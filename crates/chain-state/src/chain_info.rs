@@ -24,13 +24,9 @@ where
     N: NodePrimitives,
     N::BlockHeader: BlockHeader,
 {
-    /// Create a new chain info container for the given canonical head and finalized header if it
-    /// exists.
-    pub fn new(
-        head: SealedHeader<N::BlockHeader>,
-        finalized: Option<SealedHeader<N::BlockHeader>>,
-        safe: Option<SealedHeader<N::BlockHeader>>,
-    ) -> Self {
+    /// Create a new chain info container that starts from the given headers.
+    pub fn new(chain_info_headers: ChainInfoHeaders<N::BlockHeader>) -> Self {
+        let ChainInfoHeaders { canonical_head: head, safe, finalized } = chain_info_headers;
         let (finalized_block, _) = watch::channel(finalized);
         let (safe_block, _) = watch::channel(safe);
         let (persisted_block, _) = watch::channel(None);
@@ -187,6 +183,18 @@ struct ChainInfoInner<N: NodePrimitives = reth_ethereum_primitives::EthPrimitive
     persisted_block: watch::Sender<Option<BlockNumHash>>,
 }
 
+/// The headers a [`ChainInfoTracker`] starts from: the canonical head and, if known, the safe and
+/// finalized blocks.
+#[derive(Debug, Clone)]
+pub struct ChainInfoHeaders<H> {
+    /// The canonical head.
+    pub canonical_head: SealedHeader<H>,
+    /// The safe block, if one is known.
+    pub safe: Option<SealedHeader<H>>,
+    /// The finalized block, if one is known.
+    pub finalized: Option<SealedHeader<H>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -194,15 +202,18 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_chain_info() {
         // Create a random header
         let mut rng = generators::rng();
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(header.clone(), None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: header.clone(),
+            safe: None,
+            finalized: None,
+        });
 
         // Fetch the chain information from the tracker
         let chain_info = tracker.chain_info();
@@ -212,14 +223,18 @@ mod tests {
         assert_eq!(chain_info.best_hash, header.hash());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_on_forkchoice_update_received() {
         // Create a random block header
         let mut rng = generators::rng();
         let header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header, None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: header,
+            safe: None,
+            finalized: None,
+        });
 
         // Assert that there has been no forkchoice update yet (the timestamp is None)
         assert!(tracker.last_forkchoice_update_received_at().is_none());
@@ -231,7 +246,7 @@ mod tests {
         assert!(tracker.last_forkchoice_update_received_at().is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_canonical_head() {
         // Create a random number generator
         let mut rng = generators::rng();
@@ -240,7 +255,11 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header1, None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: header1,
+            safe: None,
+            finalized: None,
+        });
 
         // Set the second header as the canonical head of the tracker
         tracker.set_canonical_head(header2.clone());
@@ -250,7 +269,7 @@ mod tests {
         assert_eq!(canonical_head, header2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_safe() {
         // Create a random number generator
         let mut rng = generators::rng();
@@ -261,7 +280,11 @@ mod tests {
         let header2 = random_header(&mut rng, 20, None);
 
         // Create a new chain info tracker with the first header (header1)
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header1, None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: header1,
+            safe: None,
+            finalized: None,
+        });
 
         // Call the set_safe method with the second header (header2)
         tracker.set_safe(header2.clone());
@@ -296,7 +319,7 @@ mod tests {
         assert_eq!(updated_safe_header, header3);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_finalized() {
         // Create a random number generator
         let mut rng = generators::rng();
@@ -307,7 +330,11 @@ mod tests {
         let header3 = random_header(&mut rng, 30, None);
 
         // Create a new chain info tracker with the first header
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header1, None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: header1,
+            safe: None,
+            finalized: None,
+        });
 
         // Initial state: finalize header should be None
         assert!(tracker.get_finalized_header().is_none());
@@ -337,40 +364,50 @@ mod tests {
         assert_eq!(updated_finalized_header.unwrap(), header3);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_get_finalized_num_hash() {
         // Create a random header
         let mut rng = generators::rng();
         let finalized_header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the finalized header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(finalized_header.clone(), Some(finalized_header.clone()), None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: finalized_header.clone(),
+            safe: None,
+            finalized: Some(finalized_header.clone()),
+        });
 
         // Assert that the BlockNumHash returned matches the finalized header
         assert_eq!(tracker.get_finalized_num_hash(), Some(finalized_header.num_hash()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_get_safe_num_hash() {
         // Create a random header
         let mut rng = generators::rng();
         let safe_header = random_header(&mut rng, 10, None);
 
         // Create a new chain info tracker with the safe header
-        let tracker: ChainInfoTracker<EthPrimitives> =
-            ChainInfoTracker::new(safe_header.clone(), None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: safe_header.clone(),
+            safe: None,
+            finalized: None,
+        });
         tracker.set_safe(safe_header.clone());
 
         // Assert that the BlockNumHash returned matches the safe header
         assert_eq!(tracker.get_safe_num_hash(), Some(safe_header.num_hash()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_persisted() {
         let mut rng = generators::rng();
         let header = random_header(&mut rng, 10, None);
-        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header, None, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(ChainInfoHeaders {
+            canonical_head: header,
+            safe: None,
+            finalized: None,
+        });
 
         // Initial state: persisted block should be None
         assert!(tracker.get_persisted_num_hash().is_none());

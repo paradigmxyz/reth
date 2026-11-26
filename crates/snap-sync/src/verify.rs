@@ -307,6 +307,7 @@ mod tests {
     use alloy_consensus::TxLegacy;
     use alloy_eips::eip4895::{Withdrawal, Withdrawals};
     use alloy_primitives::{map::B256Map, Address, Bytes, Signature, U256};
+    use evm2::bytecode::Bytecode;
     use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_primitives::{BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_primitives_traits::SealedHeader;
@@ -320,7 +321,6 @@ mod tests {
     use reth_stages::stages::MerkleStage;
     use reth_stages_api::{ExecInput, Stage, StageError};
     use reth_trie_common::{root::storage_root_unsorted, HashedStorage, TrieAccount};
-    use revm::bytecode::Bytecode;
     use std::collections::BTreeMap;
 
     type Factory = ProviderFactory<MockNodeTypesWithDB>;

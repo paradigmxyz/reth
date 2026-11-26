@@ -173,6 +173,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                 db_exec!(self.env, tool, N, AccessRights::RW, {
                     tool.drop(db_path, static_files_path, exex_wal_path)?;
+                    // Close RocksDB before removing its directory.
+                    drop(tool);
+                    reth_fs_util::remove_dir_all(data_dir.rocksdb())?;
                 });
             }
             Subcommands::Clear(command) => {
@@ -181,9 +184,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 });
             }
             Subcommands::RepairTrie(command) => {
-                let access_rights =
-                    if command.dry_run { AccessRights::RO } else { AccessRights::RW };
-                db_exec!(self.env, tool, N, access_rights, {
+                let mut env = self.env;
+                let access_rights = if command.dry_run {
+                    // Separate worker transactions must open without concurrent commits.
+                    env.db.exclusive = Some(true);
+                    AccessRights::RO
+                } else {
+                    AccessRights::RW
+                };
+                db_exec!(env, tool, N, access_rights, {
                     command.execute(&tool, ctx.task_executor, &data_dir)?;
                 });
             }

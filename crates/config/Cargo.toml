@@ -20,7 +20,7 @@ reth-static-file-types.workspace = true
 
 # serde
 serde = { workspace = true, optional = true }
-humantime-serde = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 
 # toml
 toml = { workspace = true, optional = true }
@@ -33,13 +33,14 @@ url.workspace = true
 serde = [
     "dep:serde",
     "dep:toml",
-    "dep:humantime-serde",
+    "dep:jiff",
     "reth-network-peers/secp256k1",
     "reth-network-types/serde",
     "reth-prune-types/serde",
     "reth-stages-types/serde",
     "alloy-primitives/serde",
     "url/serde",
+    "jiff?/serde",
 ]
 
 [dev-dependencies]

@@ -652,6 +652,7 @@ stage_unit_checkpoints!(
 mod tests {
     use super::*;
     use alloy_primitives::b256;
+    use bytes::Buf;
     use proptest::{collection::vec, option, prelude::*};
     use rand::Rng;
     use reth_codecs::Compact;
@@ -809,8 +810,6 @@ mod tests {
         }
 
         fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-            use bytes::Buf;
-
             let last_storage_key = B256::from_slice(&buf[..32]);
             buf.advance(32);
 
@@ -906,7 +905,6 @@ mod tests {
         }
 
         fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
-            use bytes::Buf;
             let target_block = buf.get_u64();
 
             let last_account_key = B256::from_slice(&buf[..32]);

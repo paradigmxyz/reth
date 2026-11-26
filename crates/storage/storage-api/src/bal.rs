@@ -222,6 +222,9 @@ pub trait BalProvider {
     }
 
     /// Fetches BALs for the given block hashes.
+    ///
+    /// Providers that track executed blocks in memory also return the BALs of those blocks that
+    /// the store no longer holds.
     fn get_bals_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
         self.bal_store().get_by_hashes(block_hashes)
     }
@@ -321,6 +324,8 @@ mod tests {
         let decoded = store.get_decoded_by_hash(hash).unwrap().unwrap();
 
         assert_eq!(decoded.as_raw(), &raw_bal);
+
+        assert!(decoded.as_bal().is_empty());
     }
 
     #[test]

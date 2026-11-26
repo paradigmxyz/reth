@@ -605,7 +605,7 @@ mod tests {
         assert!(res.is_err());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_pool_init_and_access() {
         let pool = Arc::new(WorkerPool::new(2, "test"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -616,7 +616,7 @@ mod tests {
         pool.broadcast(2, |worker| assert!(worker.state.is_none()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_pool_reinit_reuses_resources() {
         let pool = Arc::new(WorkerPool::new(1, "test"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -634,7 +634,7 @@ mod tests {
         assert_eq!(len, 4);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_pool_clear_and_reinit() {
         let pool = Arc::new(WorkerPool::new(1, "test"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -646,7 +646,7 @@ mod tests {
         assert_eq!(pool.install_fn(|| state.get(String::clone)), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_pool_par_iter_with_worker() {
         let pool = Arc::new(WorkerPool::new(2, "test"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -657,7 +657,7 @@ mod tests {
         assert_eq!(results, vec![10, 11, 12, 13]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_pool_spawn_and_wait_runs_on_target_pool() {
         let caller_pool = WorkerPool::new(1, "caller");
         let target_pool = Arc::new(WorkerPool::new(1, "target"));
@@ -674,7 +674,7 @@ mod tests {
         assert_eq!(thread_name, "target-00");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_get_or_init_reuses_only_matching_run_and_type() {
         let mut worker = Worker::new();
         let first = stateful_pool();
@@ -690,7 +690,7 @@ mod tests {
         assert_eq!(*worker.get_or_init(&first.owner, || 42u64), 42);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_init_reuses_only_matching_run_and_type() {
         let mut worker = Worker::new();
         let first = stateful_pool();
@@ -707,7 +707,7 @@ mod tests {
         assert_eq!(worker.get::<String>(&second.owner), "new type");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_pool_late_cleanup_preserves_other_runs() {
         let pool = Arc::new(WorkerPool::new(2, "run-cleanup"));
         let first = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -730,7 +730,7 @@ mod tests {
         pool.broadcast(2, |worker| assert!(worker.state.is_none()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "worker state run mismatch")]
     fn worker_get_rejects_another_run() {
         let mut worker = Worker::new();
@@ -738,7 +738,7 @@ mod tests {
         worker.get::<u64>(&stateful_pool().owner);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "worker state run mismatch")]
     fn worker_get_mut_rejects_another_run() {
         let mut worker = Worker::new();
@@ -746,7 +746,7 @@ mod tests {
         worker.get_mut::<u64>(&stateful_pool().owner);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_replacement_drops_previous_state_before_initialization() {
         let mut worker = Worker::new();
         let previous_run = stateful_pool();
@@ -766,7 +766,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_failed_replacement_leaves_state_uninitialized() {
         let mut worker = Worker::new();
         let previous_run = stateful_pool();
@@ -782,14 +782,14 @@ mod tests {
         assert_eq!(*worker.get_or_init(&next_run.owner, || 2u64), 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn stateful_pool_drop_does_not_initialize_unused_pool() {
         let pool = Arc::new(WorkerPool::new(1, "unused-state"));
         drop(WorkerStatefulPool::new(Arc::clone(&pool)));
         assert!(!pool.is_initialized());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn stateful_pool_last_job_handle_clears_state() {
         let pool = Arc::new(WorkerPool::new(2, "owned-state"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -818,7 +818,7 @@ mod tests {
         pool.broadcast(2, |worker| assert!(worker.state.is_none()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn stateful_pool_clears_after_job_panics() {
         let pool = Arc::new(WorkerPool::new(1, "unwind-state"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));
@@ -835,7 +835,7 @@ mod tests {
         pool.broadcast(1, |worker| assert!(worker.state.is_none()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn stateful_pool_clears_after_unwrapping_owner() {
         let pool = Arc::new(WorkerPool::new(1, "unwrapped-state"));
         let state = WorkerStatefulPool::new(Arc::clone(&pool));

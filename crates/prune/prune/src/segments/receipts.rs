@@ -47,16 +47,23 @@ where
 
     let mut limiter = input.limiter;
 
-    let mut last_pruned_transaction = tx_range_end;
+    let mut last_pruned_transaction = None;
     let (pruned, done) = provider.tx_ref().prune_table_with_range::<tables::Receipts<
         <Provider::Primitives as NodePrimitives>::Receipt,
     >>(
         tx_range,
         &mut limiter,
         |_| false,
-        |row| last_pruned_transaction = row.0,
+        |row| last_pruned_transaction = Some(row.0),
     )?;
     trace!(target: "pruner", %pruned, %done, "Pruned receipts");
+
+    // A limit reached before the first row means nothing in the range was pruned. Returning no
+    // checkpoint keeps the stored ones, including `ContractLogs`, which `save_checkpoint` writes.
+    if last_pruned_transaction.is_none() && !done {
+        return Ok(SegmentOutput::not_done(limiter.interrupt_reason(), None))
+    }
+    let last_pruned_transaction = last_pruned_transaction.unwrap_or(tx_range_end);
 
     let last_pruned_block = provider
         .block_by_transaction_id(last_pruned_transaction)?
@@ -92,7 +99,10 @@ pub(crate) fn save_checkpoint(
 
 #[cfg(test)]
 mod tests {
-    use crate::segments::{PruneInput, PruneLimiter, SegmentOutput};
+    use crate::{
+        segments::{PruneInput, PruneLimiter, Segment, SegmentOutput, UserReceipts},
+        Pruner, PrunerError,
+    };
     use alloy_primitives::{BlockNumber, TxNumber, B256};
     use assert_matches::assert_matches;
     use itertools::{
@@ -100,15 +110,63 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_exex_types::FinishedExExHeight;
+    use reth_provider::{
+        errors::provider::ProviderResult, DBProvider, DatabaseProviderFactory,
+        PruneCheckpointReader, PruneCheckpointWriter,
+    };
     use reth_prune_types::{
-        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
+        PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PrunePurpose, PruneSegment,
     };
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{
         self, random_block_range, random_receipt, BlockRangeParams,
     };
-    use std::ops::Sub;
+    use std::{ops::Sub, thread::sleep, time::Duration};
+    use tokio::sync::watch;
+
+    /// [`UserReceipts`] whose time limit expires right after the pruner's own limit check, so the
+    /// segment sees the timeout before it deletes anything.
+    #[derive(Debug)]
+    struct ExpiredTimeLimit(UserReceipts);
+
+    impl<Provider> Segment<Provider> for ExpiredTimeLimit
+    where
+        UserReceipts: Segment<Provider>,
+    {
+        fn segment(&self) -> PruneSegment {
+            self.0.segment()
+        }
+
+        fn mode(&self) -> Option<PruneMode> {
+            self.0.mode()
+        }
+
+        fn purpose(&self) -> PrunePurpose {
+            self.0.purpose()
+        }
+
+        fn prune(
+            &self,
+            provider: &Provider,
+            mut input: PruneInput,
+        ) -> Result<SegmentOutput, PrunerError> {
+            input.limiter = input.limiter.set_time_limit(Duration::ZERO);
+            sleep(Duration::from_millis(1));
+            self.0.prune(provider, input)
+        }
+
+        fn save_checkpoint(
+            &self,
+            provider: &Provider,
+            checkpoint: PruneCheckpoint,
+        ) -> ProviderResult<()>
+        where
+            Provider: PruneCheckpointWriter,
+        {
+            self.0.save_checkpoint(provider, checkpoint)
+        }
+    }
 
     #[test]
     fn prune_legacy() {
@@ -239,6 +297,43 @@ mod tests {
             6,
             (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 10),
         );
+
+        // A timeout before the first delete keeps every stored checkpoint. `save_checkpoint` also
+        // writes `ContractLogs`, so this goes through `Pruner::run`.
+        let contract_logs = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(9),
+            prune_mode: PruneMode::Before(7),
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        provider.save_prune_checkpoint(PruneSegment::ContractLogs, contract_logs).unwrap();
+        provider.commit().expect("commit");
+        let receipts_checkpoint =
+            db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Receipts).unwrap();
+        let rows = db.table::<tables::Receipts>().unwrap().len();
+        let (_, finished_height_rx) = watch::channel(FinishedExExHeight::NoExExs);
+        let mut pruner = Pruner::new_with_factory(
+            db.factory.clone(),
+            vec![Box::new(ExpiredTimeLimit(UserReceipts::new(PruneMode::Before(7))))],
+            1,
+            usize::MAX,
+            None,
+            finished_height_rx,
+        )
+        .with_minimum_pruning_distance(0);
+        let output = pruner.run(10).unwrap();
+        assert_eq!(output.progress, PruneProgress::HasMoreData(PruneInterruptReason::Timeout));
+        assert_eq!(db.table::<tables::Receipts>().unwrap().len(), rows);
+        let provider = db.factory.provider().unwrap();
+        assert_eq!(
+            provider.get_prune_checkpoint(PruneSegment::Receipts).unwrap(),
+            receipts_checkpoint
+        );
+        assert_eq!(
+            provider.get_prune_checkpoint(PruneSegment::ContractLogs).unwrap(),
+            Some(contract_logs)
+        );
+
         test_prune(6, (PruneProgress::Finished, 2));
         test_prune(10, (PruneProgress::Finished, 8));
     }

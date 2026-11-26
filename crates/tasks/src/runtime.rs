@@ -14,7 +14,10 @@ use crate::{
     worker_map::WorkerMap,
     PanickedTaskError, TaskEvent, TaskManager,
 };
-use futures_util::{future::select, Future, FutureExt, TryFutureExt};
+use futures_util::{
+    future::{select, BoxFuture},
+    Future, FutureExt, TryFutureExt,
+};
 use std::{
     num::NonZeroUsize,
     pin::pin,
@@ -26,7 +29,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::mpsc::UnboundedSender, task::JoinHandle};
-use tracing::{debug, error};
+use tracing::{debug, error, Span};
 use tracing_futures::Instrument;
 
 use tokio::runtime::Runtime as TokioRuntime;
@@ -527,10 +530,7 @@ impl Runtime {
     }
 
     /// Spawns a regular task depending on the given [`TaskKind`].
-    fn spawn_task_as<F>(&self, fut: F, task_kind: TaskKind) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
+    fn spawn_task_as(&self, fut: BoxFuture<'static, ()>, task_kind: TaskKind) -> JoinHandle<()> {
         match task_kind {
             TaskKind::Default => self.0.metrics.inc_regular_tasks(),
             TaskKind::Blocking => self.0.metrics.inc_regular_blocking_tasks(),
@@ -545,7 +545,6 @@ impl Runtime {
         let task = {
             async move {
                 let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
-                let fut = pin!(fut);
                 let _ = select(on_shutdown, fut).await;
             }
         }
@@ -562,7 +561,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_task_as(fut, TaskKind::Default)
+        self.spawn_task_as(fut.boxed(), TaskKind::Default)
     }
 
     /// Spawns a blocking task onto the runtime.
@@ -573,7 +572,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_task_as(fut, TaskKind::Blocking)
+        self.spawn_task_as(fut.boxed(), TaskKind::Blocking)
     }
 
     /// Spawns a blocking closure directly on the tokio runtime, bypassing shutdown
@@ -583,7 +582,31 @@ impl Runtime {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        self.0.handle.spawn_blocking(func)
+        // Erases the closure type so tokio's blocking task machinery is instantiated once per `R`
+        // instead of once per closure.
+        self.0.handle.spawn_blocking(Box::new(func) as Box<dyn FnOnce() -> R + Send>)
+    }
+
+    /// Spawns a blocking closure onto the runtime.
+    ///
+    /// Unlike [`spawn_blocking_task`](Self::spawn_blocking_task), the closure runs directly on the
+    /// blocking thread instead of being driven as a future, and it also runs if the [Shutdown]
+    /// signal fired before it started. Like [`spawn_blocking_task`](Self::spawn_blocking_task), it
+    /// runs in the caller's span and is counted as a regular blocking task.
+    ///
+    /// See also [`Handle::spawn_blocking`].
+    pub fn spawn_blocking_task_fn<F>(&self, func: F) -> JoinHandle<()>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        self.0.metrics.inc_regular_blocking_tasks();
+        let finished_counter = self.0.metrics.finished_regular_blocking_tasks_total.clone();
+        let span = Span::current();
+        self.spawn_blocking(move || {
+            let _inc_counter_on_drop = IncCounterOnDrop::new(finished_counter);
+            let _enter = span.enter();
+            func()
+        })
     }
 
     /// Moves the given value to a dedicated background thread for deallocation.
@@ -668,20 +691,16 @@ impl Runtime {
     {
         let on_shutdown = self.0.on_shutdown.clone();
         let fut = f(on_shutdown);
-        let task = fut.in_current_span();
-        self.0.handle.spawn(task)
+        self.0.handle.spawn(fut.boxed().in_current_span())
     }
 
     /// Spawns a critical task depending on the given [`TaskKind`].
-    fn spawn_critical_as<F>(
+    fn spawn_critical_as(
         &self,
         name: &'static str,
-        fut: F,
+        fut: BoxFuture<'static, ()>,
         task_kind: TaskKind,
-    ) -> JoinHandle<()>
-    where
-        F: Future<Output = ()> + Send + 'static,
-    {
+    ) -> JoinHandle<()> {
         self.0.metrics.inc_critical_tasks();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = self.0.on_shutdown.clone();
@@ -715,7 +734,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_critical_as(name, fut, TaskKind::Default)
+        self.spawn_critical_as(name, fut.boxed(), TaskKind::Default)
     }
 
     /// This spawns a critical blocking task onto the runtime.
@@ -726,7 +745,7 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        self.spawn_critical_as(name, fut, TaskKind::Blocking)
+        self.spawn_critical_as(name, fut.boxed(), TaskKind::Blocking)
     }
 
     /// This spawns a critical task onto a dedicated named OS thread.
@@ -742,6 +761,15 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.spawn_critical_os_thread_boxed(thread_name, task_name, fut.boxed())
+    }
+
+    fn spawn_critical_os_thread_boxed(
+        &self,
+        thread_name: &'static str,
+        task_name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> thread::JoinHandle<()> {
         self.0.metrics.inc_critical_tasks();
         let handle = self.0.handle.clone();
         let panicked_tasks_tx = self.0.task_events_tx.clone();
@@ -801,12 +829,19 @@ impl Runtime {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let panicked_tasks_tx = self.0.task_events_tx.clone();
         let on_shutdown = GracefulShutdown::new(
             self.0.on_shutdown.clone(),
             GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
         );
-        let fut = f(on_shutdown);
+        self.spawn_critical_graceful_boxed(name, f(on_shutdown).boxed())
+    }
+
+    fn spawn_critical_graceful_boxed(
+        &self,
+        name: &'static str,
+        fut: BoxFuture<'static, ()>,
+    ) -> JoinHandle<()> {
+        let panicked_tasks_tx = self.0.task_events_tx.clone();
 
         // wrap the task in catch unwind
         let task = std::panic::AssertUnwindSafe(fut)
@@ -852,9 +887,7 @@ impl Runtime {
             self.0.on_shutdown.clone(),
             GracefulShutdownGuard::new(Arc::clone(&self.0.graceful_tasks)),
         );
-        let fut = f(on_shutdown);
-
-        self.0.handle.spawn(fut)
+        self.0.handle.spawn(f(on_shutdown).boxed())
     }
 
     /// Sends a request to the `TaskManager` to initiate a graceful shutdown.
@@ -1139,7 +1172,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn cpu_cores_override_sizes_cpu_pools() {
         let runtime = RuntimeBuilder::new(
             RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
@@ -1192,7 +1225,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn zero_cpu_threads_still_size_the_proof_pools() {
         let rt = TokioRuntime::new().unwrap();
         let mut config =
@@ -1209,7 +1242,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn proof_worker_threads_keep_pinned_counts() {
         let rt = TokioRuntime::new().unwrap();
         for configured in [1, 8, 16, 17, 64] {
@@ -1226,7 +1259,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn zero_proof_worker_threads_use_the_default() {
         let rt = TokioRuntime::new().unwrap();
         let mut config =
@@ -1242,7 +1275,7 @@ mod tests {
         assert_eq!(runtime.proof_account_worker_threads_override(), None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_runtime_builder() {
         let rt = TokioRuntime::new().unwrap();
         let config =
@@ -1300,7 +1333,7 @@ mod tests {
         assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn critical_os_thread_uses_requested_name() {
         let runtime = Runtime::test();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1319,7 +1352,7 @@ mod tests {
         handle.join().unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn critical_os_thread_panic_is_reported() {
         let runtime = Runtime::test();
         let manager_handle = runtime.take_task_manager_handle().unwrap();
@@ -1338,7 +1371,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn test_worker_pools_are_lazy() {
         let runtime = Runtime::test();
 

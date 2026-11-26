@@ -1,36 +1,35 @@
+use crate::trace::{base_block_reward, block_reward, ommer_reward};
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
-use alloy_evm::block::calc::{base_block_reward, block_reward, ommer_reward};
-use alloy_network::{primitives::HeaderResponse, ReceiptResponse, TransactionResponse};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_network::{ReceiptResponse, TransactionResponse};
+use alloy_primitives::{Address, Bytes, Sealable, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
 use alloy_rpc_types_trace::{
     otterscan::{
         BlockDetails, ContractCreator, InternalIssuance, InternalOperation, OtsBlockTransactions,
-        OtsReceipt, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
+        OtsReceipt, OtsSlimBlock, OtsTransactionReceipt, TraceEntry, TransactionsWithReceipts,
     },
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
-use async_trait::async_trait;
-use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
-use reth_chainspec::ChainSpecProvider;
-use reth_primitives_traits::{BlockBody, TxTy};
-use reth_rpc_api::{EthApiServer, OtterscanServer};
-use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_api::{
-    helpers::{EthTransactions, TraceExt},
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
-};
-use reth_rpc_eth_types::{utils::binary_search, EthApiError};
-use reth_rpc_server_types::result::internal_rpc_err;
-use revm::context_interface::result::ExecutionResult;
-use revm_inspectors::{
+use evm2::interpreter::InstrStop;
+use evm2_inspectors::{
     otterscan::InternalOperationsInspector,
     tracing::{
         types::{CallKind, CallTraceNode},
         TracingInspectorConfig,
     },
 };
+use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
+use reth_chainspec::ChainSpecProvider;
+use reth_primitives_traits::{BlockBody, TxTy};
+use reth_rpc_api::{EthApiServer, OtterscanServer};
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
+use reth_rpc_eth_api::{
+    helpers::{EthBlocks, EthTransactions, TraceExt},
+    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+};
+use reth_rpc_eth_types::{block::BlockAndReceipts, utils::binary_search, EthApiError};
+use reth_rpc_server_types::result::internal_rpc_err;
 use tokio::sync::OwnedSemaphorePermit;
 
 const API_LEVEL: u64 = 8;
@@ -50,51 +49,52 @@ impl<Eth> OtterscanApi<Eth> {
 
 impl<Eth> OtterscanApi<Eth>
 where
-    Eth: TraceExt,
+    Eth: TraceExt + EthBlocks,
 {
-    /// Constructs a `BlockDetails` from a block and its receipts.
+    /// Loads a matching pair, including locally built pending blocks.
+    async fn block_and_receipts(
+        &self,
+        block_id: BlockId,
+    ) -> RpcResult<BlockAndReceipts<Eth::Primitives>> {
+        // Missing blocks and missing receipts share the same RPC error for the requested ID.
+        let (block, receipts) = self
+            .eth
+            .load_block_and_receipts(block_id)
+            .await
+            .map_err(Into::<ErrorObjectOwned>::into)?
+            .ok_or(EthApiError::HeaderNotFound(block_id))?;
+        Ok(BlockAndReceipts { block, receipts })
+    }
+
+    /// Constructs the block details from a single resolution of the requested block.
     async fn block_details(
         &self,
-        block: RpcBlock<Eth::NetworkTypes>,
-        receipts: Vec<RpcReceipt<Eth::NetworkTypes>>,
+        block_id: BlockId,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
-        // Execution fees include the base fee; blob fees are not part of this field.
-        let total_fees = receipts
-            .iter()
-            .map(|receipt| {
-                U256::from(receipt.gas_used()) * U256::from(receipt.effective_gas_price())
-            })
-            .sum::<U256>();
-
+        let BlockAndReceipts { block, receipts } = self.block_and_receipts(block_id).await?;
+        let receipts = self
+            .eth
+            .convert_block_receipts(&block, receipts)
+            .map_err(Into::<ErrorObjectOwned>::into)?;
         let chain_spec = self.eth.provider().chain_spec();
-        let reward = if block.header.number() == 0 {
-            None
-        } else {
-            base_block_reward(&chain_spec, block.header.number())
+        let reward =
+            if block.number() == 0 { None } else { base_block_reward(&chain_spec, block.number()) };
+        let ommers = block.body().ommers().unwrap_or_default();
+        let issuance = reward.map_or_else(InternalIssuance::default, |reward| {
+            calculate_issuance(reward, block.number(), ommers.iter().map(BlockHeader::number))
+        });
+        let header = self
+            .eth
+            .converter()
+            .convert_header(block.clone_sealed_header(), Some(block.rlp_length()))
+            .map_err(|err| Eth::Error::from(err).into())?;
+        let block = OtsSlimBlock {
+            header,
+            uncles: ommers.iter().map(Sealable::hash_slow).collect(),
+            withdrawals: block.body().withdrawals().cloned(),
+            transaction_count: block.transaction_count(),
         };
-        let issuance = if let Some(reward) = reward {
-            let recovered = if block.uncles.is_empty() {
-                None
-            } else {
-                Some(
-                    self.eth
-                        .recovered_block(block.header.hash().into())
-                        .await
-                        .map_err(Into::<ErrorObjectOwned>::into)?
-                        .ok_or(EthApiError::HeaderNotFound(block.header.hash().into()))?,
-                )
-            };
-            let ommers =
-                recovered.as_ref().and_then(|block| block.body().ommers()).unwrap_or_default();
-            calculate_issuance(
-                reward,
-                block.header.number(),
-                ommers.iter().map(BlockHeader::number),
-            )
-        } else {
-            InternalIssuance::default()
-        };
-        Ok(BlockDetails::new(block, issuance, total_fees))
+        Ok(BlockDetails { block, issuance, total_fees: total_fees(&receipts) })
     }
 
     /// Acquires a permit to execute a tracing call.
@@ -105,7 +105,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>
     for OtterscanApi<Eth>
 where
@@ -117,7 +116,8 @@ where
             RpcHeader<Eth::NetworkTypes>,
             TxTy<Eth::Primitives>,
         > + EthTransactions
-        + TraceExt,
+        + TraceExt
+        + EthBlocks,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
@@ -187,16 +187,7 @@ where
         &self,
         block_number: LenientBlockNumberOrTag,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
-        let block_number = block_number.into_inner();
-        let block = self.eth.block_by_number(block_number, false);
-        let block_id = block_number.into();
-        let receipts = self.eth.block_receipts(block_id);
-        let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(
-            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
-            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
-        )
-        .await
+        self.block_details(block_number.into_inner().into()).await
     }
 
     /// Handler for `ots_getBlockDetailsByHash`
@@ -204,15 +195,7 @@ where
         &self,
         block_hash: B256,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
-        let block = self.eth.block_by_hash(block_hash, false);
-        let block_id = block_hash.into();
-        let receipts = self.eth.block_receipts(block_id);
-        let (block, receipts) = futures::try_join!(block, receipts)?;
-        self.block_details(
-            block.ok_or(EthApiError::HeaderNotFound(block_id))?,
-            receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?,
-        )
-        .await
+        self.block_details(block_hash.into()).await
     }
 
     /// Handler for `ots_getBlockTransactions`
@@ -224,15 +207,14 @@ where
     ) -> RpcResult<
         OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>,
     > {
-        let block_number = block_number.into_inner();
-        // retrieve full block and its receipts
-        let block = self.eth.block_by_number(block_number, true);
-        let block_id = block_number.into();
-        let receipts = self.eth.block_receipts(block_id);
-        let (block, receipts) = futures::try_join!(block, receipts)?;
-
-        let mut block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
-        let mut receipts = receipts.ok_or(EthApiError::ReceiptsNotFound(block_id))?;
+        let BlockAndReceipts { block, receipts } =
+            self.block_and_receipts(block_number.into_inner().into()).await?;
+        let mut receipts = self
+            .eth
+            .convert_block_receipts(&block, receipts)
+            .map_err(Into::<ErrorObjectOwned>::into)?;
+        let mut block =
+            self.eth.convert_block(&block, true).map_err(Into::<ErrorObjectOwned>::into)?;
 
         // check if the number of transactions matches the number of receipts
         let tx_len = block.transactions.len();
@@ -351,7 +333,7 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, mut ctx| {
+                move |tx_info, ctx| {
                     let _permit = &permit;
                     Ok(ctx
                         .take_inspector()
@@ -430,10 +412,19 @@ fn calculate_issuance(
     InternalIssuance { block_reward, uncle_reward, issuance: block_reward + uncle_reward }
 }
 
-fn transaction_error<H>(result: ExecutionResult<H>) -> Bytes {
-    match result {
-        ExecutionResult::Revert { output, .. } => output,
-        _ => Bytes::new(),
+/// Execution fees include the base fee and exclude blob fees.
+fn total_fees(receipts: &[impl ReceiptResponse]) -> U256 {
+    receipts
+        .iter()
+        .map(|receipt| U256::from(receipt.gas_used()) * U256::from(receipt.effective_gas_price()))
+        .sum()
+}
+
+fn transaction_error<E>(result: evm2::evm::TxResultExt<E>) -> Bytes {
+    if !result.status && result.stop == InstrStop::Revert {
+        result.output
+    } else {
+        Bytes::new()
     }
 }
 
@@ -447,13 +438,13 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
         while selfdestructs.last().is_some_and(|entry| entry.depth > trace.depth as u32) {
             entries.push(selfdestructs.pop().expect("checked above"));
         }
-        if let Some(to) = trace.selfdestruct_refund_target {
+        if let Some(to) = trace.selfdestruct_refund_target() {
             selfdestructs.push(TraceEntry {
                 r#type: "SELFDESTRUCT".to_string(),
                 depth: trace.depth as u32 + 1,
-                from: trace.selfdestruct_address.unwrap_or(trace.address),
+                from: trace.selfdestruct_address().unwrap_or(trace.address),
                 to,
-                value: trace.selfdestruct_transferred_value,
+                value: trace.selfdestruct_transferred_value(),
                 input: Bytes::new(),
                 output: Bytes::new(),
             });
@@ -477,24 +468,36 @@ fn otterscan_traces(nodes: Vec<CallTraceNode>) -> Vec<TraceEntry> {
 mod tests {
 
     use super::*;
-    use alloy_consensus::{constants::ETH_TO_WEI, Header};
-    use alloy_primitives::{bytes, TxKind};
-    use alloy_rpc_types_trace::parity::TransactionTrace;
-    use reth_chainspec::MAINNET;
-    use reth_evm_ethereum::EthEvmConfig;
-    use reth_network_api::noop::NoopNetwork;
-    use reth_provider::test_utils::MockEthProvider;
-    use reth_transaction_pool::test_utils::testing_pool;
-    use revm::{
-        context::TxEnv,
-        context_interface::result::{HaltReason, Output, SuccessReason},
-        database::InMemoryDB,
-        inspector::InspectorEvmTr,
-        primitives::hardfork::SpecId,
-        state::{AccountInfo, Bytecode},
-        Context, InspectEvm, MainBuilder, MainContext,
+    use alloy_consensus::{
+        constants::ETH_TO_WEI, proofs::calculate_transaction_root, Header, TxLegacy,
     };
-    use revm_inspectors::tracing::{types::CallTrace, TracingInspector};
+    use alloy_eips::{eip4895::Withdrawal, BlockNumHash, BlockNumberOrTag};
+    use alloy_primitives::{bytes, Signature, TxKind};
+    use alloy_rpc_types_trace::parity::TransactionTrace;
+    use evm2::{
+        bytecode::Bytecode,
+        evm::{AccountInfo, InMemoryDB},
+        SpecId,
+    };
+    use evm2_inspectors::tracing::{
+        types::{CallTrace, SelfdestructTrace},
+        TracingInspector,
+    };
+    use reth_chain_state::ExecutedBlock;
+    use reth_chainspec::{ChainInfo, MAINNET, MIN_TRANSACTION_GAS};
+    use reth_ethereum_primitives::{Block, Receipt, TransactionSigned};
+    use reth_evm::{ConfigureEvm, Evm};
+    use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
+    use reth_network_api::noop::NoopNetwork;
+    use reth_primitives_traits::{Block as _, Recovered};
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_eth_api::helpers::{LoadPendingBlock, SpawnBlocking};
+    use reth_rpc_eth_types::{builder::config::PendingBlockKind, PendingBlock};
+    use reth_transaction_pool::test_utils::testing_pool;
+    use std::{
+        sync::Arc,
+        time::{Duration, Instant},
+    };
 
     #[test]
     fn block_transaction_pages_match_frontend_index_navigation() {
@@ -521,58 +524,29 @@ mod tests {
 
     #[test]
     fn transaction_error_returns_only_revert_data() {
-        let success: ExecutionResult = ExecutionResult::Success {
-            reason: SuccessReason::Return,
-            gas: Default::default(),
-            logs: vec![],
-            output: Output::Call(Bytes::from_static(b"successful return data")),
-        };
-        let halt = ExecutionResult::Halt {
-            reason: HaltReason::OutOfGas(revm::context_interface::result::OutOfGasError::Basic),
-            gas: Default::default(),
-            logs: vec![],
-        };
-        for result in [
-            success,
-            halt,
-            ExecutionResult::Revert { gas: Default::default(), logs: vec![], output: Bytes::new() },
+        for (status, stop, output) in [
+            (
+                true,
+                evm2::interpreter::InstrStop::Return,
+                Bytes::from_static(b"successful return data"),
+            ),
+            (false, evm2::interpreter::InstrStop::OutOfGas, Bytes::new()),
+            (false, evm2::interpreter::InstrStop::Revert, Bytes::new()),
         ] {
+            let result =
+                evm2::evm::TxResultExt::<()> { status, stop, output, ..Default::default() };
             assert_eq!(serde_json::to_value(Some(transaction_error(result))).unwrap(), "0x");
         }
         let output = Bytes::from_static(b"revert data");
         assert_eq!(
-            transaction_error::<HaltReason>(ExecutionResult::Revert {
-                gas: Default::default(),
-                logs: vec![],
-                output: output.clone()
+            transaction_error(evm2::evm::TxResultExt::<()> {
+                status: false,
+                stop: evm2::interpreter::InstrStop::Revert,
+                output: output.clone(),
+                ..Default::default()
             }),
             output
         );
-    }
-
-    async fn cache_empty_block(
-        cache: reth_rpc_eth_types::EthStateCache<reth_ethereum_primitives::EthPrimitives>,
-        block: reth_ethereum_primitives::Block,
-    ) {
-        // MockEthProvider does not implement recovered_block; seed the normal RPC cache.
-        let outcome = reth_execution_types::ExecutionOutcome::new(
-            Default::default(),
-            vec![vec![]],
-            block.header.number,
-            vec![],
-        );
-        let chain = reth_execution_types::Chain::new(
-            [reth_primitives_traits::RecoveredBlock::new_unhashed(block, vec![])],
-            outcome,
-            Default::default(),
-        );
-        reth_rpc_eth_types::cache::cache_new_blocks_task(
-            cache,
-            futures::stream::iter([reth_chain_state::CanonStateNotification::Commit {
-                new: std::sync::Arc::new(chain),
-            }]),
-        )
-        .await;
     }
 
     #[tokio::test]
@@ -600,7 +574,7 @@ mod tests {
             let header = Header { number, ..Default::default() };
             let hash = header.hash_slow();
             let block = reth_ethereum_primitives::Block { header, body: Default::default() };
-            provider.add_block(hash, block.clone());
+            provider.add_block(hash, block);
             provider.add_receipts(number, vec![]);
             let api = OtterscanApi::new(
                 crate::eth::EthApiBuilder::new(
@@ -611,7 +585,6 @@ mod tests {
                 )
                 .build(),
             );
-            cache_empty_block(api.eth.cache().clone(), block).await;
             let by_number = api
                 .get_block_details(alloy_eips::BlockNumberOrTag::Number(number).into())
                 .await
@@ -639,7 +612,7 @@ mod tests {
             },
         };
         let hash = block.header.hash_slow();
-        provider.add_block(hash, block.clone());
+        provider.add_block(hash, block);
         provider.add_receipts(126, vec![]);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
@@ -650,7 +623,6 @@ mod tests {
             )
             .build(),
         );
-        cache_empty_block(api.eth.cache().clone(), block).await;
         let expected = calculate_issuance(5 * ETH_TO_WEI, 126, [123].into_iter());
         assert_eq!(
             api.get_block_details(alloy_eips::BlockNumberOrTag::Number(126).into())
@@ -708,9 +680,6 @@ mod tests {
 
     #[tokio::test]
     async fn trace_methods_wait_for_tracing_permit() {
-        use reth_rpc_eth_api::helpers::SpawnBlocking;
-        use std::time::Duration;
-
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
                 MockEthProvider::default(),
@@ -736,19 +705,204 @@ mod tests {
         assert_eq!(api.trace_transaction(B256::ZERO).await.unwrap(), None);
     }
 
+    fn block_with_transaction(
+        number: u64,
+        parent_hash: B256,
+        gas_price: u128,
+        zero_calldata_bytes: u8,
+    ) -> (Block, Receipt) {
+        // A transfer to an empty account costs four extra gas per zero calldata byte.
+        let gas_used = MIN_TRANSACTION_GAS + 4 * u64::from(zero_calldata_bytes);
+        let tx = TransactionSigned::new_unhashed(
+            TxLegacy {
+                gas_price,
+                gas_limit: gas_used,
+                to: Address::ZERO.into(),
+                input: vec![0; usize::from(zero_calldata_bytes)].into(),
+                ..Default::default()
+            }
+            .into(),
+            Signature::test_signature(),
+        );
+        let transactions = vec![tx];
+        let receipt =
+            Receipt { success: true, cumulative_gas_used: gas_used, ..Default::default() };
+        let header = Header {
+            number,
+            parent_hash,
+            transactions_root: calculate_transaction_root(&transactions),
+            receipts_root: Receipt::calculate_receipt_root_no_memo(std::slice::from_ref(&receipt)),
+            gas_used,
+            gas_limit: 30_000_000,
+            timestamp: number * 12,
+            ..Default::default()
+        };
+        (
+            Block {
+                header,
+                body: alloy_consensus::BlockBody { transactions, ..Default::default() },
+            },
+            receipt,
+        )
+    }
+
     #[tokio::test]
-    async fn execution_fees_use_full_u256_width() {
+    async fn block_responses_pin_latest() {
+        let provider = MockEthProvider::default();
+        let (first, first_receipt) = block_with_transaction(1, B256::ZERO, 2, 0);
+        let first_hash = first.header.hash_slow();
+        let tx_hash = *first.body.transactions[0].hash();
+        let first_head = ChainInfo { best_number: 1, best_hash: first_hash };
+        let (second, second_receipt) = block_with_transaction(2, first_hash, 3, 1);
+        provider.add_block(first_hash, first);
+        provider.add_receipts(1, vec![first_receipt]);
+        provider.add_block(second.header.hash_slow(), second);
+        provider.add_receipts(2, vec![second_receipt]);
         let api = OtterscanApi::new(
             crate::eth::EthApiBuilder::new(
-                MockEthProvider::default(),
+                provider,
                 testing_pool(),
                 NoopNetwork::default(),
                 EthEvmConfig::new(MAINNET.clone()),
             )
             .build(),
         );
+
+        // Each request sees the first block once, then the provider advances to the second.
+        api.eth.provider().set_next_chain_info(first_head);
+        let details = api.get_block_details(BlockNumberOrTag::Latest.into()).await.unwrap();
+        assert_eq!(details.block.header.hash, first_hash);
+        assert_eq!(details.total_fees, U256::from(42_000));
+
+        api.eth.provider().set_next_chain_info(first_head);
+        let page = api.get_block_transactions(BlockNumberOrTag::Latest.into(), 0, 1).await.unwrap();
+        assert_eq!(page.fullblock.block.header.hash, first_hash);
+        assert_eq!(page.fullblock.block.transactions.hashes().collect::<Vec<_>>(), [tx_hash]);
+        let [receipt] = page.receipts.as_slice() else { panic!("expected one receipt") };
+        assert_eq!(receipt.receipt.block_hash, Some(first_hash));
+        assert_eq!(receipt.receipt.transaction_hash, tx_hash);
+        assert_eq!(receipt.receipt.effective_gas_price, 2);
+        assert_eq!(receipt.receipt.gas_used, MIN_TRANSACTION_GAS);
+    }
+
+    #[tokio::test]
+    async fn block_responses_use_local_pending_receipts() {
+        let provider = MockEthProvider::default();
+        let parent =
+            Block { header: Header { number: 1, ..Default::default() }, ..Default::default() };
+        let parent_hash = parent.header.hash_slow();
+        provider.add_block(parent_hash, parent);
+        let api = OtterscanApi::new(
+            crate::eth::EthApiBuilder::new(
+                provider,
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(MAINNET.clone()),
+            )
+            .build(),
+        );
+        let (mut pending, receipt) = block_with_transaction(2, parent_hash, 3, 0);
+        // The local pending block and its ommer are unavailable through canonical hash lookups.
+        pending.body.ommers.push(Header { number: 1, timestamp: 6, ..Default::default() });
+        pending.header.ommers_hash = pending.body.calculate_ommers_root();
+        let hash = pending.header.hash_slow();
+        let tx_hash = *pending.body.transactions[0].hash();
+        let mut executed = ExecutedBlock {
+            recovered_block: pending.try_into_recovered().unwrap().into(),
+            ..Default::default()
+        };
+        Arc::make_mut(&mut executed.execution_output).receipts.push(receipt);
+        *api.eth.pending_block().lock().await = Some(PendingBlock::with_executed_block(
+            Instant::now() + Duration::from_secs(60),
+            executed,
+        ));
+        let details = api.get_block_details(BlockNumberOrTag::Pending.into()).await.unwrap();
+        assert_eq!(details.block.header.hash, hash);
+        assert_eq!(details.total_fees, U256::from(63_000));
+        assert_eq!(details.issuance, calculate_issuance(5 * ETH_TO_WEI, 2, [1].into_iter()));
+        let page =
+            api.get_block_transactions(BlockNumberOrTag::Pending.into(), 0, 1).await.unwrap();
+        assert_eq!(details.block.uncles, page.fullblock.block.uncles);
+        assert_eq!(page.fullblock.block.header.hash, hash);
+        assert_eq!(page.fullblock.block.transactions.hashes().collect::<Vec<_>>(), [tx_hash]);
+        let [receipt] = page.receipts.as_slice() else { panic!("expected one pending receipt") };
+        assert_eq!(receipt.receipt.block_hash, Some(hash));
+        assert_eq!(receipt.receipt.transaction_hash, tx_hash);
+    }
+
+    #[tokio::test]
+    async fn block_responses_report_missing_data_with_requested_id() {
+        let provider = MockEthProvider::default();
+        let (block, receipt) = block_with_transaction(1, B256::ZERO, 2, 0);
+        let hash = block.header.hash_slow();
+        provider.add_block(hash, block);
+        let api = OtterscanApi::new(
+            crate::eth::EthApiBuilder::new(
+                provider,
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(MAINNET.clone()),
+            )
+            .pending_block_kind(PendingBlockKind::None)
+            .build(),
+        );
+
+        let not_found = |id| ErrorObjectOwned::from(EthApiError::HeaderNotFound(id));
+        let latest = BlockNumberOrTag::Latest;
+        assert_eq!(
+            api.get_block_details(latest.into()).await.unwrap_err(),
+            not_found(latest.into())
+        );
+        for id in [latest, BlockNumberOrTag::Number(2)] {
+            assert_eq!(
+                api.get_block_transactions(id.into(), 0, 1).await.unwrap_err(),
+                not_found(id.into())
+            );
+        }
+        for id in [hash, B256::ZERO] {
+            assert_eq!(api.get_block_details_by_hash(id).await.unwrap_err(), not_found(id.into()));
+        }
+
+        // Disabled pending must fail even when the provider can resolve the block and its receipts.
+        let provider = api.eth.provider();
+        provider.add_receipts(1, vec![receipt]);
+        provider.set_pending_block_num_hash(Some(BlockNumHash::new(1, hash)));
+        let pending = BlockNumberOrTag::Pending;
+        assert_eq!(
+            api.get_block_details(pending.into()).await.unwrap_err(),
+            not_found(pending.into())
+        );
+    }
+
+    #[tokio::test]
+    async fn block_details_match_rpc_block_with_withdrawals() {
+        let provider = MockEthProvider::default();
+        let (mut block, receipt) = block_with_transaction(17_034_870, B256::ZERO, 2, 0);
+        block.header.timestamp = 1_681_338_455;
+        block.header.base_fee_per_gas = Some(1);
+        block.body.withdrawals = Some(vec![Withdrawal { amount: 42, ..Default::default() }].into());
+        block.header.withdrawals_root = block.body.calculate_withdrawals_root();
+        let hash = block.header.hash_slow();
+        provider.add_receipts(block.header.number, vec![receipt]);
+        provider.add_block(hash, block);
+        let api = OtterscanApi::new(
+            crate::eth::EthApiBuilder::new(
+                provider,
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(MAINNET.clone()),
+            )
+            .build(),
+        );
+
+        let expected = api.eth.rpc_block(hash.into(), false).await.unwrap().unwrap();
+        assert_eq!(api.get_block_details_by_hash(hash).await.unwrap().block, expected.into());
+    }
+
+    #[test]
+    fn execution_fees_use_full_u256_width() {
         let receipt = TransactionReceipt {
-            inner: alloy_consensus::ReceiptEnvelope::Legacy(
+            inner: alloy_consensus::ReceiptEnvelope::<alloy_rpc_types_eth::Log>::Legacy(
                 alloy_consensus::Receipt {
                     status: true.into(),
                     cumulative_gas_used: 2,
@@ -768,9 +922,7 @@ mod tests {
             to: None,
             contract_address: None,
         };
-        let details =
-            api.block_details(Default::default(), vec![receipt.clone(), receipt]).await.unwrap();
-        assert_eq!(details.total_fees, U256::from(u128::MAX) * U256::from(4));
+        assert_eq!(total_fees(&[receipt.clone(), receipt]), U256::from(u128::MAX) * U256::from(4));
     }
 
     #[test]
@@ -785,36 +937,37 @@ mod tests {
         assert_eq!(issuance.uncle_reward, U256::from(2_250_000_000_000_000_000u128));
     }
 
-    fn execute(code: Bytes, spec: SpecId) -> (ExecutionResult, Vec<TraceEntry>) {
+    fn execute(code: Bytes, spec: SpecId) -> (evm2::TxResult, Vec<TraceEntry>) {
         let contract = Address::repeat_byte(0x11);
         let mut db = InMemoryDB::default();
         db.insert_account_info(
-            Address::ZERO,
-            AccountInfo { balance: U256::from(ETH_TO_WEI), ..Default::default() },
+            &Address::ZERO,
+            AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)),
         );
         db.insert_account_info(
-            contract,
-            AccountInfo {
-                balance: U256::from(100),
-                code: Some(Bytecode::new_legacy(code)),
-                ..Default::default()
-            },
+            &contract,
+            AccountInfo::default()
+                .with_balance(U256::from(100))
+                .with_code(Bytecode::new_legacy(code)),
         );
-        let mut evm = Context::mainnet()
-            .modify_cfg_chained(|cfg| cfg.spec = spec)
-            .with_db(db)
-            .build_mainnet_with_inspector(TracingInspector::new(
-                TracingInspectorConfig::default_parity(),
-            ));
-        let result = evm
-            .inspect_tx(TxEnv {
-                kind: TxKind::Call(contract),
+        let config = EthEvmConfig::mainnet();
+        let env = EthEvmEnv::new(spec, Default::default(), 1);
+        let mut evm = config.evm_with_env(db, env);
+        let tx = Recovered::new_unchecked(
+            evm2::ethereum::TxEnvelope::Legacy(alloy_consensus::TxLegacy {
+                to: TxKind::Call(contract),
                 value: U256::from(7),
                 gas_limit: 1_000_000,
                 ..Default::default()
-            })
-            .unwrap();
-        let (_, inspector) = evm.ctx_inspector();
+            }),
+            Address::ZERO,
+        );
+        let (inspector, result) = Evm::transact_with_inspector(
+            &mut evm,
+            &tx,
+            TracingInspector::new(TracingInspectorConfig::default_parity()),
+        )
+        .unwrap();
         (result.result, otterscan_traces(inspector.traces().nodes().to_vec()))
     }
 
@@ -822,7 +975,7 @@ mod tests {
     fn selfdestruct_preserves_enclosing_call_and_beneficiary() {
         for spec in [SpecId::SHANGHAI, SpecId::CANCUN] {
             let (result, traces) = execute(bytes!("6022ff"), spec);
-            assert!(result.is_success());
+            assert!(result.status);
             assert_eq!(traces.len(), 2);
             assert_eq!(traces[0].r#type, "CALL");
             assert_eq!(traces[0].depth, 0);
@@ -841,7 +994,7 @@ mod tests {
         // of that call, not its child.
         let (result, traces) =
             execute(bytes!("60006000600060006000603361fffff1506022ff"), SpecId::CANCUN);
-        assert!(result.is_success());
+        assert!(result.status);
         assert_eq!(traces.len(), 3);
         assert_eq!(traces[1].r#type, "CALL");
         assert_eq!(traces[1].depth, 1);
@@ -860,9 +1013,13 @@ mod tests {
                 trace: CallTrace {
                     depth,
                     address: Address::with_last_byte(idx as u8),
-                    selfdestruct_address: (idx < 3).then_some(Address::with_last_byte(idx as u8)),
-                    selfdestruct_refund_target: (idx < 3).then_some(Address::with_last_byte(0xff)),
-                    selfdestruct_transferred_value: (idx < 3).then_some(U256::ZERO),
+                    selfdestruct: (idx < 3).then(|| {
+                        Box::new(SelfdestructTrace {
+                            address: Some(Address::with_last_byte(idx as u8)),
+                            refund_target: Some(Address::with_last_byte(0xff)),
+                            transferred_value: Some(U256::ZERO),
+                        })
+                    }),
                     ..Default::default()
                 },
                 ..Default::default()
@@ -897,7 +1054,7 @@ mod tests {
     fn precompile_calls_remain_in_transaction_traces() {
         let (result, traces) =
             execute(bytes!("60006000600060006000600461fffff15000"), SpecId::CANCUN);
-        assert!(result.is_success());
+        assert!(result.status);
         assert_eq!(traces.len(), 2);
         assert_eq!(traces[1].to, Address::with_last_byte(4));
     }
@@ -960,7 +1117,7 @@ mod tests {
             bytes!("6000600060006000602261fffffa506000600060006000602261fffff45060006000600060006001602261fffff25000"),
             SpecId::CANCUN,
         );
-        assert!(result.is_success());
+        assert!(result.status);
         assert_eq!(traces.len(), 4);
         assert_eq!(traces[1].r#type, "STATICCALL");
         assert_eq!(traces[1].value, None);

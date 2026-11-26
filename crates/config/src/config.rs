@@ -11,6 +11,9 @@ use std::{
 use url::Url;
 
 #[cfg(feature = "serde")]
+use jiff::fmt::serde::unsigned_duration::friendly::compact;
+
+#[cfg(feature = "serde")]
 const EXTENSION: &str = "toml";
 
 /// The default prune block interval
@@ -53,7 +56,11 @@ impl Config {
     /// A new configuration file is created with default values if none
     /// exists.
     pub fn from_path(path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let path = path.as_ref();
+        Self::from_path_inner(path.as_ref())
+    }
+
+    /// Non-generic body of [`Self::from_path`], so the TOML code compiles once in this crate.
+    fn from_path_inner(path: &Path) -> eyre::Result<Self> {
         match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
                 toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))
@@ -281,7 +288,7 @@ pub struct ExecutionConfig {
     #[cfg_attr(
         feature = "serde",
         serde(
-            serialize_with = "humantime_serde::serialize",
+            serialize_with = "compact::optional::serialize",
             deserialize_with = "deserialize_duration"
         )
     )]
@@ -631,7 +638,7 @@ where
     #[derive(serde::Deserialize)]
     #[serde(untagged)]
     enum AnyDuration {
-        #[serde(deserialize_with = "humantime_serde::deserialize")]
+        #[serde(deserialize_with = "compact::optional::deserialize")]
         Human(Option<Duration>),
         Duration(Option<Duration>),
     }

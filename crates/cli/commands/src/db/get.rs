@@ -11,10 +11,10 @@ use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     database::Database,
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-    table::{Compress, Decompress, DupSort, Table},
+    table::{Decompress, DupSort, Encode, Table},
     tables,
     transaction::DbTx,
-    RawKey, RawTable, TableViewer,
+    RawKey, RawTable, TableRawRow, TableViewer,
 };
 use reth_db_common::DbTool;
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
@@ -25,7 +25,8 @@ use reth_provider::{
     StaticFileProviderFactory,
 };
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::StorageChangeSetReader;
+use reth_storage_api::{StorageChangeSetReader, StorageSettingsCache};
+use reth_trie_db::TrieTableAdapter;
 use tracing::error;
 
 /// The arguments for the `reth db get` command
@@ -133,7 +134,20 @@ impl Command {
     pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         match self.subcommand {
             Subcommand::Mdbx { table, key, subkey, end_key, end_subkey, raw } => {
-                table.view(&GetValueViewer { tool, key, subkey, end_key, end_subkey, raw })?
+                let viewer = GetValueViewer { tool, key, subkey, end_key, end_subkey, raw };
+                match table {
+                    tables::Tables::AccountsTrie => {
+                        reth_trie_db::with_adapter!(tool.provider_factory, |A| {
+                            viewer.view::<<A as TrieTableAdapter>::AccountTrieTable>()
+                        })
+                    }
+                    tables::Tables::StoragesTrie => {
+                        reth_trie_db::with_adapter!(tool.provider_factory, |A| {
+                            viewer.view_dupsort::<<A as TrieTableAdapter>::StorageTrieTable>()
+                        })
+                    }
+                    _ => table.view(&viewer),
+                }?;
             }
             Subcommand::Rocksdb { table, key, block, storage_key, all_shards, raw } => {
                 get_rocksdb(tool, table, &key, block, storage_key.as_deref(), all_shards, raw)?;
@@ -554,30 +568,12 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
             let end_key = table_key::<T>(end_key_str)?;
 
             // Use walk_range to iterate over the range
-            self.tool.provider_factory.db_ref().view(|tx| {
-                let mut cursor = tx.cursor_read::<T>()?;
-                let walker = cursor.walk_range(key..end_key)?;
-
-                for result in walker {
-                    let (k, v) = result?;
-                    let json_val = if self.raw {
-                        let raw_key = RawKey::from(k);
-                        serde_json::json!({
-                            "key": hex::encode_prefixed(raw_key.raw_key()),
-                            "val": hex::encode_prefixed(v.compress().as_ref()),
-                        })
-                    } else {
-                        serde_json::json!({
-                            "key": &k,
-                            "val": &v,
-                        })
-                    };
-
-                    println!("{}", serde_json::to_string_pretty(&json_val)?);
-                }
-
-                Ok::<_, eyre::Report>(())
-            })??;
+            let tx = self.tool.provider_factory.db_ref().tx()?;
+            let mut cursor = tx.cursor_read::<RawTable<T>>()?;
+            for result in cursor.walk_range(RawKey::from(key)..RawKey::from(end_key))? {
+                print_row::<T>(result?, self.raw)?;
+            }
+            tx.commit()?;
         } else {
             // Single key lookup
             let content = if self.raw {
@@ -588,14 +584,7 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
                 self.tool.get::<T>(key)?.as_ref().map(serde_json::to_string_pretty).transpose()?
             };
 
-            match content {
-                Some(content) => {
-                    println!("{content}");
-                }
-                None => {
-                    error!(target: "reth::cli", "No content for the given table key.");
-                }
-            };
+            print_content(content, "key");
         }
 
         Ok(())
@@ -603,97 +592,85 @@ impl<N: ProviderNodeTypes> TableViewer<()> for GetValueViewer<'_, N> {
 
     fn view_dupsort<T: DupSort>(&self) -> Result<(), Self::Error>
     where
-        T::Value: reth_primitives_traits::ValueWithSubKey<SubKey = T::SubKey>,
+        T::Value: ValueWithSubKey<SubKey = T::SubKey>,
     {
         // get a key for given table
         let key = table_key::<T>(&self.key)?;
 
         // Check if we're doing a range query
         if let Some(ref end_key_str) = self.end_key {
-            let end_key = table_key::<T>(end_key_str)?;
+            let key = RawKey::from(key);
+            let end_key = RawKey::from(table_key::<T>(end_key_str)?);
             let Some(start_subkey) = self.subkey.as_deref() else {
                 eyre::bail!("a subkey is required when end_key is given");
             };
-            let start_subkey = table_subkey::<T>(start_subkey)?;
-            let end_subkey_parsed =
-                self.end_subkey.as_deref().map(table_subkey::<T>).transpose()?;
+            let start_subkey = RawKey::from(table_subkey::<T>(start_subkey)?);
+            let end_subkey =
+                self.end_subkey.as_deref().map(table_subkey::<T>).transpose()?.map(Encode::encode);
+            let end_subkey = end_subkey.as_ref().map(AsRef::as_ref).unwrap_or_default();
 
-            self.tool.provider_factory.db_ref().view(|tx| {
-                let mut cursor = tx.cursor_dup_read::<T>()?;
+            let tx = self.tool.provider_factory.db_ref().tx()?;
+            let mut cursor = tx.cursor_dup_read::<RawDupSort<T>>()?;
 
-                // Seek to the starting key. If there is actually a key at the starting key then
-                // seek to the subkey within it.
-                if let Some((decoded_key, _)) = cursor.seek(key.clone())? &&
-                    decoded_key == key
-                {
-                    cursor.seek_by_key_subkey(key.clone(), start_subkey.clone())?;
+            // A duplicate seek stays within one key. On a miss, resume at the next distinct key.
+            let mut current = match cursor.seek_by_key_subkey(key.clone(), start_subkey)? {
+                Some(value) => Some((key, value)),
+                None => match cursor.seek(key.clone())? {
+                    Some((found, _)) if found == key => cursor.next_no_dup()?,
+                    row => row,
+                },
+            };
+
+            while let Some((key, value)) = current {
+                // Each value starts with its fixed-width subkey. An empty end subkey excludes
+                // every duplicate of the end key.
+                if (&key, value.raw_value()) >= (&end_key, end_subkey) {
+                    break;
                 }
-
-                // Get the current position to start iteration
-                let mut current = cursor.current()?;
-
-                while let Some((decoded_key, decoded_value)) = current {
-                    // Extract the subkey using the ValueWithSubKey trait
-                    let decoded_subkey = decoded_value.get_subkey();
-
-                    // Check if we've reached the end (exclusive)
-                    if (&decoded_key, Some(&decoded_subkey)) >=
-                        (&end_key, end_subkey_parsed.as_ref())
-                    {
-                        break;
-                    }
-
-                    // Output the entry with both key and subkey
-                    let json_val = if self.raw {
-                        let raw_key = RawKey::from(decoded_key.clone());
-                        serde_json::json!({
-                            "key": hex::encode_prefixed(raw_key.raw_key()),
-                            "val": hex::encode_prefixed(decoded_value.compress().as_ref()),
-                        })
-                    } else {
-                        serde_json::json!({
-                            "key": &decoded_key,
-                            "val": &decoded_value,
-                        })
-                    };
-
-                    println!("{}", serde_json::to_string_pretty(&json_val)?);
-
-                    // Move to next entry
-                    current = cursor.next()?;
-                }
-
-                Ok::<_, eyre::Report>(())
-            })??;
+                print_row::<T>((key, value), self.raw)?;
+                current = cursor.next()?;
+            }
+            tx.commit()?;
         } else {
             // Single key/subkey lookup
             let Some(subkey) = self.subkey.as_deref() else {
                 eyre::bail!("a subkey is required for dupsort tables");
             };
-            let subkey = table_subkey::<T>(subkey)?;
+            let encoded_subkey = table_subkey::<T>(subkey)?.encode();
+            let subkey = encoded_subkey.as_ref();
 
-            let content = if self.raw {
-                self.tool
-                    .get_dup::<RawDupSort<T>>(RawKey::from(key), RawKey::from(subkey))?
-                    .map(|content| hex::encode_prefixed(content.raw_value()))
-            } else {
-                self.tool
-                    .get_dup::<T>(key, subkey)?
-                    .as_ref()
-                    .map(serde_json::to_string_pretty)
-                    .transpose()?
-            };
-
-            match content {
-                Some(content) => {
-                    println!("{content}");
-                }
-                None => {
-                    error!(target: "reth::cli", "No content for the given table subkey.");
-                }
-            };
+            // MDBX can return the next duplicate. Each table encodes its full, fixed-width subkey
+            // at the start of the value, so raw reads can check it without decoding the payload.
+            let value = self
+                .tool
+                .get_dup::<RawDupSort<T>>(key.into(), RawKey::from_vec(subkey.to_vec()))?
+                .filter(|value| value.raw_value().starts_with(subkey));
+            match value {
+                Some(value) if self.raw => println!("{}", hex::encode_prefixed(value.raw_value())),
+                Some(value) => println!("{}", serde_json::to_string_pretty(&value.value()?)?),
+                None => print_content(None, "subkey"),
+            }
         }
         Ok(())
+    }
+}
+
+/// Prints a range row, preserving the stored bytes for raw output.
+fn print_row<T: Table>((key, value): TableRawRow<T>, raw: bool) -> eyre::Result<()> {
+    let (key, val) = if raw {
+        (hex::encode_prefixed(key.raw_key()).into(), hex::encode_prefixed(value.raw_value()).into())
+    } else {
+        (serde_json::to_value(key.key()?)?, serde_json::to_value(value.value()?)?)
+    };
+    println!("{}", serde_json::to_string_pretty(&serde_json::json!({ "key": key, "val": val }))?);
+    Ok(())
+}
+
+/// Prints the looked up content, or logs that nothing exists for the given `key` or `subkey`.
+fn print_content(content: Option<String>, missing: &str) {
+    match content {
+        Some(content) => println!("{content}"),
+        None => error!(target: "reth::cli", "No content for the given table {missing}."),
     }
 }
 

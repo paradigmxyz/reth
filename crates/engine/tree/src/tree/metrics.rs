@@ -678,7 +678,7 @@ mod tests {
     use metrics_util::debugging::{DebuggingRecorder, Snapshotter};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::BlockExecutionResult;
-    use reth_revm::db::BundleState;
+    use reth_trie_common::bundle_state::BundleState;
 
     fn setup_test_recorder() -> Snapshotter {
         let recorder = DebuggingRecorder::new();

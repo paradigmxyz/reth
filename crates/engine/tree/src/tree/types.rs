@@ -5,7 +5,7 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::B256;
 use reth_chain_state::{ExecutedBlock, ExecutionTimingStats};
-use reth_evm::{ConfigureEvm, EvmEnvFor, HaltReasonFor};
+use reth_evm::{ConfigureEvm, EvmEnvFor, EvmTypesFor};
 use reth_execution_cache::TxPoolPrewarmCacheSnapshot;
 use reth_primitives_traits::{BlockTy, NodePrimitives};
 use std::sync::Arc;
@@ -42,7 +42,7 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     ///
     /// None if txpool prewarming does not record results or the block environment differs from
     /// the predicted one.
-    pub(crate) pool_seeds: Option<PoolSeeds<HaltReasonFor<Evm>>>,
+    pub(crate) pool_seeds: Option<PoolSeeds<EvmTypesFor<Evm>>>,
 }
 
 impl<Evm: ConfigureEvm> ExecutionEnv<Evm>

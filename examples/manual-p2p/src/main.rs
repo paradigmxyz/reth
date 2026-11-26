@@ -26,7 +26,7 @@ use reth_ethereum::{
     },
 };
 use reth_network_peers::{mainnet_nodes, pk2id, NodeRecord};
-use secp256k1::{SecretKey, SECP256K1};
+use secp256k1::SecretKey;
 use std::sync::LazyLock;
 use tokio::net::TcpStream;
 
@@ -94,7 +94,7 @@ async fn handshake_p2p(
     let outgoing = TcpStream::connect((peer.address, peer.tcp_port)).await?;
     let ecies_stream = ECIESStream::connect(outgoing, key, peer.id).await?;
 
-    let our_peer_id = pk2id(&key.public_key(SECP256K1));
+    let our_peer_id = pk2id(&key.public_key());
     let our_hello = HelloMessage::builder(our_peer_id).build();
 
     Ok(UnauthedP2PStream::new(ecies_stream).handshake(our_hello).await?)

@@ -1,6 +1,6 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
-use crate::{DecodedRevmBal, ExecutionOutcome};
+use crate::{DecodedEvmBal, ExecutionOutcome};
 use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
 use alloy_consensus::{
     transaction::{Recovered, TxHashRef},
@@ -49,7 +49,7 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// that need the BAL of an arbitrary block must read it from the BAL store. This is derived
     /// cache data and not part of the serialized representation.
     #[cfg_attr(feature = "serde", serde(skip))]
-    bals: BTreeMap<BlockNumber, Arc<DecodedRevmBal>>,
+    bals: BTreeMap<BlockNumber, Arc<DecodedEvmBal>>,
 }
 
 type ChainTxReceiptMeta<'a, N> = (
@@ -137,19 +137,19 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get all prepared block access lists for this chain.
     ///
     /// Blocks without an available BAL have no entry; see the `bals` field for details.
-    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedRevmBal>> {
+    pub const fn bals(&self) -> &BTreeMap<BlockNumber, Arc<DecodedEvmBal>> {
         &self.bals
     }
 
     /// Get the prepared block access list for a specific block number, if one is available.
     ///
     /// `None` only means no BAL was attached for that block; see the `bals` field for details.
-    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedRevmBal>> {
+    pub fn bal_at(&self, block_number: BlockNumber) -> Option<&Arc<DecodedEvmBal>> {
         self.bals.get(&block_number)
     }
 
     /// Attach a prepared block access list to a block of this chain.
-    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedRevmBal>) {
+    pub fn insert_bal(&mut self, block_number: BlockNumber, bal: Arc<DecodedEvmBal>) {
         debug_assert!(
             self.blocks.contains_key(&block_number),
             "BAL must belong to a block of this chain"
@@ -276,7 +276,7 @@ impl<N: NodePrimitives> Chain<N> {
     /// Blocks without an available BAL are skipped; see the `bals` field for details.
     pub fn blocks_and_bals(
         &self,
-    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedRevmBal>)> + '_ {
+    ) -> impl Iterator<Item = (&Arc<RecoveredBlock<N::Block>>, &Arc<DecodedEvmBal>)> + '_ {
         self.bals
             .iter()
             .filter_map(|(number, bal)| self.blocks.get(number).map(|block| (block, bal)))
@@ -558,8 +558,8 @@ pub(super) mod serde_bincode_compat {
     use alloy_rlp::Decodable;
     use core::marker::PhantomData;
     use reth_ethereum_primitives::EthPrimitives;
-    use reth_primitives_traits::{NodePrimitives, SealedBlock};
-    use reth_trie_common::SortedTrieData;
+    use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
+    use reth_trie_common::{LazyTrieData, SortedTrieData};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -642,9 +642,6 @@ pub(super) mod serde_bincode_compat {
         N: NodePrimitives,
     {
         fn from(value: Chain<'a, N>) -> Self {
-            use reth_primitives_traits::RecoveredBlock;
-            use reth_trie_common::LazyTrieData;
-
             let hashed_state_map: BTreeMap<_, _> =
                 value.hashed_state.into_iter().map(|(k, v)| (k, Arc::new(v.into()))).collect();
 
@@ -706,6 +703,7 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use super::super::{serde_bincode_compat, Chain};
+        use alloc::collections::BTreeMap;
         use arbitrary::Arbitrary;
         use rand::Rng;
         use reth_primitives_traits::RecoveredBlock;
@@ -714,8 +712,6 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_chain_bincode_roundtrip() {
-            use alloc::collections::BTreeMap;
-
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
@@ -746,8 +742,9 @@ mod tests {
     use super::*;
     use alloy_consensus::TxType;
     use alloy_primitives::{map::HashMap, Address, B256};
+    use evm2::evm::AccountInfo;
     use reth_ethereum_primitives::Receipt;
-    use revm::{database::BundleState, state::AccountInfo};
+    use reth_trie_common::bundle_state::BundleState;
 
     #[test]
     fn chain_append() {

@@ -21,14 +21,14 @@ use reth_libmdbx::{
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_storage_errors::db::LogLevel;
-use reth_tracing::tracing::error;
 use rustc_hash::FxHashMap;
 use std::{
     ops::{Deref, Range},
     path::{Path, PathBuf},
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
+use tracing::error;
 use tx::Tx;
 
 pub mod cursor;
@@ -53,6 +53,17 @@ const DEFAULT_MAX_READERS: u64 = 32_000;
 /// Space that a read-only transaction can occupy until the warning is emitted.
 /// See [`reth_libmdbx::EnvironmentBuilder::set_handle_slow_readers`] for more information.
 const MAX_SAFE_READER_SPACE: usize = 10 * GIGABYTE;
+
+/// Longest time a [`SyncMode::SafeNoSync`] or [`SyncMode::UtterlyNoSync`] environment goes
+/// without a steady (synced) commit.
+///
+/// Commits in these modes are weak. After an unclean shutdown on a new boot (host reboot or power
+/// loss) MDBX discards all weak commits and rolls back to the last steady one, while static files
+/// and `RocksDB` sync on every commit and stay ahead. Without a period, steady commits only happen
+/// on a clean close or when the file fills up, so the rollback can span days and land below data
+/// that static file pruning already deleted, which startup healing cannot repair. MDBX checks the
+/// period on each commit.
+const NON_DURABLE_SYNC_PERIOD: Duration = Duration::from_secs(60);
 
 /// Environment used when opening a MDBX environment. RO/RW.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -114,8 +125,8 @@ pub struct DatabaseArguments {
     ///   considered committed.   This provides the highest level of durability and crash safety
     ///   but may have a performance cost.
     /// - [`SyncMode::SafeNoSync`]: Skips certain fsync operations to improve write performance.
-    ///   This mode still maintains database integrity but may lose the most recent transactions if
-    ///   the system crashes unexpectedly.
+    ///   This mode still maintains database integrity but may lose the transactions committed
+    ///   within the last [`NON_DURABLE_SYNC_PERIOD`] if the system crashes unexpectedly.
     ///
     /// Choose `Durable` if consistency and crash safety are critical (e.g., production
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
@@ -253,11 +264,51 @@ pub struct DatabaseEnv {
     /// More generally, do not dynamically create, re-open, or drop tables at
     /// runtime. It's better to perform table creation and migration only once
     /// at startup.
-    dbis: Arc<FxHashMap<&'static str, ffi::MDBX_dbi>>,
+    dbis: Arc<TableDbis>,
     /// Cache for metric handles. If `None`, metrics are not recorded.
     metrics: Option<Arc<DatabaseEnvMetrics>>,
+    /// Disables long-lived read safety on transactions opened through this handle.
+    disable_long_read_transaction_safety: bool,
     /// Write lock for when dealing with a read-write environment.
     _lock_file: Option<StorageLock>,
+}
+
+/// MDBX DBIs of the tables tracked by a [`DatabaseEnv`].
+#[derive(Debug, Clone)]
+pub(crate) struct TableDbis {
+    /// DBIs of [`Tables`] entries, indexed by the entry's position in [`Tables::ALL`].
+    tables: [Option<ffi::MDBX_dbi>; Tables::COUNT],
+    /// DBIs of tables defined outside of [`Tables`], by name.
+    other: FxHashMap<&'static str, ffi::MDBX_dbi>,
+}
+
+impl Default for TableDbis {
+    fn default() -> Self {
+        Self { tables: [None; Tables::COUNT], other: FxHashMap::default() }
+    }
+}
+
+impl TableDbis {
+    /// Returns the tracked DBI of a table, which is looked up by `table` if it is a [`Tables`]
+    /// entry and by `name` otherwise.
+    ///
+    /// Returns `None` if the table is not tracked.
+    pub(crate) fn get(&self, table: Option<Tables>, name: &str) -> Option<ffi::MDBX_dbi> {
+        match table {
+            Some(table) => self.tables[table as usize],
+            None => self.other.get(name).copied(),
+        }
+    }
+
+    /// Tracks the DBI of the table with the given name.
+    fn insert(&mut self, name: &'static str, dbi: ffi::MDBX_dbi) {
+        match name.parse::<Tables>() {
+            Ok(table) => self.tables[table as usize] = Some(dbi),
+            Err(_) => {
+                self.other.insert(name, dbi);
+            }
+        }
+    }
 }
 
 impl Database for DatabaseEnv {
@@ -265,21 +316,29 @@ impl Database for DatabaseEnv {
     type TXMut = tx::Tx<RW>;
 
     fn tx(&self) -> Result<Self::TX, DatabaseError> {
-        Tx::new(
+        let mut tx = Tx::new(
             self.inner.begin_ro_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        if self.disable_long_read_transaction_safety {
+            tx.disable_long_read_transaction_safety();
+        }
+        Ok(tx)
     }
 
     fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
-        Tx::new(
+        let mut tx = Tx::new(
             self.inner.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?,
             self.dbis.clone(),
             self.metrics.clone(),
         )
-        .map_err(|e| DatabaseError::InitTx(e.into()))
+        .map_err(|e| DatabaseError::InitTx(e.into()))?;
+        if self.disable_long_read_transaction_safety {
+            tx.disable_long_read_transaction_safety();
+        }
+        Ok(tx)
     }
 
     fn path(&self) -> PathBuf {
@@ -304,6 +363,10 @@ impl Database for DatabaseEnv {
         } else {
             Some(txnid as u64)
         }
+    }
+
+    fn reader_check(&self) -> Result<(), DatabaseError> {
+        self.inner.reader_check().map(|_| ()).map_err(|e| DatabaseError::Read(e.into()))
     }
 }
 
@@ -411,6 +474,9 @@ impl DatabaseEnv {
             DatabaseEnvKind::RW => {
                 // enable writemap mode in RW mode
                 inner_env.write_map();
+                if matches!(args.sync_mode, SyncMode::SafeNoSync | SyncMode::UtterlyNoSync) {
+                    inner_env.set_sync_period(NON_DURABLE_SYNC_PERIOD);
+                }
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };
@@ -450,7 +516,7 @@ impl DatabaseEnv {
                     "External process has a long-lived database transaction that grows the database file. \
                      Use shorter-lived read transactions or shut down the node."
                 };
-                reth_tracing::tracing::warn!(
+                tracing::warn!(
                     target: "storage::db::mdbx",
                     ?process_id,
                     ?thread_id,
@@ -539,6 +605,7 @@ impl DatabaseEnv {
             path: path.to_path_buf(),
             dbis: Arc::default(),
             metrics: None,
+            disable_long_read_transaction_safety: false,
             _lock_file,
         };
 
@@ -575,7 +642,9 @@ impl DatabaseEnv {
         // Note: This is okay because self has mutable access here and `DatabaseEnv` must be Arc'ed
         // before it can be shared.
         let dbis = Arc::make_mut(&mut self.dbis);
-        dbis.extend(handles);
+        for (name, dbi) in handles {
+            dbis.insert(name, dbi);
+        }
 
         Ok(())
     }
@@ -591,7 +660,9 @@ impl DatabaseEnv {
         if let Some(db) = Arc::get_mut(self) {
             // Note: The db is unique and the dbis as well, and they can also be cloned.
             let dbis = Arc::make_mut(&mut db.dbis);
-            dbis.extend(handles);
+            for (name, dbi) in handles {
+                dbis.insert(name, dbi);
+            }
         }
         Ok(())
     }
@@ -666,6 +737,15 @@ impl DatabaseEnv {
 
         Ok(())
     }
+
+    /// Disables timeouts and long-read backtrace reporting for transactions opened through this
+    /// handle. Existing transactions and other previously cloned handles are unaffected.
+    ///
+    /// Use for offline work that intentionally holds transactions open.
+    pub const fn with_disable_long_read_transaction_safety(mut self) -> Self {
+        self.disable_long_read_transaction_safety = true;
+        self
+    }
 }
 
 impl Deref for DatabaseEnv {
@@ -692,12 +772,22 @@ mod tests {
     use reth_db_api::{
         cursor::{DbDupCursorRO, DbDupCursorRW, ReverseWalker, Walker},
         models::{AccountBeforeTx, IntegerList, ShardedKey},
-        table::{Encode, Table},
+        table::{Encode, Table, TableInfo},
+        tables_to_generic,
     };
     use reth_libmdbx::Error;
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
     use tempfile::TempDir;
+
+    #[cfg(unix)]
+    use reth_db_api::database::ReaderTxnTracker;
+    #[cfg(unix)]
+    use std::{
+        io::{BufRead, BufReader, Read},
+        process::{Command, Stdio},
+        sync::mpsc,
+    };
 
     /// Create database for testing. Returns the `TempDir` to prevent cleanup until test ends.
     fn create_test_db(kind: DatabaseEnvKind) -> (TempDir, DatabaseEnv) {
@@ -1657,5 +1747,185 @@ mod tests {
             let list400 = IntegerList::new_pre_sorted([400u64]);
             assert_eq!(list400, list);
         }
+    }
+
+    #[test]
+    fn db_tracks_table_dbis() {
+        #[derive(Debug)]
+        struct CustomTable;
+
+        impl Table for CustomTable {
+            const NAME: &'static str = "CustomTable";
+            const DUPSORT: bool = false;
+
+            type Key = u64;
+            type Value = u64;
+        }
+
+        impl TableInfo for CustomTable {
+            fn name(&self) -> &'static str {
+                Self::NAME
+            }
+
+            fn is_dupsort(&self) -> bool {
+                Self::DUPSORT
+            }
+        }
+
+        impl TableSet for CustomTable {
+            fn tables() -> Box<dyn Iterator<Item = Box<dyn TableInfo>>> {
+                Box::new(std::iter::once(Box::new(Self) as Box<dyn TableInfo>))
+            }
+        }
+
+        let (_tempdir, mut env) = create_test_db(DatabaseEnvKind::RW);
+        env.create_and_track_tables_for::<CustomTable>().expect(ERROR_TABLE_CREATION);
+        let env = env.with_metrics();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        for table in Tables::ALL {
+            let dbi = tables_to_generic!(table, |T| tx.get_dbi::<T>()).unwrap();
+            assert_eq!(env.dbis.get(Some(*table), table.name()), Some(dbi), "{table}");
+            assert_eq!(tx.inner().open_db(Some(table.name())).unwrap().dbi(), dbi, "{table}");
+        }
+
+        let dbi = tx.get_dbi::<CustomTable>().unwrap();
+        assert_eq!(env.dbis.get(None, CustomTable::NAME), Some(dbi));
+        assert_eq!(tx.inner().open_db(Some(CustomTable::NAME)).unwrap().dbi(), dbi);
+        tx.put::<CustomTable>(1, 2).expect(ERROR_PUT);
+        tx.cursor_write::<CustomTable>().unwrap().upsert(3, &4).expect(ERROR_UPSERT);
+        tx.commit().expect(ERROR_COMMIT);
+
+        let tx = env.tx().expect(ERROR_INIT_TX);
+        assert_eq!(tx.get::<CustomTable>(1).expect(ERROR_GET), Some(2));
+        assert_eq!(tx.get::<CustomTable>(3).expect(ERROR_GET), Some(4));
+    }
+
+    #[test]
+    fn non_durable_sync_period() {
+        let sync_period = |sync_mode| {
+            let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+            let env = DatabaseEnv::open(
+                tempdir.path(),
+                DatabaseEnvKind::RW,
+                DatabaseArguments::test().with_sync_mode(Some(sync_mode)),
+            )
+            .expect(ERROR_DB_CREATION);
+            let mut period = 0;
+            // SAFETY: the pointer is only used within the closure, while `env` is open.
+            let rc = env.with_raw_env_ptr(|env| unsafe {
+                ffi::mdbx_env_get_option(env, ffi::MDBX_opt_sync_period, &raw mut period)
+            });
+            assert_eq!(rc, ffi::MDBX_SUCCESS);
+            // MDBX reports the period in 1/65536 of a second.
+            Duration::from_secs_f64(period as f64 / 65536.0)
+        };
+
+        assert_eq!(sync_period(SyncMode::Durable), Duration::ZERO);
+        assert_eq!(sync_period(SyncMode::SafeNoSync), NON_DURABLE_SYNC_PERIOD);
+        assert_eq!(sync_period(SyncMode::UtterlyNoSync), NON_DURABLE_SYNC_PERIOD);
+    }
+
+    /// A reader slot left behind by a `SIGKILL`ed process must not block
+    /// [`ReaderTxnTracker::wait_for_pre_commit_readers`] forever.
+    #[cfg(unix)]
+    #[test]
+    fn wait_for_pre_commit_readers_clears_dead_process_reader() {
+        const CHILD_DB_PATH_ENV: &str = "RETH_TEST_STALE_READER_DB_PATH";
+
+        // Child process: hold a read transaction until killed or until the parent closes stdin.
+        if let Some(path) = std::env::var_os(CHILD_DB_PATH_ENV) {
+            let env = DatabaseEnv::open(
+                Path::new(&path),
+                DatabaseEnvKind::RO,
+                DatabaseArguments::new(ClientVersion::default()),
+            )
+            .unwrap();
+            let _tx = env.tx().unwrap();
+            println!("ready");
+            let _ = std::io::stdin().read_to_end(&mut Vec::new());
+            std::process::exit(0);
+        }
+
+        let (dir, env) = create_test_db(DatabaseEnvKind::RW);
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "implementation::mdbx::tests::wait_for_pre_commit_readers_clears_dead_process_reader",
+                "--nocapture",
+            ])
+            .env(CHILD_DB_PATH_ENV, dir.path())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let (ready_tx, ready_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            // With one test thread, libtest prints `test <name> ... ` on the same line first.
+            let ready =
+                stdout.lines().any(|line| line.is_ok_and(|l| l.trim_end().ends_with("ready")));
+            let _ = ready_tx.send(ready);
+        });
+        let ready = ready_rx.recv_timeout(Duration::from_secs(10));
+        if ready != Ok(true) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("child did not open a read transaction: {ready:?}");
+        }
+
+        // `Child::kill` sends `SIGKILL`, so the child's reader slot is never released.
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        env.update(|tx| tx.put::<CanonicalHeaders>(1, B256::ZERO)).unwrap().unwrap();
+        assert!(
+            env.oldest_reader_txnid().unwrap() < env.last_txnid().unwrap(),
+            "dead reader slot must still be counted before the wait"
+        );
+
+        let env = Arc::new(env);
+        let (done_tx, done_rx) = mpsc::channel();
+        let waiter = Arc::clone(&env);
+        std::thread::spawn(move || {
+            waiter.wait_for_pre_commit_readers().unwrap();
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("wait_for_pre_commit_readers hung on a dead process's reader slot");
+        // This process's own idle slot may remain, but no slot may predate the last commit.
+        let last_txnid = env.last_txnid().unwrap();
+        assert!(
+            env.oldest_reader_txnid().is_none_or(|oldest| oldest >= last_txnid),
+            "dead reader slot must be cleared"
+        );
+    }
+
+    #[test]
+    fn commit_durable_syncs_non_durable_env() {
+        let tempdir = tempfile::TempDir::new().expect(ERROR_TEMPDIR);
+        let mut env = DatabaseEnv::open(
+            tempdir.path(),
+            DatabaseEnvKind::RW,
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        )
+        .expect(ERROR_DB_CREATION);
+        env.create_tables().expect(ERROR_TABLE_CREATION);
+        let info = || env.info().unwrap();
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CanonicalHeaders>(1, B256::ZERO).expect(ERROR_PUT);
+        tx.commit().expect(ERROR_COMMIT);
+        assert!(info().last_steady_txnid() < Some(info().last_txnid() as u64));
+
+        // Read-only transactions don't sync.
+        env.tx().expect(ERROR_INIT_TX).commit_durable().expect(ERROR_COMMIT);
+        assert!(info().last_steady_txnid() < Some(info().last_txnid() as u64));
+
+        let tx = env.tx_mut().expect(ERROR_INIT_TX);
+        tx.put::<CanonicalHeaders>(2, B256::ZERO).expect(ERROR_PUT);
+        tx.commit_durable().expect(ERROR_COMMIT);
+        assert_eq!(info().last_steady_txnid(), Some(info().last_txnid() as u64));
     }
 }

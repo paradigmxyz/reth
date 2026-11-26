@@ -82,3 +82,15 @@ instead.
 
 snap/1 synchronization is not covered: this design keeps the state current with BALs, which only
 snap/2 serves, rather than with snap/1's trie-node healing.
+
+## Monitoring
+
+The sync exports account progress, catch-up lag and restarts under `sync.snap`:
+
+- `account_progress` reports the share of the account keyspace downloaded, from 0 to 1.
+- The difference between `pivot_block` and `applied_block` measures how far BAL catch-up lags the
+  pivot. A gap that keeps growing leads to a restart once peers no longer serve the BALs required
+  to close it.
+- `restarts` counts attempts abandoned and started over.
+
+`downloaders.snap.invalid_responses` counts responses rejected by verification.

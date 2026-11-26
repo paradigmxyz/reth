@@ -1,7 +1,10 @@
 use crossbeam_utils::CachePadded;
 use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    panic::{catch_unwind, AssertUnwindSafe},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -111,8 +114,6 @@ where
     I::Item: Send,
     F: FnMut(I::Item),
 {
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-
     let n = iter.len();
     if n == 0 {
         return;
@@ -165,12 +166,15 @@ where
 mod tests {
     use super::*;
     use rayon::prelude::*;
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Barrier,
+    use std::{
+        rc::Rc,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Barrier,
+        },
     };
 
-    #[test]
+    #[reth_concurrency::test]
     fn preserves_order() {
         let input: Vec<u64> = (0..1000).collect();
         let mut output = Vec::with_capacity(input.len());
@@ -179,7 +183,7 @@ mod tests {
         assert_eq!(output, expected);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn empty_iterator() {
         let input: Vec<u64> = vec![];
         let mut output = Vec::new();
@@ -187,14 +191,14 @@ mod tests {
         assert!(output.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn single_element() {
         let mut output = Vec::new();
         vec![42u64].par_iter().map(|x| *x).for_each_ordered(|x| output.push(x));
         assert_eq!(output, vec![42]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn slow_early_items_still_delivered_in_order() {
         let barrier = Barrier::new(2);
         let n = 64usize;
@@ -214,7 +218,7 @@ mod tests {
         assert_eq!(output, input);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn drops_unconsumed_slots_on_panic() {
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -244,7 +248,7 @@ mod tests {
         assert!(drops > 0, "some items should have been dropped");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn no_double_drop() {
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -263,9 +267,8 @@ mod tests {
         assert_eq!(DROP_COUNT.load(Ordering::Relaxed), n as usize);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn callback_is_not_send() {
-        use std::rc::Rc;
         let counter = Rc::new(std::cell::Cell::new(0u64));
         let input: Vec<u64> = (0..100).collect();
         input.par_iter().map(|&x| x).for_each_ordered(|x| {
@@ -274,7 +277,7 @@ mod tests {
         assert_eq!(counter.get(), (0..100u64).sum::<u64>());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn panic_does_not_deadlock_consumer() {
         // Regression test: producer panics while consumer is waiting on a condvar.
         // Without the lock-before-notify fix, the consumer could miss the wakeup
@@ -299,7 +302,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn early_panic_at_item_zero() {
         let result = std::panic::catch_unwind(|| {
             let input: Vec<u64> = (0..10).collect();
@@ -314,7 +317,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn late_panic_at_last_item() {
         let n = 100usize;
         let result = std::panic::catch_unwind(|| {
@@ -330,7 +333,7 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn large_items() {
         let n = 500usize;
         let input: Vec<usize> = (0..n).collect();
@@ -345,7 +348,7 @@ mod tests {
         assert_eq!(output, input);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn consumer_slower_than_producer() {
         // Producer is fast, consumer is slow. All items should still arrive in order.
         let n = 64usize;
@@ -360,7 +363,7 @@ mod tests {
         assert_eq!(output, input);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn concurrent_panic_and_drop_no_leak() {
         // Ensure items produced before a panic are all dropped.
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
