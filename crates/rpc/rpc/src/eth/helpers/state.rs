@@ -64,6 +64,7 @@ mod tests {
     };
     use alloy_rpc_types_eth::TransactionRequest;
     use alloy_serde::JsonStorageKey;
+    use reth_chain_state::InMemoryStateWriter;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
@@ -72,8 +73,9 @@ mod tests {
     use reth_provider::{
         providers::BlockchainProvider,
         test_utils::{
-            create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
-            MockNodeTypesWithDB, NoopProvider,
+            create_test_provider_factory_with_chain_spec,
+            create_test_provider_factory_with_in_memory_state_writer, ExtendedAccount,
+            MockEthProvider, MockNodeTypesWithDB, NoopProvider,
         },
         ChainSpecProvider,
     };
@@ -481,7 +483,7 @@ mod tests {
 
     /// Withdraws the provider's pending block right after its environment is read.
     #[derive(Clone)]
-    struct WithdrawnPending(ProviderEthApi);
+    struct WithdrawnPending(ProviderEthApi, Arc<parking_lot::Mutex<InMemoryStateWriter>>);
 
     impl EthApiTypes for WithdrawnPending {
         type Error = EthApiError;
@@ -556,7 +558,7 @@ mod tests {
 
         fn pending_block_env_and_cfg(&self) -> Result<PendingBlockEnv<Self::Evm>, Self::Error> {
             let pending = self.0.pending_block_env_and_cfg();
-            self.provider().canonical_in_memory_state().clear_state();
+            self.1.lock().clear_state();
             pending
         }
     }
@@ -592,9 +594,11 @@ mod tests {
             ]);
         let chain_spec =
             Arc::new(ChainSpecBuilder::mainnet().cancun_activated().genesis(genesis).build());
-        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(chain_spec);
         init_genesis(&factory).unwrap();
         let provider = BlockchainProvider::new(factory).unwrap();
+        let in_memory_state_writer = Arc::new(parking_lot::Mutex::new(in_memory_state_writer));
         let pool = testing_pool();
         pool.add_external_transaction(tx).await.unwrap();
         let eth_api = EthApi::builder(
@@ -607,7 +611,7 @@ mod tests {
 
         // Make the locally built block the provider's pending block.
         let pending = eth_api.pool_pending_block().await.unwrap().unwrap().executed_block;
-        provider.canonical_in_memory_state().set_pending_block(pending);
+        in_memory_state_writer.lock().set_pending_block(pending);
 
         let request = TransactionRequest::default().to(contract);
         let output =
@@ -626,6 +630,7 @@ mod tests {
             )
             .pending_block_kind(PendingBlockKind::None)
             .build(),
+            in_memory_state_writer,
         );
         let res = eth_api.transact_call_at(request, BlockId::pending(), Default::default()).await;
         assert!(res.is_err(), "{:?}", res.map(|res| res.result.output));

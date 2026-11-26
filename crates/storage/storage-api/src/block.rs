@@ -16,14 +16,14 @@ use reth_storage_errors::provider::ProviderResult;
 /// fetched.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum BlockSource {
-    /// Check all available sources.
+    /// Check the canonical chain first, then the blocks the engine tree holds in memory, such as
+    /// side chain blocks, reorged-out blocks and the pending block.
     ///
-    /// Note: it's expected that looking up pending blocks is faster than looking up blocks in the
-    /// database so this prioritizes Pending > Database.
+    /// A block that is not canonical is only found until the tree drops it, for example once it
+    /// conflicts with the finalized block.
     #[default]
     Any,
-    /// The block was fetched from the pending block source, the blockchain tree that buffers
-    /// blocks that are not yet part of the canonical chain.
+    /// The pending block, which extends the canonical head but has no forkchoice update yet.
     Pending,
     /// The block must be part of the canonical chain.
     Canonical,
@@ -39,6 +39,11 @@ impl BlockSource {
     pub const fn is_canonical(&self) -> bool {
         matches!(self, Self::Canonical | Self::Any)
     }
+
+    /// Returns `true` if the block source is `Any`.
+    pub const fn is_any(&self) -> bool {
+        matches!(self, Self::Any)
+    }
 }
 
 /// A helper type alias to access [`BlockReader::Block`].
@@ -48,10 +53,6 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 ///
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
-///
-/// Lookups by hash may also return non-canonical blocks the engine tree still holds, such as side
-/// chain or reorged-out blocks. Use [`Self::find_block_by_hash`] with [`BlockSource::Canonical`]
-/// when only canonical blocks are wanted.
 pub trait BlockReader:
     HeaderProvider + BlockBodyIndicesProvider + TransactionsProvider + ReceiptProvider
 {
@@ -367,10 +368,7 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
         transaction_kind: TransactionVariant,
     ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         match id {
-            BlockId::Hash(_) => self.block_hash_for_id(id)?.map_or_else(
-                || Ok(None),
-                |hash| self.recovered_block(hash.into(), transaction_kind),
-            ),
+            BlockId::Hash(hash) => self.recovered_block(hash.block_hash.into(), transaction_kind),
             BlockId::Number(num) => self
                 .convert_block_number(num)?
                 .map_or_else(|| Ok(None), |num| self.recovered_block(num.into(), transaction_kind)),

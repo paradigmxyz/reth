@@ -192,7 +192,7 @@ struct PayloadExecutionCacheMetrics {
 mod tests {
     use super::*;
 
-    #[test]
+    #[reth_concurrency::test]
     fn single_checkout_blocks_second() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(1u8);
@@ -208,7 +208,7 @@ mod tests {
         assert!(second.is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn checkout_available_after_drop() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(2u8);
@@ -225,7 +225,7 @@ mod tests {
         assert!(second.is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn raw_cache_handle_blocks_checkout_until_drop() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(3u8);
@@ -247,7 +247,7 @@ mod tests {
         assert!(available.is_some(), "checkout should succeed after raw handle is dropped");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn hash_mismatch_clears_and_retags() {
         let cache = PayloadExecutionCache::default();
         let hash_a = B256::repeat_byte(0xAA);
@@ -262,13 +262,13 @@ mod tests {
         assert_eq!(checked_out.unwrap().executed_block_hash(), hash_b);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn empty_cache_returns_none() {
         let cache = PayloadExecutionCache::default();
         assert!(cache.get_cache_for(B256::ZERO).is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn checkout_distinguishes_empty_from_in_use() {
         let cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(7u8);

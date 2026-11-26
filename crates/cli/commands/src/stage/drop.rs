@@ -105,6 +105,7 @@ impl<C: ChainSpecParser> Command<C> {
 
         let provider_rw = tool.provider_factory.unwind_provider_rw()?;
         let tx = provider_rw.tx_ref();
+        let storage_v2 = provider_rw.cached_storage_settings().storage_v2;
 
         match self.stage {
             StageEnum::Headers => {
@@ -184,45 +185,29 @@ impl<C: ChainSpecParser> Command<C> {
                 )?;
             }
             StageEnum::AccountHistory => {
-                let settings = provider_rw.cached_storage_settings();
-                let rocksdb = tool.provider_factory.rocksdb_provider();
-
-                if settings.storage_v2 {
-                    rocksdb.clear::<tables::AccountsHistory>()?;
-                } else {
+                if !storage_v2 {
                     tx.clear::<tables::AccountsHistory>()?;
+                    insert_genesis_account_history(
+                        &provider_rw,
+                        self.env.chain.genesis().alloc.iter(),
+                    )?;
                 }
 
                 reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
-
-                insert_genesis_account_history(
-                    &provider_rw,
-                    self.env.chain.genesis().alloc.iter(),
-                )?;
             }
             StageEnum::StorageHistory => {
-                let settings = provider_rw.cached_storage_settings();
-                let rocksdb = tool.provider_factory.rocksdb_provider();
-
-                if settings.storage_v2 {
-                    rocksdb.clear::<tables::StoragesHistory>()?;
-                } else {
+                if !storage_v2 {
                     tx.clear::<tables::StoragesHistory>()?;
+                    insert_genesis_storage_history(
+                        &provider_rw,
+                        self.env.chain.genesis().alloc.iter(),
+                    )?;
                 }
 
                 reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
-
-                insert_genesis_storage_history(
-                    &provider_rw,
-                    self.env.chain.genesis().alloc.iter(),
-                )?;
             }
             StageEnum::TxLookup => {
-                if provider_rw.cached_storage_settings().storage_v2 {
-                    tool.provider_factory
-                        .rocksdb_provider()
-                        .clear::<tables::TransactionHashNumbers>()?;
-                } else {
+                if !storage_v2 {
                     tx.clear::<tables::TransactionHashNumbers>()?;
                 }
 
@@ -236,6 +221,37 @@ impl<C: ChainSpecParser> Command<C> {
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
         provider_rw.commit()?;
+
+        // `RocksDB` writes are not part of the MDBX transaction. Clear the `RocksDB` index only
+        // after the checkpoint reset commits: if the command stops before the index is rebuilt,
+        // the startup consistency check sees checkpoint 0 and clears the stale index. Write the
+        // genesis history back after the clear: if the changeset tip is still 0, the startup check
+        // returns before it reseeds genesis, and live persistence does not rebuild the index.
+        if storage_v2 {
+            let rocksdb = tool.provider_factory.rocksdb_provider();
+            match self.stage {
+                StageEnum::AccountHistory => {
+                    rocksdb.clear::<tables::AccountsHistory>()?;
+                    let provider_rw = tool.provider_factory.unwind_provider_rw()?;
+                    insert_genesis_account_history(
+                        &provider_rw,
+                        self.env.chain.genesis().alloc.iter(),
+                    )?;
+                    provider_rw.commit()?;
+                }
+                StageEnum::StorageHistory => {
+                    rocksdb.clear::<tables::StoragesHistory>()?;
+                    let provider_rw = tool.provider_factory.unwind_provider_rw()?;
+                    insert_genesis_storage_history(
+                        &provider_rw,
+                        self.env.chain.genesis().alloc.iter(),
+                    )?;
+                    provider_rw.commit()?;
+                }
+                StageEnum::TxLookup => rocksdb.clear::<tables::TransactionHashNumbers>()?,
+                _ => {}
+            }
+        }
 
         Ok(())
     }
