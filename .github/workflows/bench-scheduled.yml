@@ -398,7 +398,9 @@ jobs:
           apt_get update -qq
           apt_get install -y --no-install-recommends gh
           apt_get install -y --no-install-recommends \
-            python3 make jq zstd curl dmsetup m4 \
+            python3 make jq zstd curl dmsetup m4
+          # Try the kernel-specific package once (it may not exist), then fall back.
+          sudo apt-get -o DPkg::Lock::Timeout=120 install -y --no-install-recommends \
             linux-tools-"$(uname -r)" || \
             apt_get install -y --no-install-recommends linux-tools-generic
 
@@ -409,7 +411,13 @@ jobs:
           fi
 
           # llvm
-          .github/scripts/install_llvm.sh ubuntu
+          # install_llvm.sh runs apt-get too; retry it the same way.
+          for attempt in 1 2 3 4 5; do
+            .github/scripts/install_llvm.sh ubuntu && break
+            [ "$attempt" -lt 5 ] || exit 1
+            echo "::warning::install_llvm.sh failed (attempt $attempt/5), retrying in $((attempt * 15))s"
+            sleep $((attempt * 15))
+          done
 
           # uv (Python package manager)
           if ! command -v uv &>/dev/null; then
