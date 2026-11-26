@@ -1748,6 +1748,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unpriced_estimate_runs_at_zero_base_fee() {
+        let contract = Address::repeat_byte(0xaa);
+        let provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().cancun_activated().build());
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header {
+                    number: 1,
+                    gas_limit: 30_000_000,
+                    base_fee_per_gas: Some(7),
+                    excess_blob_gas: Some(0),
+                    ..Default::default()
+                },
+                body: BlockBody::default(),
+            },
+        );
+        let api = build_test_eth_api(provider);
+        // Reverts unless BASEFEE equals GASPRICE.
+        let code = AccountOverride {
+            code: Some(alloy_primitives::bytes!("483a14600b5760006000fd5b00")),
+            ..Default::default()
+        };
+        for max_priority_fee_per_gas in [None, Some(0)] {
+            let request = TransactionRequest {
+                max_priority_fee_per_gas,
+                ..TransactionRequest::default().with_to(contract)
+            };
+            let overrides =
+                EvmOverrides::state(Some(StateOverride::from_iter([(contract, code.clone())])));
+            EthCall::call(&api, request.clone(), Some(BlockId::latest()), overrides.clone())
+                .await
+                .unwrap();
+            EthCall::estimate_gas_at(&api, request, BlockId::latest(), overrides).await.unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn zero_priority_fee_call_runs_free() {
         let contract = Address::repeat_byte(0xaa);
         let provider = MockEthProvider::default()
