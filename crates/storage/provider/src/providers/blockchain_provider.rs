@@ -131,6 +131,23 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         ConsistentProvider::new(self.database.clone(), self.canonical_in_memory_state())
     }
 
+    /// Resolves a `safe` or `finalized` tag to a block number before a [`ConsistentProvider`] is
+    /// opened. Other ids are returned unchanged.
+    ///
+    /// [`ConsistentProvider`] reads `safe` and `finalized` from the live in-memory state, not from
+    /// its snapshot. A forkchoice update that lands after the snapshot can move the tag to a block
+    /// that is neither in the snapshot nor in the database yet, so the lookup returns `None`. The
+    /// engine moves the head before it moves the tags, so a tag read here, before the snapshot, is
+    /// always covered by it.
+    fn resolve_safe_or_finalized(&self, id: BlockId) -> ProviderResult<BlockId> {
+        match id {
+            BlockId::Number(tag @ (BlockNumberOrTag::Safe | BlockNumberOrTag::Finalized)) => {
+                Ok(self.convert_block_number(tag)?.map_or(id, |num| BlockId::Number(num.into())))
+            }
+            _ => Ok(id),
+        }
+    }
+
     /// Returns a state provider for the post-state of an already resolved in-memory chain.
     ///
     /// This is the post-state of `state.hash()`. Because the caller already holds the in-memory
@@ -754,6 +771,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     fn receipts_by_block_id(&self, block: BlockId) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+        let block = self.resolve_safe_or_finalized(block)?;
         self.consistent_provider()?.receipts_by_block_id(block)
     }
 }
@@ -959,6 +977,7 @@ where
     Self: ReceiptProviderIdExt,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
+        let id = self.resolve_safe_or_finalized(id)?;
         self.consistent_provider()?.block_by_id(id)
     }
 
@@ -4268,6 +4287,80 @@ mod tests {
             .update_chain(NewCanonicalChain::Commit { new: vec![block] });
 
         assert!(other.canonical_in_memory_state.state_by_hash(hash).is_some());
+        Ok(())
+    }
+
+    /// Marks the in-memory head safe and finalized, then installs a hook that applies the next
+    /// forkchoice update (a new head that is also safe and finalized, as on a chain with
+    /// single-slot finality) once, right after the next `ConsistentProvider` has snapshotted the
+    /// in-memory chain and opened its database transaction.
+    ///
+    /// Returns the provider and the head that is safe and finalized before the update.
+    fn provider_with_forkchoice_update_after_snapshot(
+    ) -> eyre::Result<(BlockchainProvider<MockNodeTypesWithDB>, ExecutedBlock)> {
+        let mut rng = generators::rng();
+        let (provider, _, _, _, mut writer) = provider_with_random_blocks(
+            &mut rng,
+            TEST_BLOCKS_COUNT,
+            TEST_BLOCKS_COUNT,
+            BlockRangeParams::default(),
+        )?;
+
+        let head = provider.canonical_in_memory_state.head_state().expect("in-memory head").block();
+        let head_header = head.recovered_block().clone_sealed_header();
+        writer.set_safe(head_header.clone());
+        writer.set_finalized(head_header.clone());
+
+        let next = TestBlockBuilder::eth()
+            .get_executed_block_with_number(head_header.number + 1, head_header.hash());
+        let next_header = next.recovered_block().clone_sealed_header();
+        let writer = Mutex::new(writer);
+        let fired = AtomicBool::new(false);
+        provider.database.db_ref().set_post_transaction_hook(Box::new(move || {
+            if !fired.swap(true, Ordering::SeqCst) {
+                // Same order as the engine: `on_canonical_chain_update`, then
+                // `ensure_consistent_forkchoice_state`.
+                let mut writer = writer.lock();
+                writer.update_chain(NewCanonicalChain::Commit { new: vec![next.clone()] });
+                writer.set_canonical_head(next_header.clone());
+                writer.set_finalized(next_header.clone());
+                writer.set_safe(next_header.clone());
+            }
+        }));
+
+        Ok((provider, head))
+    }
+
+    #[test]
+    fn finalized_block_by_id_survives_forkchoice_update_after_snapshot() -> eyre::Result<()> {
+        let (provider, head) = provider_with_forkchoice_update_after_snapshot()?;
+        assert_eq!(
+            provider.block_by_id(BlockId::finalized())?,
+            Some(head.recovered_block().clone_block())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn safe_block_by_id_survives_forkchoice_update_after_snapshot() -> eyre::Result<()> {
+        let (provider, head) = provider_with_forkchoice_update_after_snapshot()?;
+        assert_eq!(
+            provider.block_by_id(BlockId::safe())?,
+            Some(head.recovered_block().clone_block())
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn finalized_receipts_by_id_survive_forkchoice_update_after_snapshot() -> eyre::Result<()> {
+        let (provider, head) = provider_with_forkchoice_update_after_snapshot()?;
+        // Read from the in-memory state only, so no database transaction fires the hook here.
+        let expected = provider
+            .canonical_in_memory_state
+            .state_by_hash(head.recovered_block().hash())
+            .expect("head is in memory")
+            .executed_block_receipts();
+        assert_eq!(provider.receipts_by_block_id(BlockId::finalized())?, Some(expected));
         Ok(())
     }
 }
