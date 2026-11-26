@@ -836,6 +836,11 @@ where
         if let Some(tag) = to_tag {
             filter.to_block = Some(resolve(tag)?);
         }
+        // An omitted bound means latest too; take it from the same head read.
+        if filter.block_hash.is_none() {
+            filter.from_block.get_or_insert(latest);
+            filter.to_block.get_or_insert(latest);
+        }
         Self::trace_filter(self, filter).await.map_err(Into::into)
     }
 

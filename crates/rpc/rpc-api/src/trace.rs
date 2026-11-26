@@ -9,7 +9,7 @@ use alloy_rpc_types_trace::{
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_eth_api::CallManyRequest;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use serde_json::{Map, Value};
+use serde_json::value::RawValue;
 
 /// Ethereum trace API
 #[rpc(server, namespace = "trace")]
@@ -175,45 +175,59 @@ impl From<TraceFilter> for TraceFilterRequest {
 
 impl<'de> Deserialize<'de> for TraceFilterRequest {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let mut filter = deserializer.deserialize_map(UniqueKeysVisitor)?;
+        // Members are kept as their raw JSON text, so the rest is parsed by TraceFilter exactly as
+        // it would be without the tags.
+        let mut members = deserializer.deserialize_map(UniqueKeysVisitor)?;
         let mut take_tag = |key: &str| {
-            let tag = match filter.get(key)?.as_str()? {
-                "earliest" => BlockNumberOrTag::Earliest,
-                "latest" => BlockNumberOrTag::Latest,
-                "safe" => BlockNumberOrTag::Safe,
-                "finalized" => BlockNumberOrTag::Finalized,
-                "pending" => BlockNumberOrTag::Pending,
+            let index = members.iter().position(|(name, _)| name == key)?;
+            let tag = match members[index].1.get() {
+                r#""earliest""# => BlockNumberOrTag::Earliest,
+                r#""latest""# => BlockNumberOrTag::Latest,
+                r#""safe""# => BlockNumberOrTag::Safe,
+                r#""finalized""# => BlockNumberOrTag::Finalized,
+                r#""pending""# => BlockNumberOrTag::Pending,
                 _ => return None,
             };
-            filter.remove(key);
+            members.remove(index);
             Some(tag)
         };
         let from_tag = take_tag("fromBlock");
         let to_tag = take_tag("toBlock");
-        let filter = TraceFilter::deserialize(Value::Object(filter)).map_err(de::Error::custom)?;
+        let mut json = String::from("{");
+        for (index, (name, value)) in members.iter().enumerate() {
+            if index > 0 {
+                json.push(',');
+            }
+            json.push_str(&serde_json::to_string(name).map_err(de::Error::custom)?);
+            json.push(':');
+            json.push_str(value.get());
+        }
+        json.push('}');
+        let filter = serde_json::from_str(&json).map_err(de::Error::custom)?;
         Ok(Self { filter, from_tag, to_tag })
     }
 }
 
-/// Collects a JSON object, rejecting a repeated member as [`TraceFilter`]'s typed decoder does.
+/// Collects a JSON object's members as raw JSON, rejecting a repeated member as [`TraceFilter`]'s
+/// typed decoder does.
 struct UniqueKeysVisitor;
 
 impl<'de> de::Visitor<'de> for UniqueKeysVisitor {
-    type Value = Map<String, Value>;
+    type Value = Vec<(String, Box<RawValue>)>;
 
     fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         formatter.write_str("a trace filter object")
     }
 
     fn visit_map<A: de::MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
-        let mut map = Map::new();
-        while let Some((key, value)) = access.next_entry::<String, Value>()? {
-            if map.contains_key(&key) {
+        let mut members = Vec::<(String, Box<RawValue>)>::new();
+        while let Some((key, value)) = access.next_entry::<String, Box<RawValue>>()? {
+            if members.iter().any(|(name, _)| *name == key) {
                 return Err(de::Error::custom(format_args!("duplicate field `{key}`")))
             }
-            map.insert(key, value);
+            members.push((key, value));
         }
-        Ok(map)
+        Ok(members)
     }
 }
 
@@ -269,5 +283,12 @@ mod tests {
                 .unwrap();
         assert_eq!(request.from_tag, Some(BlockNumberOrTag::Safe));
         assert_eq!(request.filter.to_block, Some(2));
+    }
+
+    #[test]
+    fn trace_filter_request_rejects_raw_value_marker() {
+        let json =
+            r#"{"blockHash":{"$serde_json::private::RawValue":"null"},"fromBlock":"latest"}"#;
+        assert!(serde_json::from_str::<TraceFilterRequest>(json).is_err());
     }
 }
