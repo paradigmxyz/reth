@@ -745,9 +745,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
-        // earliest history height tracks the lowest block number that has __not__ been expired, in
-        // other words, the first/earliest available block.
-        Ok(self.caught_up_static_file_provider()?.earliest_history_height())
+        self.provider()?.earliest_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1093,7 +1091,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{metadata::keys, MetadataWriter};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1613,5 +1611,122 @@ mod tests {
             writer.commit().unwrap();
         }
         factory
+    }
+
+    #[test]
+    fn legacy_and_verified_bodies_checkpoints_after_reopen() -> eyre::Result<()> {
+        let mut factory = create_test_provider_factory();
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("files"))
+                .with_blocks_per_file(2)
+                .build()?;
+        let provider = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        for number in 0..=5 {
+            let tx_count = Some(u8::from(matches!(number, 1 | 3)));
+            let block =
+                random_block(&mut rng, number, BlockParams { tx_count, ..Default::default() });
+            provider.insert_block(&block.try_recover()?)?;
+        }
+        // The fixture imports blocks without executing transactions or writing receipts.
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
+        let legacy = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(3),
+        };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
+        provider.commit()?;
+
+        let segment = StaticFileSegment::Transactions;
+        let files = factory.static_file_provider();
+        files.initialize_index()?;
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
+        let checkpoints = || factory.get_prune_checkpoints_for_availability();
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..legacy };
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
+        assert_eq!(factory.get_prune_checkpoint(PruneSegment::Bodies)?, Some(legacy));
+
+        let provider = factory.provider_rw()?;
+        for ambiguous in [
+            PruneCheckpoint { tx_number: Some(0), ..legacy },
+            PruneCheckpoint { prune_mode: PruneMode::Before(6), ..legacy },
+            PruneCheckpoint { block_number: Some(3), ..legacy },
+        ] {
+            assert_eq!(
+                files.snapshot_bodies_checkpoint(provider.tx_ref(), ambiguous, 0, 5)?,
+                ambiguous
+            );
+        }
+        // A verified source boundary inside a physically retained jar still expires its bodies.
+        provider.write_metadata(keys::VERIFIED_SNAPSHOT_BODIES, Vec::new())?;
+        assert_eq!(files.snapshot_bodies_checkpoint(provider.tx_ref(), legacy, 0, 5)?, legacy);
+        let pruned = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(3) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
+        provider.commit()?;
+        assert_eq!(factory.earliest_block_number()?, 4);
+        assert!(factory.block(factory.earliest_block_number()?.into())?.is_some());
+        assert_matches!(
+            factory.block(3.into()),
+            Err(ProviderError::BlockExpired { requested: 3, earliest_available: 4 })
+        );
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pruned)]);
+
+        // The older jar contains transaction zero; the entire suffix after the gap is empty.
+        files.delete_jar(segment, 2)?;
+        assert_eq!(files.get_highest_static_file_tx(segment), Some(0));
+        assert_eq!(files.check_consistency(&factory.provider()?)?, None);
+        assert_eq!(factory.block(5.into())?.unwrap().body.transactions.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn unverified_bodies_checkpoint_follows_the_transaction_files() -> eyre::Result<()> {
+        let mut factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("files"))
+                .with_blocks_per_file(2)
+                .build()?;
+        let provider = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        for number in 0..=6 {
+            let tx_count = Some(u8::from(matches!(number, 1 | 3 | 6)));
+            let block =
+                random_block(&mut rng, number, BlockParams { tx_count, ..Default::default() });
+            provider.insert_block(&block.try_recover()?)?;
+        }
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
+        // An older download recorded its tip 5 as pruned, and the chain has since advanced.
+        let legacy = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(3),
+        };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
+        provider.commit()?;
+
+        let files = factory.static_file_provider();
+        files.initialize_index()?;
+        let checkpoints = || factory.get_prune_checkpoints_for_availability();
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..legacy };
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
+
+        // A file before a gap stays readable.
+        files.delete_jar(StaticFileSegment::Transactions, 2)?;
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(1.into())?.unwrap().body.transactions.len(), 1);
+
+        // Snap sync stores no body indices at its pivot, which stays unavailable.
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().delete::<tables::BlockBodyIndices>(6, None)?;
+        let pivot = PruneCheckpoint { tx_number: Some(2), ..PruneCheckpoint::pruned_through(6) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, pivot)?;
+        provider.commit()?;
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pivot)]);
+        Ok(())
     }
 }

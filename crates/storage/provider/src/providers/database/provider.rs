@@ -68,8 +68,8 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    metadata::keys, BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader,
+    MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -1083,10 +1083,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if block_number < earliest_available {
-            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
-        }
+        self.ensure_body_available(block_number)?;
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
         // Get the block body
@@ -1158,15 +1155,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
-        // like the single block lookups, reject ranges that reach into expired history instead
-        // of assembling blocks whose bodies are no longer available
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if *range.start() < earliest_available {
-            return Err(ProviderError::BlockExpired {
-                requested: *range.start(),
-                earliest_available,
-            })
-        }
+        self.ensure_body_available(*range.start())?;
 
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
@@ -1372,6 +1361,24 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     .map(|s| s.value))
             },
         )
+    }
+
+    /// The snapshot Bodies checkpoint can expire a block whose state and receipts still exist.
+    fn ensure_body_available(&self, requested: BlockNumber) -> ProviderResult<()> {
+        let checkpoint = self.get_prune_checkpoint(PruneSegment::Bodies)?;
+        // Reconciling an older download's checkpoint only lowers it, so later blocks skip that.
+        if requested >= self.static_file_provider.earliest_history_height() &&
+            checkpoint
+                .and_then(|checkpoint| checkpoint.block_number)
+                .is_none_or(|pruned| pruned < requested)
+        {
+            return Ok(())
+        }
+        let earliest_available = self.earliest_body_block(checkpoint)?;
+        if requested < earliest_available {
+            return Err(ProviderError::BlockExpired { requested, earliest_available })
+        }
+        Ok(())
     }
 }
 
@@ -1942,6 +1949,52 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Only a checkpoint the downloader verified against the restored files bounds reads. Older
+    /// downloads could record their tip as pruned with its bodies retained, so without that
+    /// marker a checkpoint inside the transaction files is reported where the files start.
+    /// The original pruning progress is kept for writes.
+    fn bodies_checkpoint_for_reads(
+        &self,
+        mut checkpoint: PruneCheckpoint,
+    ) -> ProviderResult<PruneCheckpoint> {
+        let first = self.static_file_provider.earliest_history_height();
+        // Snap sync has no body indices at its pivot, which stays unavailable.
+        if let Some(block) = checkpoint.block_number &&
+            block >= first &&
+            self.tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_none() &&
+            self.tx.get::<tables::BlockBodyIndices>(block)?.is_some()
+        {
+            checkpoint.block_number = first.checked_sub(1);
+            checkpoint.tx_number = self
+                .tx
+                .get::<tables::BlockBodyIndices>(first)?
+                .and_then(|indices| indices.first_tx_num().checked_sub(1));
+        }
+        Ok(checkpoint)
+    }
+
+    /// Returns the first block with an available body, given the stored Bodies checkpoint.
+    fn earliest_body_block(
+        &self,
+        checkpoint: Option<PruneCheckpoint>,
+    ) -> ProviderResult<BlockNumber> {
+        let first_file_block = self.static_file_provider.earliest_history_height();
+        // A download keeps body indices at the pruned tip and anchors its transaction file
+        // there for the next append. Snap sync has no body indices at its pivot.
+        let earliest = if let Some(checkpoint) = checkpoint &&
+            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
+            pruned >= first_file_block &&
+            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
+        {
+            pruned.saturating_add(1)
+        } else {
+            first_file_block
+        };
+        Ok(earliest)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
@@ -1960,6 +2013,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         self.static_file_provider.last_block_number()
+    }
+
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.earliest_body_block(self.get_prune_checkpoint(PruneSegment::Bodies)?)
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1991,10 +2048,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// Returns an error if the requested block is below the earliest available history.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
-            let earliest_available = self.static_file_provider.earliest_history_height();
-            if number < earliest_available {
-                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
-            }
+            self.ensure_body_available(number)?;
 
             let Some(header) = self.header_by_number(number)? else { return Ok(None) };
 
@@ -4023,6 +4077,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
     ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         let mut checkpoints = self.get_prune_checkpoints()?;
+        if let Some((_, bodies)) =
+            checkpoints.iter_mut().find(|(segment, _)| *segment == PruneSegment::Bodies)
+        {
+            *bodies = self.bodies_checkpoint_for_reads(*bodies)?;
+        }
         if !EitherWriter::receipts_destination(self).is_static_file() ||
             !checkpoints.iter().any(|(segment, checkpoint)| {
                 matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&

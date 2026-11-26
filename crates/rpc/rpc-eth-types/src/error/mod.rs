@@ -564,10 +564,40 @@ impl From<BlockExecutionError> for EthApiError {
                 ))),
             },
             BlockExecutionError::Internal(internal_error) => {
+                // Execution must not hide a provider's unavailable-history error, which reaches
+                // here directly or wrapped in evm2's database and handler errors.
+                let provider = internal_error
+                    .as_other()
+                    .or_else(|| internal_error.as_evm().map(|(_, error)| error))
+                    .and_then(provider_error_in);
+                if let Some(provider) = provider {
+                    let mapped = Self::from(provider.clone());
+                    if matches!(
+                        mapped,
+                        Self::PrunedHistoryUnavailable { .. } |
+                            Self::Internal(RethError::Provider(
+                                reth_errors::ProviderError::StateAtBlockPruned(_)
+                            ))
+                    ) {
+                        return mapped;
+                    }
+                }
                 Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
             }
         }
     }
+}
+
+/// Returns the provider error an execution error carries: directly, inside evm2's
+/// [`evm2::DatabaseError`], or inside a [`HandlerError::Database`].
+fn provider_error_in(error: &evm2::AnyError) -> Option<&ProviderError> {
+    error
+        .downcast_ref::<ProviderError>()
+        .or_else(|| error.downcast_ref::<evm2::DatabaseError>()?.downcast_ref::<ProviderError>())
+        .or_else(|| match error.downcast_ref::<HandlerError>()? {
+            HandlerError::Database(error) => error.downcast_ref::<ProviderError>(),
+            _ => None,
+        })
 }
 
 impl From<evm2::DatabaseError> for EthApiError {
@@ -1260,6 +1290,48 @@ mod tests {
             .into_rpc_err();
             assert_eq!(err.code(), -32603);
         }
+    }
+
+    #[test]
+    fn execution_errors_preserve_pruned_history() {
+        use reth_errors::ProviderError;
+        use reth_evm::execute::InternalBlockExecutionError;
+
+        for provider in [
+            ProviderError::BlockExpired { requested: 1, earliest_available: 43 },
+            ProviderError::InsufficientChangesets { requested: 1, available: 43..=48 },
+            ProviderError::InsufficientChangesets { requested: 43, available: 43..=48 },
+            ProviderError::InsufficientChangesets { requested: 49, available: 43..=48 },
+            ProviderError::StateAtBlockPruned(1),
+            ProviderError::BestBlockNotFound,
+        ] {
+            let expected = EthApiError::from(provider.clone()).into_rpc_err();
+            let database_error = || evm2::DatabaseError::new(provider.clone(), true);
+            for execution in [
+                BlockExecutionError::other(provider.clone()),
+                // A database failure in a pre-block system call.
+                BlockExecutionError::other(database_error()),
+                // A database failure in a block transaction.
+                BlockExecutionError::Internal(InternalBlockExecutionError::EVM {
+                    hash: B256::ZERO,
+                    error: evm2::AnyError::new(HandlerError::Database(database_error())),
+                }),
+            ] {
+                let message = execution.to_string();
+                let actual = EthApiError::from(execution).into_rpc_err();
+                if expected.code() == 4444 {
+                    assert_eq!(actual.code(), expected.code());
+                    assert_eq!(actual.message(), expected.message());
+                } else {
+                    assert_eq!(actual.code(), -32603);
+                    assert_eq!(actual.message(), message);
+                }
+            }
+        }
+
+        let error = EthApiError::from(BlockExecutionError::msg("unrelated failure")).into_rpc_err();
+        assert_eq!(error.code(), -32603);
+        assert_eq!(error.message(), "unrelated failure");
     }
 
     #[test]

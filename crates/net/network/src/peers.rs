@@ -48,10 +48,6 @@ use tracing::{trace, warn};
 /// Bound admission-time throttling independently of long-lived security bans.
 const MAX_INCOMING_IP_THROTTLE_ENTRIES: u32 = 16_384;
 
-/// Maximum number of tracked peers, so discovering fresh identities cannot grow the peer set
-/// without bound.
-const MAX_TRACKED_PEERS: usize = 10_000;
-
 /// Maintains the state of _all_ the peers known to the network.
 ///
 /// This is supposed to be owned by the network itself, but can be reached via the [`PeersHandle`].
@@ -145,8 +141,9 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
+        // Persisted rows are not counted, since filtered ones would keep their space reserved.
         let mut peers: HashMap<PeerId, Peer, FbBuildHasher<64>> = HashMap::with_capacity_and_hasher(
-            trusted_nodes.len() + basic_nodes.len() + persisted_peers.len().min(MAX_TRACKED_PEERS),
+            trusted_nodes.len() + basic_nodes.len(),
             Default::default(),
         );
         let mut trusted_peer_ids: HashSet<PeerId, FbBuildHasher<64>> =
@@ -186,13 +183,6 @@ impl PeersManager {
             }
             if !ip_filter.is_allowed(&address) {
                 trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer from IP not in allowed ranges");
-                continue
-            }
-            if kind.is_basic() &&
-                !trusted_peer_ids.contains(&id) &&
-                peers.len() >= MAX_TRACKED_PEERS
-            {
-                trace!(target: "net::peers", ?id, ?address, "Skipping persisted peer, peer set is full");
                 continue
             }
             peers.entry(id).or_insert_with(|| {
@@ -951,30 +941,9 @@ impl PeersManager {
 
     /// Called for a newly discovered peer.
     ///
-    /// If the peer already exists, then the address, kind and `fork_id` will be updated. A new
-    /// untrusted peer is skipped once [`MAX_TRACKED_PEERS`] peers are tracked, so it never pushes
-    /// out an existing one.
+    /// If the peer already exists, then the address, kind and `fork_id` will be updated.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
-        if self.is_full_for(&peer_id) {
-            trace!(target: "net::peers", ?peer_id, addr=?addr.tcp(), "Skipping discovered peer, peer set is full");
-            return
-        }
         self.add_peer_kind(peer_id, None, addr, fork_id)
-    }
-
-    /// Returns `true` if keeping the discovered peer would exceed [`MAX_TRACKED_PEERS`].
-    ///
-    /// A trusted or already kept peer always fits. A peer tracked only until its session ends
-    /// starts counting once discovery keeps it, in the place it already takes.
-    fn is_full_for(&self, peer_id: &PeerId) -> bool {
-        if self.trusted_peer_ids.contains(peer_id) {
-            return false
-        }
-        match self.peers.get(peer_id) {
-            Some(peer) if !peer.remove_after_disconnect => false,
-            Some(_) => self.peers.len() > MAX_TRACKED_PEERS,
-            None => self.peers.len() >= MAX_TRACKED_PEERS,
-        }
     }
 
     /// Marks the given peer as trusted.
@@ -4777,59 +4746,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_discovered_peers_limited_in_total() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        // One host announcing fresh identities.
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        for _ in 0..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-
-        // a newly discovered peer never pushes out a tracked one
-        let discovered = PeerId::random();
-        peers.add_peer(discovered, addr, None);
-        assert!(!peers.peers.contains_key(&discovered));
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS);
-
-        // a trusted id is still added
-        let trusted = PeerId::random();
-        peers.add_trusted_peer_id(trusted);
-        peers.add_peer(trusted, addr, None);
-        assert!(peers.peers.contains_key(&trusted));
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 1);
-
-        // a known peer is still updated, also past the limit
-        let known = *peers.peers.keys().find(|id| **id != trusted).unwrap();
-        let new_addr = PeerAddr::from_tcp("5.6.7.8:30303".parse().unwrap());
-        peers.add_peer(known, new_addr, None);
-        assert_eq!(peers.peers[&known].addr, new_addr);
-    }
-
-    #[tokio::test]
-    async fn test_discovered_inbound_peer_kept_within_budget() {
-        let mut peers = PeersManager::new(PeersConfig::test());
-        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
-        for _ in 1..MAX_TRACKED_PEERS {
-            peers.add_peer(PeerId::random(), addr, None);
-        }
-        // an unknown inbound peer is tracked only until it disconnects, and discovering it keeps it
-        // past the session, so it must fit within the budget
-        let mut discover_inbound = |ip: [u8; 4]| {
-            let inbound = PeerId::random();
-            assert!(peers.on_incoming_pending_session(IpAddr::from(ip)).is_ok());
-            peers.on_incoming_session_established(inbound, SocketAddr::from((ip, 40404)));
-            assert!(peers.peers[&inbound].remove_after_disconnect);
-            peers.add_peer(inbound, PeerAddr::from_tcp(SocketAddr::from((ip, 30303))), None);
-            (peers.peers[&inbound].remove_after_disconnect, peers.peers.len())
-        };
-
-        // the entry already counts, so the last free slot is enough to keep it
-        assert_eq!(discover_inbound([5, 6, 7, 8]), (false, MAX_TRACKED_PEERS));
-        // a full set leaves it tracked only for its session
-        assert_eq!(discover_inbound([5, 6, 7, 9]), (true, MAX_TRACKED_PEERS + 1));
-    }
-
-    #[tokio::test]
     async fn test_temporary_peer_removed_after_dropped_session() {
         let mut peers = PeersManager::new(PeersConfig::test());
         let inbound = PeerId::random();
@@ -4891,38 +4807,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_persisted_peers_limited_in_total() {
-        // The trusted node's own address is filtered, so only its basic record can add it.
-        let trusted = PeerId::random();
-        let mut config =
-            PeersConfig::test().with_ip_filter(IpFilter::from_cidr_string("1.2.3.0/24").unwrap());
-        config.trusted_nodes =
-            vec![NodeRecord::new("5.6.7.8:30303".parse().unwrap(), trusted).into()];
-        // Twice as many basic records as fit, then peers that are not limited.
-        config.persisted_peers = (0..2 * MAX_TRACKED_PEERS)
-            .map(|_| PeerId::random())
-            .chain([trusted])
-            .map(|id| {
+    async fn test_skipped_persisted_peers_reserve_no_capacity() {
+        let rows = 10_000;
+        let mut config = PeersConfig::test();
+        config.enforce_enr_fork_id = true;
+        // records without a fork id are skipped when the fork id is enforced
+        config.persisted_peers = (0..rows)
+            .map(|_| {
                 PersistedPeerInfo::from_node_record(NodeRecord::new(
                     "1.2.3.4:30303".parse().unwrap(),
-                    id,
+                    PeerId::random(),
                 ))
             })
             .collect();
-        let static_peer = PeerId::random();
-        config.persisted_peers.push(PersistedPeerInfo {
-            kind: PeerKind::Static,
-            ..PersistedPeerInfo::from_node_record(NodeRecord::new(
-                "1.2.3.4:30303".parse().unwrap(),
-                static_peer,
-            ))
-        });
 
         let peers = PeersManager::new(config);
-        assert!(peers.peers[&trusted].kind.is_trusted());
-        assert!(peers.peers[&static_peer].is_static());
-        assert_eq!(peers.peers.len(), MAX_TRACKED_PEERS + 2);
-        // skipped records don't keep their space reserved
-        assert!(peers.peers.capacity() < 2 * MAX_TRACKED_PEERS);
+        assert!(peers.peers.is_empty());
+        assert!(peers.peers.capacity() < rows);
     }
 }

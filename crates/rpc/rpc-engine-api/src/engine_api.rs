@@ -28,7 +28,9 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
-use reth_storage_api::{BalProvider, BlockReader, BlockSource, StateProviderFactory};
+use reth_storage_api::{
+    errors::ProviderError, BalProvider, BlockReader, BlockSource, StateProviderFactory,
+};
 use reth_tasks::Runtime;
 use reth_transaction_pool::{BestTransactions, TransactionPool};
 use std::{
@@ -518,9 +520,13 @@ where
             .map_err(|_| EngineApiError::UnknownPayload)
     }
 
-    /// Helper function for validating the payload timestamp and retrieving & converting the payload
-    /// into desired envelope.
-    async fn get_payload_inner<R>(
+    /// Retrieves and converts a built payload after validating its timestamp for `version`.
+    ///
+    /// Use `EngineT::BuiltPayload` as `R` to retain the resolved snapshot. Returns
+    /// [`UnsupportedFork`](reth_payload_primitives::EngineObjectValidationError::UnsupportedFork)
+    /// if the payload timestamp is invalid for `version`, and [`EngineApiError::UnknownPayload`]
+    /// for an unknown job or a resolution/conversion failure.
+    pub async fn get_payload_inner<R>(
         &self,
         payload_id: PayloadId,
         version: EngineApiMessageVersion,
@@ -751,9 +757,8 @@ where
                 }
                 let block_result = inner.provider.block(BlockHashOrNumber::Number(num));
                 match block_result {
-                    Ok(block) => {
-                        result.push(block.map(&f));
-                    }
+                    Ok(block) => result.push(block.map(&f)),
+                    Err(ProviderError::BlockExpired { .. }) => result.push(None),
                     Err(err) => {
                         tx.send(Err(EngineApiError::Internal(Box::new(err)))).ok();
                         return;
@@ -893,9 +898,8 @@ where
 
                 let block_result = inner.provider.find_block_by_hash(hash, BlockSource::Any);
                 match block_result {
-                    Ok(block) => {
-                        result.push(block.map(&f));
-                    }
+                    Ok(block) => result.push(block.map(&f)),
+                    Err(ProviderError::BlockExpired { .. }) => result.push(None),
                     Err(err) => {
                         let _ = tx.send(Err(EngineApiError::Internal(Box::new(err))));
                         return;

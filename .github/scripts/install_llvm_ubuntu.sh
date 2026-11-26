@@ -2,7 +2,7 @@
 set -eo pipefail
 
 v=${1:-23}
-bins=(clang llvm-config lld ld.lld FileCheck)
+bins=(clang clang++ llvm-config lld ld.lld FileCheck)
 
 apt-get update -qq
 apt-get install -y --no-install-recommends \

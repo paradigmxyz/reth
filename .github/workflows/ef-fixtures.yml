@@ -37,7 +37,9 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo build --locked --profile hivetests -p ef-test-runner --features ef-tests/asm-keccak
+      # The state tests in unit.yml cover the default arkworks BN254 backend; these cover the opt-in
+      # MCL backend.
+      - run: cargo build --locked --profile hivetests -p ef-test-runner --features ef-tests/asm-keccak,ef-tests/bn254-mcl
       - name: Bundle the runner and its CI reporter
         run: |
           mkdir runner
