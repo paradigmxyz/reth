@@ -84,14 +84,15 @@ impl RpcMemoryBudget {
     ///
     /// The request waits for the permit without holding any of the budget, and for the budget
     /// without holding the permit, so that requests queued for one hold none of the other. Returns
-    /// [`EthApiError::MemoryBudgetExhausted`] once it has waited [`MEMORY_BUDGET_WAIT`] for the
-    /// budget.
+    /// [`EthApiError::MemoryBudgetExhausted`] once it has waited [`MEMORY_BUDGET_WAIT`] in total
+    /// for the budget, however long it queued for the permit.
     pub async fn acquire_with(
         &self,
         permits: &Arc<Semaphore>,
         weight_mib: u64,
     ) -> Result<Admission, EthApiError> {
-        let deadline = Instant::now() + MEMORY_BUDGET_WAIT;
+        // Only the time spent waiting for the budget counts against its wait.
+        let mut wait = MEMORY_BUDGET_WAIT;
         loop {
             let permit =
                 permits.clone().acquire_owned().await.map_err(|_| EthApiError::InternalEthError)?;
@@ -99,7 +100,9 @@ impl RpcMemoryBudget {
                 return Ok(Admission { _permit: permit, _memory: Some(memory) })
             }
             drop(permit);
-            let memory = self.acquire_until(weight_mib, deadline).await?;
+            let start = Instant::now();
+            let memory = self.acquire_until(weight_mib, start + wait).await?;
+            wait = wait.saturating_sub(start.elapsed());
             if let Ok(permit) = permits.clone().try_acquire_owned() {
                 return Ok(Admission { _permit: permit, _memory: Some(memory) })
             }
@@ -293,6 +296,24 @@ mod tests {
         drop(running);
         queued.await.unwrap().unwrap();
         assert_eq!(budget.available_mib(), 100);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn permit_queue_time_does_not_count_against_budget_wait() {
+        let budget = budget(100);
+        let permits = Arc::new(Semaphore::new(1));
+        let running = budget.acquire_with(&permits, 10).await.unwrap();
+        let held = budget.acquire(90).await.unwrap();
+        let queued = tokio::spawn({
+            let (budget, permits) = (budget.clone(), permits.clone());
+            async move { budget.acquire_with(&permits, 10).await.map(drop) }
+        });
+        tokio::time::sleep(MEMORY_BUDGET_WAIT * 2).await;
+        drop(running);
+        // Its memory frees up within the budget's wait after it got the permit.
+        tokio::time::sleep(MEMORY_BUDGET_WAIT / 2).await;
+        drop(held);
+        queued.await.unwrap().unwrap();
     }
 
     #[tokio::test(start_paused = true)]

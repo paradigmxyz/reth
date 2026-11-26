@@ -1916,7 +1916,8 @@ fn geth_trace_weight_mib(
             // Memory expansion costs at least words^2 / 512 gas, and return data comes from a
             // call's memory, so each step lists at most that much of either as hex.
             let memory_hex_bytes = gas.saturating_mul(512).isqrt().saturating_mul(64);
-            if config.enable_memory == Some(true) || config.disable_memory == Some(false) {
+            // An explicit enableMemory wins over disableMemory, as in the recorder.
+            if config.enable_memory.unwrap_or_else(|| config.disable_memory == Some(false)) {
                 bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
             }
             if config.enable_return_data == Some(true) {
@@ -2538,6 +2539,15 @@ mod tests {
                 max_response_size
             ),
             40
+        );
+        assert_eq!(
+            weight(
+                serde_json::json!({
+                    "disableStorage": true, "enableMemory": false, "disableMemory": false
+                }),
+                300_000
+            ),
+            weight(serde_json::json!({ "disableStorage": true }), 300_000)
         );
         // Return data adds as much as memory does.
         assert_eq!(
