@@ -17,6 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -114,6 +115,10 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Database
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     ///
+    /// `overlay_manager` carries the in-memory state that [`Self::in_memory_state`] returns. A
+    /// default manager has a read-only in-memory state, which never has blocks: that fits storage
+    /// whose blocks are all on disk.
+    ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after
     /// creation to ensure consistency between the database and static files.
@@ -124,6 +129,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
@@ -132,7 +138,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::v1();
         let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
-        let overlay_manager = OverlayManager::default();
         let storage_settings = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
@@ -177,9 +182,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, runtime)
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, overlay_manager, runtime)
             .and_then(Self::assert_consistent)
     }
 }
@@ -194,12 +200,6 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     /// Sets the BAL store for an existing [`ProviderFactory`].
     pub fn with_bal_store(mut self, bal_store: BalStoreHandle) -> Self {
         self.bal_store = bal_store;
-        self
-    }
-
-    /// Sets the overlay manager for an existing [`ProviderFactory`].
-    pub fn with_overlay_manager(mut self, overlay_manager: OverlayManager<N::Primitives>) -> Self {
-        self.overlay_manager = overlay_manager;
         self
     }
 
@@ -323,6 +323,12 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
+
+    /// Returns the in-memory state of the overlay manager of this factory, which holds the
+    /// executed blocks that are not on disk yet, canonical or not.
+    pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
+        self.overlay_manager.in_memory_state()
+    }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
@@ -358,6 +364,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
@@ -365,6 +372,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            overlay_manager,
             runtime,
         )
         .map_err(RethError::Provider)
@@ -581,6 +589,41 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     ) -> ProviderResult<StaticFileProvider<N::Primitives>> {
         self.sync_providers_if_needed()?;
         Ok(self.static_file_provider.clone())
+    }
+
+    /// Returns the latest, safe and finalized headers stored in the database. The safe header is
+    /// the finalized one if no safe block is stored.
+    ///
+    /// These are the headers a canonical in-memory state over this factory starts from.
+    ///
+    /// Returns [`ProviderError::HeaderNotFound`] if the header of the latest block is not stored,
+    /// which is the case for a database without a genesis block.
+    pub fn chain_info_headers(&self) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
+        let provider = self.provider()?;
+        let best = provider.chain_info()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        Ok(ChainInfoHeaders {
+            canonical_head: SealedHeader::new(latest, best.best_hash),
+            safe: safe_header,
+            finalized: finalized_header,
+        })
     }
 }
 
@@ -805,6 +848,13 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ProviderFactory<N> {
         self.provider()?.transaction_by_hash_with_meta(tx_hash)
     }
 
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        self.provider()?.transaction_by_hash_with_meta_and_sender(tx_hash)
+    }
+
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -906,6 +956,13 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ProviderFactory<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> reth_storage_api::DurableBlockReader for ProviderFactory<N> {
+    fn last_durable_block_num_hash(&self) -> ProviderResult<alloy_eips::BlockNumHash> {
+        // Read the database, not in-memory blocks that may be on an unpersisted fork.
+        self.provider()?.last_durable_block_num_hash()
+    }
+}
+
 impl<N: ProviderNodeTypes> StageCheckpointReader for ProviderFactory<N> {
     fn get_stage_checkpoint(&self, id: StageId) -> ProviderResult<Option<StageCheckpoint>> {
         self.provider()?.get_stage_checkpoint(id)
@@ -937,6 +994,12 @@ impl<N: ProviderNodeTypes> PruneCheckpointReader for ProviderFactory<N> {
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         self.provider()?.get_prune_checkpoints()
+    }
+
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        self.provider()?.get_prune_checkpoints_for_availability()
     }
 }
 
@@ -1010,13 +1073,13 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
 mod tests {
     use super::*;
     use crate::{
-        providers::{StaticFileProvider, StaticFileWriter},
+        providers::{StaticFileProvider, StaticFileProviderBuilder, StaticFileWriter},
         test_utils::{
             blocks::TEST_BLOCK, create_test_provider_factory,
             create_test_provider_factory_with_genesis_block_number, MockNodeTypesWithDB,
         },
         BlockHashReader, BlockNumReader, BlockWriter, DBProvider, HeaderSyncGapProvider,
-        StageCheckpointWriter, TransactionsProvider,
+        PruneCheckpointWriter, StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{TxNumber, B256};
@@ -1026,7 +1089,8 @@ mod tests {
         mdbx::DatabaseArguments,
         test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
     };
-    use reth_db_api::{models::SnapAttempt, tables};
+    use reth_db_api::{models::SnapAttempt, tables, transaction::DbTxMut};
+    use reth_ethereum_primitives::Receipt;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_storage_api::MetadataWriter;
@@ -1072,6 +1136,7 @@ mod tests {
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            OverlayManager::default(),
             reth_tasks::Runtime::test(),
         )
         .unwrap();
@@ -1417,5 +1482,136 @@ mod tests {
 
         factory.set_storage_settings_cache(StorageSettings::v2());
         assert!(factory.database_provider_ro().unwrap().ensure_sync_mode(true).is_ok());
+    }
+
+    #[test]
+    fn receipt_availability_preserves_prune_checkpoints() {
+        let moved = PruneCheckpoint {
+            block_number: Some(7),
+            tx_number: Some(15),
+            prune_mode: PruneMode::Before(8),
+        };
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..moved };
+        let pruned = PruneCheckpoint { block_number: Some(4), tx_number: Some(9), ..moved };
+        let covered = PruneCheckpoint { block_number: Some(2), tx_number: Some(5), ..moved };
+        let anchor = PruneCheckpoint { tx_number: None, ..moved };
+
+        for (case, blocks_per_file, receipt_blocks, stored, expected) in [
+            ("continuous", 3, vec![(0, 9)], [moved; 2], [available; 2]),
+            ("pruned prefix", 10, vec![(5, 9)], [pruned; 2], [pruned; 2]),
+            ("padded prefix", 10, vec![(5, 9)], [moved; 2], [pruned; 2]),
+            ("above tip", 3, vec![(0, 4)], [moved; 2], [moved; 2]),
+            ("gap", 3, vec![(0, 2), (4, 9)], [moved; 2], [moved; 2]),
+            ("empty file gap", 3, vec![(0, 2), (6, 9)], [moved; 2], [moved; 2]),
+            ("covered receipts", 3, vec![(0, 2), (4, 9)], [covered, moved], [available, moved]),
+            ("covered logs", 3, vec![(0, 2), (4, 9)], [moved, covered], [moved, available]),
+            ("snap anchor", 3, vec![(0, 9)], [anchor; 2], [anchor; 2]),
+            ("empty first file", 3, vec![(5, 9)], [moved; 2], [moved; 2]),
+            ("no files", 3, vec![], [moved; 2], [moved; 2]),
+        ] {
+            let factory =
+                receipt_availability_test_factory(blocks_per_file, &receipt_blocks, stored);
+            let before = factory.get_prune_checkpoints().unwrap();
+            assert_eq!(
+                factory.get_prune_checkpoints_for_availability().unwrap(),
+                [(PruneSegment::Receipts, expected[0]), (PruneSegment::ContractLogs, expected[1])],
+                "{case}",
+            );
+            assert_eq!(factory.get_prune_checkpoints().unwrap(), before);
+        }
+
+        // Storage v1 keeps new receipts in MDBX when receipt pruning is enabled.
+        let factory = receipt_availability_test_factory(3, &[(0, 9)], [moved; 2]);
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        assert_eq!(
+            factory.get_prune_checkpoints_for_availability().unwrap(),
+            factory.get_prune_checkpoints().unwrap(),
+        );
+    }
+
+    #[test]
+    fn receipt_availability_requires_body_indices() {
+        let stored = PruneCheckpoint {
+            block_number: Some(7),
+            tx_number: Some(15),
+            prune_mode: PruneMode::Before(8),
+        };
+        let factory = receipt_availability_test_factory(10, &[(5, 9)], [stored; 2]);
+        let unchanged = || {
+            assert_eq!(
+                factory.get_prune_checkpoints_for_availability().unwrap(),
+                factory.get_prune_checkpoints().unwrap(),
+            );
+        };
+
+        let provider = factory.provider_rw().unwrap();
+        provider.tx_ref().delete::<tables::BlockBodyIndices>(4, None).unwrap();
+        provider.commit().unwrap();
+        unchanged();
+
+        // A seek can land on the next block after expired history.
+        let provider = factory.provider_rw().unwrap();
+        provider.tx_ref().delete::<tables::TransactionBlocks>(9, None).unwrap();
+        provider.commit().unwrap();
+        unchanged();
+
+        let provider = factory.provider_rw().unwrap();
+        provider.tx_ref().clear::<tables::TransactionBlocks>().unwrap();
+        provider.commit().unwrap();
+        unchanged();
+    }
+
+    fn receipt_availability_test_factory(
+        blocks_per_file: u64,
+        receipt_blocks: &[(u64, u64)],
+        checkpoints: [PruneCheckpoint; 2],
+    ) -> ProviderFactory<MockNodeTypesWithDB> {
+        let mut factory = create_test_provider_factory().with_prune_modes(PruneModes {
+            receipts: Some(PruneMode::Distance(100)),
+            ..PruneModes::default()
+        });
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("receipt_files"))
+                .with_blocks_per_file(blocks_per_file)
+                .build()
+                .unwrap();
+        assert_eq!(factory.get_prune_checkpoints_for_availability().unwrap(), Vec::new());
+
+        let provider = factory.provider_rw().unwrap();
+        // All blocks have two transactions, including blocks whose receipts were pruned.
+        for block in 0..=9 {
+            provider
+                .tx_ref()
+                .put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { first_tx_num: 2 * block, tx_count: 2 },
+                )
+                .unwrap();
+            provider.tx_ref().put::<tables::TransactionBlocks>(2 * block + 1, block).unwrap();
+        }
+        for (segment, checkpoint) in
+            [PruneSegment::Receipts, PruneSegment::ContractLogs].into_iter().zip(checkpoints)
+        {
+            provider.save_prune_checkpoint(segment, checkpoint).unwrap();
+        }
+        provider.commit().unwrap();
+
+        for &(start, end) in receipt_blocks {
+            let static_file_provider = factory.static_file_provider();
+            let mut writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            if let Some(last_pruned) = start.checked_sub(1) {
+                writer.ensure_at_block(last_pruned).unwrap();
+            }
+            for block in start..=end {
+                writer.increment_block(block).unwrap();
+                for tx in 2 * block..2 * block + 2 {
+                    writer.append_receipt(tx, &Receipt::default()).unwrap();
+                }
+            }
+            writer.commit().unwrap();
+        }
+        factory
     }
 }

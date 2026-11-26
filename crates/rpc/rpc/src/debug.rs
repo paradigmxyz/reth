@@ -8,13 +8,14 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Account, AccountInfo, BlockError, Bundle, Index, StateContext,
 };
-use alloy_rpc_types_trace::geth::{
-    ChainBlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
-    TraceResult,
+use alloy_rpc_types_trace::{
+    common::TraceResult,
+    geth::{GethDebugTracingCallOptions, GethDebugTracingOptions},
 };
-use async_trait::async_trait;
 use evm2::evm::StateChangeSource;
-use evm2_inspectors::tracing::{DebugInspector, TransactionContext};
+use evm2_inspectors::tracing::{
+    DebugInspector, DebugInspectorError, DebugTrace, StructLogMode, TraceLimits, TransactionContext,
+};
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
 use parking_lot::RwLock;
@@ -22,8 +23,9 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{
-    execute::Executor, witness::ExecutionWitnessRecord, ConfigureEvm, DynDatabase, Evm, EvmEnv,
-    EvmEnvFor,
+    execute::{BlockExecutor, BlockTransactionResult, Executor},
+    witness::ExecutionWitnessRecord,
+    BlockExecutionError, ConfigureEvm, DynDatabase, Evm, EvmEnv, EvmEnvFor,
 };
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
@@ -32,9 +34,9 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    AsEthApiError, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
+    AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::{utils::CallManyBudget, EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HashedPostStateProvider, HeaderProvider, ProviderBlock,
@@ -48,16 +50,18 @@ use reth_trie_common::{
     HashedStorage,
 };
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, sync::Arc};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
 #[cfg(feature = "js-tracer")]
-use alloy_rpc_types_trace::geth::GethDebugTracerType;
+use alloy_rpc_types_trace::geth::{
+    GethDebugBuiltInTracerType, GethDebugTracerConfig, GethDebugTracerType,
+};
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
 #[cfg(feature = "js-tracer")]
-use std::time::Duration;
+use jiff::fmt::friendly::SpanParser;
 
 /// `debug` API implementation.
 ///
@@ -121,15 +125,20 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
-    /// Trace the entire block asynchronously
+    /// Traces every transaction of a block through the block executor, see
+    /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor).
+    ///
+    /// A supplied permit stays with the worker if the waiting request times out or is dropped.
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _permit = permit;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -137,38 +146,45 @@ where
                 let block_env = *evm_env.block_env();
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
-                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                let trace_limits = eth_api.trace_limits();
+                let inspector = new_debug_inspector(opts).map_err(Eth::Error::from_eth_err)?;
+                let mut response =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
+                let mut inspector = inspector.with_limits(response.limit(trace_limits));
+                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
+                    let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
 
-                    let (next_inspector, res) = evm
-                        .transact_with_inspector(&tx_env, inspector)
+                    let (next_inspector, output) = executor
+                        .inspect_transaction_without_commit(tx, inspector)
                         .map_err(Eth::Error::from_evm_err)?;
                     inspector = next_inspector;
                     let result = inspector
-                        .get_result(
+                        .get_trace(
                             Some(TransactionContext {
                                 block_hash: Some(block.hash()),
-                                tx_hash: Some(*tx.tx_hash()),
+                                tx_hash: Some(tx_hash),
                                 tx_index: Some(index),
                             }),
                             &tx_env,
                             &block_env,
-                            &res,
-                            evm.state_db_mut(),
+                            output.result(),
+                            executor.evm_mut().state_db_mut(),
                         )
                         .map_err(Eth::Error::from_eth_err)?;
+                    response.charge(&inspector);
 
-                    results.push(TraceResult::Success { result, tx_hash: Some(*tx.tx_hash()) });
+                    results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
                         inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                        inspector.set_limits(response.limit(trace_limits));
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        evm.commit_state(&res.pending_state)
+                        executor.commit_transaction(output).map_err(Eth::Error::from_evm_err)?;
                     }
                 }
 
@@ -183,7 +199,7 @@ where
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<Option<TraceResult>>, Eth::Error> {
+    ) -> Result<Vec<Option<TraceResult<DebugTrace, String>>>, Eth::Error> {
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
@@ -195,8 +211,10 @@ where
 
                 let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = match DebugInspector::new(opts) {
-                    Ok(inspector) => inspector,
+                // Notifications are not bound by the response size limit, so only the trace byte
+                // limit of each transaction applies.
+                let mut inspector = match new_debug_inspector(opts) {
+                    Ok(inspector) => inspector.with_limits(eth_api.trace_limits()),
                     Err(err) => {
                         if let Some((_, tx)) = transactions.peek() {
                             results.push(Some(TraceResult::Error {
@@ -208,15 +226,15 @@ where
                         return Ok(results)
                     }
                 };
-                let mut evm = eth_api.evm_config().evm_with_env(&mut db, evm_env);
+                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
                     let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-                    let res = match evm.transact_with_inspector(&tx_env, inspector) {
-                        Ok((next_inspector, res)) => {
+                    let output = match executor.inspect_transaction_without_commit(tx, inspector) {
+                        Ok((next_inspector, output)) => {
                             inspector = next_inspector;
-                            res
+                            output
                         }
                         Err(err) => {
                             results.push(Some(TraceResult::Error {
@@ -227,7 +245,7 @@ where
                         }
                     };
 
-                    let result = match inspector.get_result(
+                    let result = match inspector.get_trace(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
                             tx_hash: Some(tx_hash),
@@ -235,8 +253,8 @@ where
                         }),
                         &tx_env,
                         &block_env,
-                        &res,
-                        evm.state_db_mut(),
+                        output.result(),
+                        executor.evm_mut().state_db_mut(),
                     ) {
                         Ok(result) => result,
                         Err(err) => {
@@ -257,7 +275,13 @@ where
                             }));
                             break
                         }
-                        evm.commit_state(&res.pending_state);
+                        if let Err(err) = executor.commit_transaction(output) {
+                            results.push(Some(TraceResult::Error {
+                                error: err.to_string(),
+                                tx_hash: Some(*next_tx.tx_hash()),
+                            }));
+                            break
+                        }
                     }
                 }
 
@@ -272,11 +296,18 @@ where
     /// This expects a rlp encoded block
     ///
     /// Note, the parent of this block must be present, or it will fail.
+    ///
+    /// The block is supplied by the caller, so its replay is bounded by a timeout of 30 seconds: no
+    /// transaction starts after it expires, the request then fails with
+    /// [`EthApiError::ExecutionTimedOut`].
+    /// The replay retains its tracing permit until the running transaction finishes.
     pub async fn debug_trace_raw_block(
         &self,
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
+    ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
+        let permit =
+            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
@@ -297,7 +328,20 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
-        self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
+        // Dropping the replay cancels it before its next transaction.
+        tokio::time::timeout(
+            RAW_BLOCK_TRACE_TIMEOUT,
+            self.trace_block(
+                Arc::new(block.into_recovered_with_signers(senders)),
+                evm_env,
+                opts,
+                Some(permit),
+            ),
+        )
+        .await
+        .map_err(|_| {
+            Eth::Error::from_eth_err(EthApiError::ExecutionTimedOut(RAW_BLOCK_TRACE_TIMEOUT))
+        })?
     }
 
     /// Replays a block and returns the trace of each transaction.
@@ -305,7 +349,7 @@ where
         &self,
         block_id: BlockId,
         opts: GethDebugTracingOptions,
-    ) -> Result<Vec<TraceResult>, Eth::Error> {
+    ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         let block = self
             .eth_api()
             .recovered_block(block_id)
@@ -317,7 +361,7 @@ where
         }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block(block, evm_env, opts).await
+        self.trace_block(block, evm_env, opts, None).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -327,7 +371,7 @@ where
         &self,
         tx_hash: B256,
         opts: GethDebugTracingOptions,
-    ) -> Result<GethTrace, Eth::Error> {
+    ) -> Result<DebugTrace, Eth::Error> {
         let (transaction, block, bal) =
             match self.eth_api().transaction_and_block_and_maybe_bal(tx_hash).await? {
                 None => return Err(EthApiError::TracingTransactionNotFound.into()),
@@ -349,19 +393,21 @@ where
                     tx_info.index.expect("transaction_and_block only returns block transactions")
                         as usize;
 
-                let inspector = tracer_interrupt
-                    .attach(DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?);
+                let inspector = new_debug_inspector(opts).map_err(Eth::Error::from_eth_err)?;
+                let limits =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size)
+                        .limit(eth_api.trace_limits());
+                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
                 let tx_env = eth_api.evm_config().tx_env(tx);
                 let (mut inspector, res, evm_env) = eth_api.inspect_transaction_in_block(
                     &block,
                     &mut db,
                     inspector,
                     index,
-                    &tx_env,
                     bal.as_deref(),
                 )?;
                 let trace = inspector
-                    .get_result(
+                    .get_trace(
                         Some(TransactionContext {
                             block_hash: Some(block.hash()),
                             tx_index: Some(index),
@@ -394,7 +440,7 @@ where
         call: RpcTxReq<Eth::NetworkTypes>,
         block_id: Option<BlockId>,
         opts: GethDebugTracingCallOptions,
-    ) -> Result<GethTrace, Eth::Error> {
+    ) -> Result<DebugTrace, Eth::Error> {
         let at = block_id.unwrap_or_default();
         let GethDebugTracingCallOptions {
             tracing_options,
@@ -416,13 +462,18 @@ where
         let this = self.clone();
         let trace =
             self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let inspector = tracer_interrupt.attach(
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
-                );
+                let inspector =
+                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let limits = ResponseBudget::new(
+                    &inspector,
+                    this.eth_api().eth_api_settings().max_response_size,
+                )
+                .limit(this.eth_api().trace_limits());
+                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
                 let (mut inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env.clone(), &tx_env, inspector)?;
                 let trace = inspector
-                    .get_result(None, &tx_env, evm_env.block_env(), &res, db)
+                    .get_trace(None, &tx_env, evm_env.block_env(), &res, db)
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace)
             });
@@ -445,7 +496,7 @@ where
         tx_index: usize,
         tracing_options: GethDebugTracingOptions,
         overrides: EvmOverrides,
-    ) -> Result<GethTrace, Eth::Error> {
+    ) -> Result<DebugTrace, Eth::Error> {
         // Get the target block to check transaction count
         let (block, bal) = self
             .eth_api()
@@ -481,13 +532,16 @@ where
                 let (evm_env, tx_env) =
                     eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
-                let inspector = tracer_interrupt.attach(
-                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?,
-                );
+                let inspector =
+                    new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let limits =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size)
+                        .limit(eth_api.trace_limits());
+                let inspector = tracer_interrupt.attach(inspector.with_limits(limits));
                 let (mut inspector, res) =
                     eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
                 let trace = inspector
-                    .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                    .get_trace(None, &tx_env, evm_env.block_env(), &res, &mut db)
                     .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
@@ -504,10 +558,11 @@ where
         bundles: Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
+    ) -> Result<Vec<Vec<DebugTrace>>, Eth::Error> {
         if bundles.is_empty() {
             return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
+        let mut budget = CallManyBudget::for_bundles(&bundles, self.eth_api().call_gas_limit())?;
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
         let transaction_index = transaction_index.unwrap_or_default();
@@ -556,8 +611,13 @@ where
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
-                let mut inspector = DebugInspector::new(tracing_options.clone())
+                let trace_limits = eth_api.trace_limits();
+                // All bundles share one response.
+                let inspector = new_debug_inspector(tracing_options.clone())
                     .map_err(Eth::Error::from_eth_err)?;
+                let mut response =
+                    ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
+                let mut inspector = inspector.with_limits(response.limit(trace_limits));
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
@@ -573,20 +633,25 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) =
+                        let (evm_env, mut tx_env) =
                             eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
+                        budget.admit(&mut tx_env)?;
 
-                        let (next_inspector, res) =
-                            eth_api.inspect(&mut db, evm_env.clone(), &tx_env, inspector)?;
+                        let (next_inspector, res) = eth_api
+                            .inspect(&mut db, evm_env.clone(), &tx_env, inspector)
+                            .map_err(|err| budget.map_call_err(err))?;
+                        budget.charge(&res.result)?;
                         inspector = next_inspector;
                         let trace = inspector
-                            .get_result(None, &tx_env, evm_env.block_env(), &res, &mut db)
+                            .get_trace(None, &tx_env, evm_env.block_env(), &res, &mut db)
                             .map_err(Eth::Error::from_eth_err)?;
+                        response.charge(&inspector);
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
                             inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                            inspector.set_limits(response.limit(trace_limits));
                             db.commit_source(&res.pending_state);
                         }
                         results.push(trace);
@@ -810,30 +875,56 @@ where
     }
 
     /// Executes a block and returns the state root after each transaction.
+    ///
+    /// The block is either canonical or a bad block the engine rejected. Execution stops at the
+    /// first transaction that is invalid on top of its predecessors, so the result for a bad block
+    /// holds the roots before that transaction.
     pub async fn intermediate_roots(&self, block_hash: B256) -> Result<Vec<B256>, Eth::Error> {
-        let block = self
-            .eth_api()
-            .recovered_block(block_hash.into())
-            .await?
-            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
+        let block = match self.eth_api().recovered_block(block_hash.into()).await? {
+            Some(block) => block,
+            None => {
+                self.inner
+                    .bad_block_store
+                    .get(block_hash)
+                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?
+                    .block
+            }
+        };
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let mut roots = Vec::with_capacity(block.body().transactions().len());
+                let tx_count = block.body().transactions().len();
                 let mut state = eth_api.apply_pre_execution_changes(&block, &mut db)?;
+
+                // the executor borrows the database, so collect each transaction's changes first
+                // and compute the roots once it is dropped
+                let mut transaction_states = Vec::with_capacity(tx_count);
+                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 for tx in block.transactions_recovered() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let tx_env = eth_api.evm_config().tx_env(tx.cloned());
-                    let result = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
+                    let output = match executor.execute_transaction_without_commit(tx) {
+                        Ok(output) => output,
+                        Err(BlockExecutionError::Validation(_)) => break,
+                        Err(err) => return Err(Eth::Error::from_evm_err(err)),
+                    };
                     let mut changes = reth_execution_types::TransactionChanges::default();
-                    let Ok(()) = result.pending_state.visit(&mut changes);
+                    let Ok(()) = output.result().pending_state.visit(&mut changes);
                     let mut transaction_state = reth_execution_types::BlockState::default();
                     transaction_state.commit(&changes);
-                    state.extend(transaction_state.into_bundle());
-                    db.commit_source(&result.pending_state);
+                    transaction_states.push(transaction_state.into_bundle());
+                    executor.commit_transaction(output).map_err(Eth::Error::from_evm_err)?;
+                }
+                drop(executor);
+
+                let mut roots = Vec::with_capacity(tx_count);
+                for transaction_state in transaction_states {
+                    if is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    state.extend(transaction_state);
                     let hashed_state = db
                         .db
                         .inner()
@@ -850,7 +941,63 @@ where
     }
 }
 
-#[async_trait]
+/// The bytes a debug trace response has left for the struct logs of the default tracer.
+///
+/// The default struct logger writes the JSON of the response as it records, so the response size
+/// limit bounds what it may record, across every transaction the response traces. Other tracers
+/// record data that is several times larger or smaller than their JSON, so only the trace byte
+/// limit of each transaction bounds them.
+///
+/// The budget counts the struct logs alone, not the separators between them or the other fields of
+/// the response, so the server can still reject a response that is slightly over its limit.
+#[derive(Debug, Clone, Copy)]
+struct ResponseBudget {
+    /// Bytes left in the response, `None` for other tracers or without a response size limit.
+    remaining: Option<usize>,
+}
+
+impl ResponseBudget {
+    /// Creates the budget of a response traced by `inspector`, whose size is limited to
+    /// `max_response_size` bytes.
+    ///
+    /// Decided by the inspector rather than the request's options, since the inspector also
+    /// treats an empty tracer name as the default struct logger.
+    const fn new(inspector: &DebugInspector, max_response_size: Option<usize>) -> Self {
+        Self {
+            remaining: if matches!(inspector, DebugInspector::RawDefault(_)) {
+                max_response_size
+            } else {
+                None
+            },
+        }
+    }
+
+    /// Returns `limits` with the byte limit lowered to the bytes left in the response.
+    fn limit(&self, limits: TraceLimits) -> TraceLimits {
+        let Some(remaining) = self.remaining else { return limits };
+        limits.set_max_recorded_bytes(Some(
+            limits.max_recorded_bytes.map_or(remaining, |max| max.min(remaining)),
+        ))
+    }
+
+    /// Takes the bytes `inspector` recorded for its last transaction from the response.
+    fn charge(&mut self, inspector: &DebugInspector) {
+        if let Some(remaining) = &mut self.remaining {
+            *remaining = remaining.saturating_sub(inspector.recorded_bytes());
+        }
+    }
+}
+
+/// Creates the inspector of a trace request.
+///
+/// The default struct logger writes its struct logs as JSON, which only
+/// [`DebugInspector::get_trace`] returns.
+fn new_debug_inspector(
+    opts: GethDebugTracingOptions,
+) -> Result<DebugInspector, DebugInspectorError> {
+    DebugInspector::new_with_struct_log_mode(opts, StructLogMode::Raw)
+}
+
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
     Eth: EthTransactions + TraceExt,
@@ -1077,11 +1224,8 @@ where
                 if traces.is_empty() && number != end_number {
                     continue
                 }
-                let result = ChainBlockTraceResult {
-                    block: U256::from(number),
-                    hash: block.hash(),
-                    traces,
-                };
+                let result =
+                    ChainBlockTraces { block: U256::from(number), hash: block.hash(), traces };
                 let message = match SubscriptionMessage::new(
                     sink.method_name(),
                     sink.subscription_id(),
@@ -1112,8 +1256,7 @@ where
         &self,
         rlp_block: Bytes,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
-        let _permit = self.acquire_trace_permit().await;
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         Self::debug_trace_raw_block(self, rlp_block, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1124,7 +1267,7 @@ where
         &self,
         block: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
@@ -1136,7 +1279,7 @@ where
         &self,
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
@@ -1148,7 +1291,7 @@ where
         &self,
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<GethTrace> {
+    ) -> RpcResult<DebugTrace> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
@@ -1161,7 +1304,7 @@ where
         request: RpcTxReq<Eth::NetworkTypes>,
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<GethTrace> {
+    ) -> RpcResult<DebugTrace> {
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
             .await
@@ -1170,10 +1313,13 @@ where
 
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>,
+        bundles: CallManyRequest<Vec<Bundle<RpcTxReq<Eth::NetworkTypes>>>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<Vec<GethTrace>>> {
+    ) -> RpcResult<Vec<Vec<DebugTrace>>> {
+        // Decoding is bounded by the call limit, so malformed input is rejected without waiting
+        // for a tracing permit.
+        let bundles = bundles.into_inner()?;
         let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
@@ -1266,9 +1412,11 @@ where
     /// * Contract bytecode associated with a code hash. The key format is: `<0x63><code_hash>`
     ///     * Prefix byte: 0x63 (required)
     ///     * Code hash: 32 bytes
+    ///
     ///   Must be provided as either:
     ///     * Hex string: "0x63..." (66 hex characters after 0x)
     ///     * Raw byte string: raw byte string (33 bytes)
+    ///
     ///   See Geth impl: <https://github.com/ethereum/go-ethereum/blob/737ffd1bf0cbee378d0111a5b17ae4724fb2216c/core/rawdb/schema.go#L120>
     async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>> {
         let key_bytes = if key.starts_with("0x") {
@@ -1406,7 +1554,7 @@ where
         &self,
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
-    ) -> RpcResult<Vec<TraceResult>> {
+    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
         let _permit = self.acquire_trace_permit().await;
         let entry = self
             .inner
@@ -1422,7 +1570,7 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(entry.block.clone(), evm_env, opts).await.map_err(Into::into)
+        self.trace_block(entry.block.clone(), evm_env, opts, None).await.map_err(Into::into)
     }
 }
 
@@ -1505,9 +1653,28 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
+/// Timeout of tracing a block supplied by the caller, whose work no consensus rule bounds.
+const RAW_BLOCK_TRACE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Default timeout of a JS tracer, matching geth.
 #[cfg(feature = "js-tracer")]
 const DEFAULT_JS_TRACER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Returns whether `tracer` is a JS tracer or a mux tracer that holds one, at any depth.
+#[cfg(feature = "js-tracer")]
+fn runs_js_tracer(tracer: &GethDebugTracerType, config: &GethDebugTracerConfig) -> bool {
+    match tracer {
+        GethDebugTracerType::JsTracer(_) => true,
+        GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer) => {
+            config.clone().into_mux_config().is_ok_and(|mux| {
+                mux.0.iter().any(|(tracer, config)| {
+                    runs_js_tracer(tracer, &config.clone().unwrap_or_default())
+                })
+            })
+        }
+        GethDebugTracerType::BuiltInTracer(_) => false,
+    }
+}
 
 /// Interrupts a JS tracer once its request is dropped or its timeout expires.
 ///
@@ -1526,11 +1693,17 @@ impl JsTraceInterrupt {
     )]
     fn new(opts: &GethDebugTracingOptions) -> Result<Self, EthApiError> {
         #[cfg(feature = "js-tracer")]
-        if let Some(GethDebugTracerType::JsTracer(_)) = &opts.tracer {
+        if let Some(tracer) = &opts.tracer &&
+            runs_js_tracer(tracer, &opts.tracer_config)
+        {
             let timeout = match &opts.timeout {
-                Some(timeout) => humantime::parse_duration(timeout).map_err(|err| {
-                    EthApiError::InvalidParams(format!("invalid tracer timeout {timeout:?}: {err}"))
-                })?,
+                Some(timeout) => {
+                    SpanParser::new().parse_unsigned_duration(timeout).map_err(|err| {
+                        EthApiError::InvalidParams(format!(
+                            "invalid tracer timeout {timeout:?}: {err}"
+                        ))
+                    })?
+                }
                 None => DEFAULT_JS_TRACER_TIMEOUT,
             };
             return Ok(Self { js: Some((JsInspectorInterrupt::new(), timeout)) })
@@ -1538,20 +1711,19 @@ impl JsTraceInterrupt {
         Ok(Self::default())
     }
 
-    /// Lets this interrupt stop `inspector` if it's a JS tracer.
+    /// Lets this interrupt stop the JS tracers of `inspector`, including those in a mux tracer.
     #[cfg_attr(
         not(feature = "js-tracer"),
-        expect(clippy::missing_const_for_fn, reason = "only JS tracers can be interrupted")
+        expect(
+            unused_mut,
+            clippy::missing_const_for_fn,
+            reason = "only JS tracers can be interrupted"
+        )
     )]
-    fn attach(&self, inspector: DebugInspector) -> DebugInspector {
+    fn attach(&self, mut inspector: DebugInspector) -> DebugInspector {
         #[cfg(feature = "js-tracer")]
         if let Some((interrupt, _)) = &self.js {
-            return match inspector {
-                DebugInspector::Js(js) => {
-                    DebugInspector::Js(Box::new(js.with_interrupt(interrupt.clone())))
-                }
-                inspector => inspector,
-            }
+            inspector.set_js_interrupt(interrupt);
         }
         inspector
     }
@@ -1587,23 +1759,40 @@ impl JsTraceInterrupt {
     }
 }
 
+/// The message of a `traceChain` subscription.
+///
+/// Serializes like a
+/// [`ChainBlockTraceResult`](alloy_rpc_types_trace::geth::ChainBlockTraceResult), whose traces
+/// can't hold raw struct logs.
+#[derive(Debug, Serialize)]
+struct ChainBlockTraces {
+    block: U256,
+    hash: B256,
+    traces: Vec<Option<TraceResult<DebugTrace, String>>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{eth::helpers::types::EthRpcConverter, EthApi};
+    use alloy_consensus::{Header, TxLegacy};
     use alloy_genesis::{Genesis, GenesisAccount};
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::{bytes, keccak256, TxKind, U256};
+    use alloy_rpc_types_eth::TransactionRequest;
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::{Block, BlockBody, Transaction};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::StorageEntry;
     use reth_provider::test_utils::{
-        create_test_provider_factory, create_test_provider_factory_with_chain_spec, NoopProvider,
+        create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+        ExtendedAccount, MockEthProvider, NoopProvider,
     };
     use reth_rpc_eth_api::EthApiServer;
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState, StorageSlot};
 
@@ -1645,6 +1834,151 @@ mod tests {
         assert_eq!(err.code(), -32001);
     }
 
+    #[tokio::test]
+    async fn struct_logs_halt_past_byte_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let call = TransactionRequest::default().to(target).gas_limit(1_000_000);
+
+        for max_trace_bytes in [None, Some(1 << 16)] {
+            let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(max_trace_bytes)
+            .build();
+            let debug_api = DebugApi::new(
+                eth_api,
+                BlockingTaskGuard::new(1),
+                &Runtime::test(),
+                futures::stream::empty(),
+            );
+            let result = debug_api.debug_trace_call(call.clone(), None, Default::default()).await;
+            match max_trace_bytes {
+                None => {
+                    let DebugTrace::RawDefault(frame) = result.unwrap() else {
+                        panic!("expected raw struct logs")
+                    };
+                    let logs =
+                        serde_json::from_str::<Vec<serde_json::Value>>(frame.struct_logs.get());
+                    assert!(logs.unwrap().len() > 100_000);
+                }
+                Some(_) => assert_eq!(
+                    result.unwrap_err().to_string(),
+                    "fatal error: trace recorded byte limit exceeded"
+                ),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn struct_logs_share_response_size_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        // The block holds two transactions that call the loop.
+        let key = generate_key(&mut generators::rng());
+        let transactions = (0..2)
+            .map(|nonce| {
+                let tx = TxLegacy {
+                    nonce,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(target),
+                    ..Default::default()
+                };
+                sign_tx_with_key_pair(key, Transaction::Legacy(tx))
+            })
+            .collect::<Vec<_>>();
+        let tx_hash = *transactions[1].tx_hash();
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        let block_hash = header.hash_slow();
+        let block = Block { header, body: BlockBody { transactions, ..Default::default() } };
+        provider.add_block(block_hash, block.clone());
+        let call = TransactionRequest::default().to(target).gas_limit(100_000);
+        let debug_api = |max_response_size| {
+            let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_response_size(max_response_size)
+            .build();
+            DebugApi::new(
+                eth_api,
+                BlockingTaskGuard::new(1),
+                &Runtime::test(),
+                futures::stream::empty(),
+            )
+        };
+        let exceeded = "fatal error: trace recorded byte limit exceeded";
+
+        let DebugTrace::RawDefault(frame) =
+            debug_api(None).debug_trace_call(call.clone(), None, Default::default()).await.unwrap()
+        else {
+            panic!("expected raw struct logs")
+        };
+        let logs_len = frame.struct_logs.get().len();
+
+        // The struct logs of one call fit in the response, those of two do not.
+        let api = debug_api(Some(logs_len + logs_len / 2));
+        api.debug_trace_call(call.clone(), None, Default::default()).await.unwrap();
+        let bundles =
+            vec![Bundle { transactions: vec![call.clone(), call.clone()], block_override: None }];
+        let err = api.debug_trace_call_many(bundles, None, None).await.unwrap_err();
+        assert_eq!(err.to_string(), exceeded);
+        // Neither do those of the two transactions of the block, unless it is traced for a
+        // `traceChain` notification, which the response size limit does not bound.
+        let block_err =
+            format!("internal EVM error occurred when executing transaction {tx_hash}: {exceeded}");
+        let err = api.debug_trace_block(block_hash.into(), Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), block_err);
+        let block = Arc::new(block.try_into_recovered().unwrap());
+        let traces = api.trace_chain_block(block, Default::default()).await.unwrap();
+        assert!(traces.iter().all(|trace| matches!(trace, Some(TraceResult::Success { .. }))));
+
+        let api = debug_api(Some(logs_len / 2));
+        let err = api.debug_trace_call(call.clone(), None, Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), exceeded);
+        let err = api.debug_trace_transaction(tx_hash, Default::default()).await.unwrap_err();
+        assert_eq!(err.to_string(), block_err);
+        let opts = GethDebugTracingCallOptions { tx_index: Some(1), ..Default::default() };
+        let err = api.debug_trace_call(call.clone(), None, opts).await.unwrap_err();
+        assert_eq!(err.to_string(), exceeded);
+
+        // An empty tracer name selects the default struct logger too.
+        let opts: GethDebugTracingCallOptions =
+            serde_json::from_value(serde_json::json!({ "tracer": "" })).unwrap();
+        let err = api.debug_trace_call(call, None, opts).await.unwrap_err();
+        assert_eq!(err.to_string(), exceeded);
+
+        // Other tracers have no budget. The call tracer records the 32 bytes of input of the call
+        // this contract makes: PUSH1 0, 0, 32, 0, 0, 0x99, PUSH2 0x1000, CALL, STOP.
+        let caller = Address::with_last_byte(0x43);
+        provider.add_account(
+            caller,
+            ExtendedAccount::new(0, U256::ZERO)
+                .with_bytecode(bytes!("600060006020600060006099611000f100")),
+        );
+        let call = TransactionRequest::default().to(caller).gas_limit(100_000);
+        let opts: GethDebugTracingCallOptions =
+            serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
+        debug_api(Some(1)).debug_trace_call(call, None, opts).await.unwrap();
+    }
+
     #[cfg(feature = "js-tracer")]
     fn js_tracer_opts(timeout: Option<&str>) -> GethDebugTracingOptions {
         GethDebugTracingOptions {
@@ -1679,6 +2013,28 @@ mod tests {
         );
         let err = Evm::transact_with_inspector(&mut evm, &tx, inspector).unwrap_err();
         assert_eq!(err.to_string(), "fatal error: JavaScript tracing interrupted");
+    }
+
+    #[cfg(feature = "js-tracer")]
+    #[test]
+    fn js_trace_interrupt_covers_mux_tracers_with_js_children() {
+        let mux = |config: serde_json::Value| GethDebugTracingOptions {
+            tracer: Some(GethDebugTracerType::BuiltInTracer(GethDebugBuiltInTracerType::MuxTracer)),
+            tracer_config: serde_json::from_value(config).unwrap(),
+            ..Default::default()
+        };
+        let js = "{ fault: function() {}, result: function() { return null; } }";
+        let nested = mux(serde_json::json!({ "muxTracer": { (js): {} } }));
+        let nested = serde_json::json!({ "muxTracer": nested.tracer_config });
+        for (config, interrupted) in [
+            (serde_json::json!({ (js): {} }), true),
+            (nested, true),
+            (serde_json::json!({ "callTracer": {} }), false),
+        ] {
+            let opts = mux(config);
+            let interrupt = JsTraceInterrupt::new(&opts).unwrap();
+            assert_eq!(interrupt.js.is_some(), interrupted);
+        }
     }
 
     #[cfg(feature = "js-tracer")]

@@ -15,7 +15,7 @@ use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
     EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
-    UnifiedStatus,
+    UnifiedStatus, MAX_PAYLOAD_SIZE,
 };
 use reth_eth_wire_types::{message::MAX_MESSAGE_SIZE, SnapVersion};
 use reth_ethereum_forks::{ForkFilter, Head};
@@ -26,7 +26,6 @@ use reth_storage_api::{
     StateRangeProviderFactory,
 };
 use reth_tasks::Runtime;
-use secp256k1::SECP256K1;
 use std::{collections::HashSet, net::SocketAddr, sync::Arc};
 
 // re-export for convenience
@@ -38,7 +37,7 @@ pub use secp256k1::SecretKey;
 
 /// Convenience function to create a new random [`SecretKey`]
 pub fn rng_secret_key() -> SecretKey {
-    SecretKey::new(&mut rand_08::thread_rng())
+    SecretKey::new(&mut rand::rng())
 }
 
 /// All network related initialization settings.
@@ -104,6 +103,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub handshake: Arc<dyn EthRlpxHandshake>,
     /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
     pub eth_max_message_size: usize,
+    /// Maximum uncompressed size of a message payload on the `p2p` stream, which carries every
+    /// subprotocol.
+    pub p2p_max_payload_size: usize,
     /// List of block number-hash pairs to check for required blocks.
     /// If non-empty, peers that don't have these blocks will be filtered out.
     pub required_block_hashes: Vec<BlockNumHash>,
@@ -231,6 +233,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     handshake: Arc<dyn EthRlpxHandshake>,
     /// Maximum allowed ETH message size for post-handshake ETH/Snap streams.
     eth_max_message_size: usize,
+    /// Maximum uncompressed size of a message payload on the `p2p` stream.
+    p2p_max_payload_size: usize,
     /// List of block hashes to check for required blocks.
     required_block_hashes: Vec<BlockNumHash>,
     /// Optional network id
@@ -278,6 +282,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat: None,
             handshake: Arc::new(EthHandshake::default()),
             eth_max_message_size: MAX_MESSAGE_SIZE,
+            p2p_max_payload_size: MAX_PAYLOAD_SIZE,
             required_block_hashes: Vec::new(),
             network_id: None,
             snap_enabled: false,
@@ -294,7 +299,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Returns the configured [`PeerId`]
     pub fn get_peer_id(&self) -> PeerId {
-        pk2id(&self.secret_key.public_key(SECP256K1))
+        pk2id(&self.secret_key.public_key())
     }
 
     /// Returns the configured [`SecretKey`], from which the node's identity is derived.
@@ -613,6 +618,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     ///
     /// This does not affect the initial status handshake, which continues to use
     /// [`MAX_MESSAGE_SIZE`].
+    ///
+    /// Every message also passes the `p2p` stream's payload limit first, so a value above
+    /// [`p2p_max_payload_size`](Self::p2p_max_payload_size) only takes effect once that is raised
+    /// as well.
     pub const fn eth_max_message_size(mut self, max_message_size: usize) -> Self {
         self.eth_max_message_size = max_message_size;
         self
@@ -623,6 +632,18 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         if let Some(max_message_size) = max_message_size {
             self.eth_max_message_size = max_message_size;
         }
+        self
+    }
+
+    /// Sets the maximum uncompressed size of a message payload on the `p2p` stream, which defaults
+    /// to [`MAX_PAYLOAD_SIZE`] (16 MiB, from EIP-706).
+    ///
+    /// The limit applies to every subprotocol, in both directions, and to the `p2p` handshake.
+    /// An `RLPx` frame carries less than 16 MiB of snappy-compressed data, so a larger value only
+    /// admits messages that compress below that. Sending a frame that does not fit closes the
+    /// session with an error.
+    pub const fn p2p_max_payload_size(mut self, max_payload_size: usize) -> Self {
+        self.p2p_max_payload_size = max_payload_size;
         self
     }
 
@@ -665,6 +686,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             required_block_hashes,
             network_id,
             snap_enabled,
@@ -762,6 +784,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             nat,
             handshake,
             eth_max_message_size,
+            p2p_max_payload_size,
             required_block_hashes,
         }
     }
@@ -806,7 +829,7 @@ mod tests {
     use std::{net::Ipv4Addr, sync::Arc};
 
     fn builder() -> NetworkConfigBuilder {
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let secret_key = SecretKey::new(&mut rand::rng());
         NetworkConfigBuilder::new(secret_key, Runtime::test())
     }
 

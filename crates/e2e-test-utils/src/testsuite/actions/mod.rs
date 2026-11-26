@@ -2,11 +2,12 @@
 
 use crate::testsuite::Environment;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatusEnum};
+use alloy_rpc_types_engine::{
+    ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatusEnum,
+};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
-use reth_rpc_api::clients::EngineApiClient;
 use std::future::Future;
 use tracing::debug;
 
@@ -155,12 +156,12 @@ where
                 let active_idx = env.active_node_idx;
                 let engine = env.node_clients[active_idx].engine.http_client();
 
-                let fcu_response = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                    &engine,
-                    fork_choice_state,
-                    None,
-                )
-                .await?;
+                let fcu_response = engine
+                    .request::<_, ForkchoiceUpdated>(
+                        "engine_forkchoiceUpdatedV3",
+                        (fork_choice_state, None::<PayloadAttributes>),
+                    )
+                    .await?;
 
                 debug!(
                     "Active node {}: Forkchoice update status: {:?}",

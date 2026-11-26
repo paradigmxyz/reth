@@ -1,5 +1,6 @@
 use super::SaveBlocksInput;
 use crate::{
+    changeset_walker::changeset_block_range,
     changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics, DatabaseProviderMetrics},
@@ -275,20 +276,22 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
     ///
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
-    /// truncating static files from checkpoints on the next startup.
+    /// truncating static files from checkpoints on the next startup. The MDBX commit is synced in
+    /// every sync mode, so power loss can't roll it back above the truncated static files.
     ///
     /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
-    /// later cross-store unwind steps.
+    /// later cross-store unwind steps. If the wait fails because MDBX stopped answering queries,
+    /// the later steps are skipped and the same startup recovery applies.
     ///
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
     fn commit_unwind(self) -> ProviderResult<()> {
         let storage_v2 = self.cached_storage_settings().storage_v2;
         let reader_txn_tracker = self.reader_txn_tracker.clone();
-        self.tx.commit()?;
+        self.tx.commit_durable()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_commit_readers();
+            reader_txn_tracker.wait_for_pre_commit_readers()?;
         }
 
         if storage_v2 {
@@ -1658,18 +1661,39 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let mut changesets = Vec::new();
+        self.for_each_storage_changeset(range, |block_address, entry| {
+            changesets.push((block_address, entry))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_storage_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
         if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changesets_range(range)
+            self.static_file_provider.for_each_storage_changeset(range, f)
         } else {
-            self.tx
-                .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberAddressRange::from(range))?
-                .map(|r| {
-                    let (bna, entry) = r?;
-                    Ok((bna, entry))
-                })
-                .collect()
+            let mut cursor = self.tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+            for entry in cursor.walk_range(BlockNumberAddressRange::from(range))? {
+                let (block_address, storage_entry) = entry?;
+                f(block_address, storage_entry);
+            }
+            Ok(())
         }
+    }
+
+    fn lowest_storage_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::StorageChangeSets)
+            .filter(|&block| block > 0))
     }
 }
 
@@ -1716,15 +1740,43 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+        self.for_each_account_changeset(range, |block_number, changeset| {
+            changesets.push((block_number, changeset))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
         if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changesets_range(range)
+            self.static_file_provider.for_each_account_changeset(range, f)
         } else {
-            self.tx
-                .cursor_read::<tables::AccountChangeSets>()?
-                .walk_range(to_range(range))?
-                .map(|r| r.map_err(Into::into))
-                .collect()
+            let range = changeset_block_range(range, BlockNumber::MAX);
+            if range.is_empty() {
+                return Ok(())
+            }
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(range)? {
+                let (block_number, changeset) = entry?;
+                f(block_number, changeset);
+            }
+            Ok(())
         }
+    }
+
+    fn lowest_account_changeset_block(&self) -> ProviderResult<Option<BlockNumber>> {
+        // Only storage v2 keeps changesets in static files.
+        if !self.cached_storage_settings().storage_v2 {
+            return Ok(None)
+        }
+        Ok(self
+            .static_file_provider
+            .get_lowest_range_start(StaticFileSegment::AccountChangeSets)
+            .filter(|&block| block > 0))
     }
 }
 
@@ -1869,6 +1921,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
     ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
         self.static_file_provider.sealed_headers_while(range, predicate)
     }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypes> reth_storage_api::DurableBlockReader
+    for DatabaseProvider<TX, N>
+{
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, N> {
@@ -2116,34 +2173,21 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
-            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
-            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
-            let Some(sealed_header) = self.sealed_header(block_number)?
-        {
-            let (header, block_hash) = sealed_header.split();
-            if let Some(block_body) = self.block_body_indices(block_number)? {
-                // the index of the tx in the block is the offset:
-                // len([start..tx_id])
-                // NOTE: `transaction_id` is always `>=` the block's first
-                // index
-                let index = transaction_id - block_body.first_tx_num();
+        Ok(self
+            .transaction_by_hash_with_meta_and_id(tx_hash)?
+            .map(|(transaction, meta, _)| (transaction, meta)))
+    }
 
-                let meta = TransactionMeta {
-                    tx_hash,
-                    index,
-                    block_hash,
-                    block_number,
-                    base_fee: header.base_fee_per_gas(),
-                    excess_blob_gas: header.excess_blob_gas(),
-                    timestamp: header.timestamp(),
-                };
-
-                return Ok(Some((transaction, meta)))
-            }
-        }
-
-        Ok(None)
+    fn transaction_by_hash_with_meta_and_sender(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta, Option<Address>)>> {
+        let Some((transaction, meta, transaction_id)) =
+            self.transaction_by_hash_with_meta_and_id(tx_hash)?
+        else {
+            return Ok(None)
+        };
+        Ok(Some((transaction, meta, self.transaction_sender(transaction_id)?)))
     }
 
     fn transactions_by_block(
@@ -2206,6 +2250,43 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         } else {
             Ok(self.tx.get::<tables::TransactionSenders>(id)?)
         }
+    }
+}
+
+impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Returns the transaction with the metadata of the block it was mined in, and its id.
+    fn transaction_by_hash_with_meta_and_id(
+        &self,
+        tx_hash: TxHash,
+    ) -> ProviderResult<Option<(TxTy<N>, TransactionMeta, TxNumber)>> {
+        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
+            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
+            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
+            let Some(sealed_header) = self.sealed_header(block_number)?
+        {
+            let (header, block_hash) = sealed_header.split();
+            if let Some(block_body) = self.block_body_indices(block_number)? {
+                // the index of the tx in the block is the offset:
+                // len([start..tx_id])
+                // NOTE: `transaction_id` is always `>=` the block's first
+                // index
+                let index = transaction_id - block_body.first_tx_num();
+
+                let meta = TransactionMeta {
+                    tx_hash,
+                    index,
+                    block_hash,
+                    block_number,
+                    base_fee: header.base_fee_per_gas(),
+                    excess_blob_gas: header.excess_blob_gas(),
+                    timestamp: header.timestamp(),
+                };
+
+                return Ok(Some((transaction, meta, transaction_id)))
+            }
+        }
+
+        Ok(None)
     }
 }
 
@@ -3025,8 +3106,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn take_state_above(
         &self,
         block: BlockNumber,
+        end: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>> {
-        let range = block + 1..=self.last_block_number()?;
+        let range = block + 1..=end;
 
         if range.is_empty() {
             return Ok(ExecutionOutcome::default())
@@ -3034,7 +3116,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let start_block_number = *range.start();
 
         // We are not removing block meta as it is used to get block changesets.
-        let block_bodies = self.block_body_indices_range(range.clone())?;
+        let block_bodies = self.block_body_indices_range(range)?;
 
         // get transaction receipts
         let from_transaction_num =
@@ -3042,7 +3124,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let to_transaction_num =
             block_bodies.last().expect("already checked if there are blocks").last_tx_num();
 
-        let storage_range = BlockNumberAddress::range(range.clone());
         let storage_changeset = if let Some(highest_block) = self
             .static_file_provider
             .get_highest_static_file_block(StaticFileSegment::StorageChangeSets) &&
@@ -3054,7 +3135,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             changeset_writer.prune_storage_changesets(block)?;
             changesets
         } else {
-            self.take::<tables::StorageChangeSets>(storage_range)?.into_iter().collect()
+            // Revert every changeset above `block`, including any above `end`.
+            self.take::<tables::StorageChangeSets>(
+                BlockNumberAddress((block + 1, Address::ZERO))..,
+            )?
+            .into_iter()
+            .collect()
         };
 
         // if there are static files for this segment, prune them.
@@ -3074,7 +3160,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         } else {
             // Have to remove from static files if they exist, otherwise remove using `take` for the
             // changeset tables
-            self.take::<tables::AccountChangeSets>(range)?
+            self.take::<tables::AccountChangeSets>(block + 1..)?
         };
 
         let (state, reverts) = if self.cached_storage_settings().use_hashed_state() {
@@ -3597,7 +3683,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
         self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
-        let execution_state = self.take_state_above(block)?;
+        let execution_state = self.take_state_above(block, *range.end())?;
 
         let blocks = self.recovered_block_range(range)?;
 
@@ -3932,6 +4018,79 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
             })
             .collect::<Result<_, _>>()?)
     }
+
+    fn get_prune_checkpoints_for_availability(
+        &self,
+    ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
+        let mut checkpoints = self.get_prune_checkpoints()?;
+        if !EitherWriter::receipts_destination(self).is_static_file() ||
+            !checkpoints.iter().any(|(segment, checkpoint)| {
+                matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
+                    checkpoint.tx_number.is_some()
+            })
+        {
+            return Ok(checkpoints)
+        }
+
+        let Some(lowest_block) =
+            self.static_file_provider.get_lowest_range_start(StaticFileSegment::Receipts)
+        else {
+            return Ok(checkpoints)
+        };
+        let Some(first_tx_range) = self
+            .static_file_provider
+            .get_segment_provider_for_block(StaticFileSegment::Receipts, lowest_block, None)?
+            .user_header()
+            .tx_range()
+        else {
+            return Ok(checkpoints)
+        };
+
+        // Migration can pad the first file with blocks whose receipts were already pruned.
+        // TransactionBlocks::seek can also land after expired history, so verify the body range.
+        let pruned_tx = first_tx_range.start().checked_sub(1);
+        let pruned_block = if let Some(tx) = pruned_tx {
+            if let Some((_, block)) =
+                self.tx.cursor_read::<tables::TransactionBlocks>()?.seek(tx)? &&
+                let Some(indices) = self.tx.get::<tables::BlockBodyIndices>(block)? &&
+                indices.tx_num_range().contains(&tx)
+            {
+                Some(block).max(lowest_block.checked_sub(1))
+            } else {
+                return Ok(checkpoints)
+            }
+        } else {
+            lowest_block.checked_sub(1)
+        };
+
+        // The removed StaticFileReceipts pruner checkpointed moves into static files.
+        // Writers enforce continuity within each file, but migration can leave gaps between files.
+        // Reuse the verified coverage for both receipts and logs.
+        let mut last_tx = first_tx_range.end();
+        for (segment, checkpoint) in &mut checkpoints {
+            if matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
+                let Some(tx) = checkpoint.tx_number &&
+                tx >= first_tx_range.start()
+            {
+                while let Some(next_tx) = last_tx.checked_add(1) &&
+                    next_tx <= tx &&
+                    let Some(next_file) = self
+                        .static_file_provider
+                        .get_maybe_segment_provider(StaticFileSegment::Receipts, next_tx)? &&
+                    let Some(next_range) = next_file.user_header().tx_range() &&
+                    next_range.start() == next_tx
+                {
+                    last_tx = next_range.end();
+                }
+                if tx <= last_tx {
+                    checkpoint.block_number = pruned_block;
+                    checkpoint.tx_number = pruned_tx;
+                }
+            }
+        }
+
+        Ok(checkpoints)
+    }
 }
 
 impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N> {
@@ -3959,27 +4118,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> StatsReader for DatabaseProvid
 
 impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvider<TX, N> {
     fn last_finalized_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastFinalizedBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastFinalizedBlock)?)
     }
 
     fn last_safe_block_number(&self) -> ProviderResult<Option<BlockNumber>> {
-        let mut finalized_blocks = self
-            .tx
-            .cursor_read::<tables::ChainState>()?
-            .walk(Some(tables::ChainStateKey::LastSafeBlock))?
-            .take(1)
-            .collect::<Result<BTreeMap<tables::ChainStateKey, BlockNumber>, _>>()?;
-
-        let last_finalized_block_number = finalized_blocks.pop_first().map(|pair| pair.1);
-        Ok(last_finalized_block_number)
+        Ok(self.tx.get::<tables::ChainState>(tables::ChainStateKey::LastSafeBlock)?)
     }
 }
 
@@ -4089,21 +4232,28 @@ impl<TX: Send, N: NodeTypes> StoragePath for DatabaseProvider<TX, N> {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        test_utils::{
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_chain_spec_and_db_args,
+            create_test_provider_factory_with_in_memory_state_writer,
+        },
         BlockWriter,
     };
     use alloy_consensus::Header;
+    use alloy_eips::BlockNumHash;
     use alloy_primitives::{
         map::{AddressMap, B256Map},
         U256,
     };
     use evm2::evm::AccountInfo;
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
-    use reth_db_api::models::StorageSettings;
+    use reth_chainspec::MAINNET;
+    use reth_db::mdbx::{DatabaseArguments, SyncMode};
+    use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
-    use reth_primitives_traits::SealedBlock;
-    use reth_storage_api::{DatabaseProviderFactory, MetadataWriter};
+    use reth_primitives_traits::{SealedBlock, SealedHeader};
+    use reth_storage_api::{DatabaseProviderFactory, DurableBlockReader, MetadataWriter};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::{
         bundle_state::BundleState, HashedPostState, KeccakKeyHasher, Nibbles, SortedTrieData,
@@ -4133,9 +4283,6 @@ mod tests {
 
     #[test]
     fn snap_attempt_guards_finish_checkpoint_writers() {
-        use alloy_eips::BlockNumHash;
-        use reth_db_api::models::SnapAttempt;
-
         let factory = create_test_provider_factory();
         let provider = factory.database_provider_rw().unwrap();
         provider.update_pipeline_stages(5, false).unwrap();
@@ -4186,10 +4333,45 @@ mod tests {
     }
 
     #[test]
-    fn snap_attempt_guards_partial_state_trie_advances() {
-        use alloy_eips::BlockNumHash;
-        use reth_db_api::models::SnapAttempt;
+    fn last_durable_block_num_hash_follows_finish_checkpoint() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+        let genesis_hash = data.genesis.hash();
+        let provider = factory.provider_rw().unwrap();
+        provider.insert_block(&data.genesis.try_recover().unwrap()).unwrap();
+        for (block, _) in &data.blocks {
+            provider.insert_block(block).unwrap();
+        }
+        provider.commit().unwrap();
+        let hash = |number: u64| {
+            data.blocks.iter().find(|(block, _)| block.number() == number).unwrap().0.hash()
+        };
 
+        let provider = factory.provider_rw().unwrap();
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0)).unwrap();
+        assert_eq!(
+            provider.last_durable_block_num_hash().unwrap(),
+            BlockNumHash::new(0, genesis_hash)
+        );
+
+        provider.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+        assert_eq!(provider.last_durable_block_num_hash().unwrap(), BlockNumHash::new(2, hash(2)));
+
+        provider
+            .save_stage_checkpoint(
+                StageId::Finish,
+                StageCheckpoint::new(3)
+                    .with_finish_stage_checkpoint(FinishCheckpoint { partial_state_trie: Some(1) }),
+            )
+            .unwrap();
+        assert_eq!(provider.last_durable_block_num_hash().unwrap(), BlockNumHash::new(1, hash(1)));
+        provider.commit().unwrap();
+
+        assert_eq!(factory.last_durable_block_num_hash().unwrap(), BlockNumHash::new(1, hash(1)));
+    }
+
+    #[test]
+    fn snap_attempt_guards_partial_state_trie_advances() {
         for abandoned in [false, true] {
             let factory = create_test_provider_factory();
             let provider = factory.database_provider_rw().unwrap();
@@ -4277,6 +4459,32 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn unwind_commit_syncs_non_durable_db() {
+        let factory = create_test_provider_factory_with_chain_spec_and_db_args(
+            MAINNET.clone(),
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        );
+        let info = || factory.db_ref().db().info().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![1]).unwrap();
+        provider_rw.commit().unwrap();
+        assert!(
+            info().last_steady_txnid() < Some(info().last_txnid() as u64),
+            "safe-no-sync commits must not be steady"
+        );
+
+        let provider_rw = factory.unwind_provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![2]).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(
+            info().last_steady_txnid(),
+            Some(info().last_txnid() as u64),
+            "the unwind commit must be steady"
+        );
     }
 
     #[test]
@@ -4984,14 +5192,15 @@ mod tests {
 
     #[test]
     fn unwind_restores_trie_nodes_masked_above_the_frontier() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
         let provider = factory.provider_rw().unwrap();
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
         for block in &blocks[6..] {
-            factory.overlay_manager().insert_block(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         provider
             .save_stage_checkpoint(
@@ -5028,7 +5237,8 @@ mod tests {
 
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
@@ -5039,7 +5249,7 @@ mod tests {
         provider_rw.commit().unwrap();
 
         for block in &blocks[2..] {
-            factory.overlay_manager().insert_block(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();
@@ -6032,5 +6242,64 @@ mod tests {
         assert!(all_blocks.contains(&3), "block 3 should remain");
         assert!(!all_blocks.contains(&7), "block 7 should be unwound");
         assert!(!all_blocks.contains(&10), "block 10 should be unwound");
+    }
+
+    #[test]
+    fn test_chain_state_block_numbers_are_read_by_exact_key() {
+        for (finalized, safe) in
+            [(None, None), (None, Some(100)), (Some(90), None), (Some(90), Some(100))]
+        {
+            let factory = create_test_provider_factory();
+            let provider = factory.provider_rw().unwrap();
+            if let Some(block_number) = finalized {
+                provider.save_finalized_block_number(block_number).unwrap();
+            }
+            if let Some(block_number) = safe {
+                provider.save_safe_block_number(block_number).unwrap();
+            }
+
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+            provider.commit().unwrap();
+
+            let provider = factory.provider().unwrap();
+            assert_eq!(provider.last_finalized_block_number().unwrap(), finalized);
+            assert_eq!(provider.last_safe_block_number().unwrap(), safe);
+        }
+    }
+
+    #[test]
+    fn take_state_outcome_stops_at_execution_tip() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let provider = factory.database_provider_rw().unwrap();
+        let tx = provider.tx_ref();
+        for block in 0..=3 {
+            tx.put::<tables::BlockBodyIndices>(
+                block,
+                StoredBlockBodyIndices { first_tx_num: 0, tx_count: 0 },
+            )
+            .unwrap();
+        }
+        // State above the execution tip must still be reverted.
+        tx.put::<tables::AccountChangeSets>(
+            3,
+            AccountBeforeTx { address: Address::ZERO, info: None },
+        )
+        .unwrap();
+        tx.put::<tables::PlainAccountState>(Address::ZERO, Account::default()).unwrap();
+        let sf = factory.static_file_provider();
+        let mut headers = sf.latest_writer(StaticFileSegment::Headers).unwrap();
+        for number in 0..=3 {
+            let header = Header { number, ..Default::default() };
+            headers.append_header(&header, &header.hash_slow()).unwrap();
+        }
+        headers.commit().unwrap();
+        drop(headers);
+        assert_eq!(provider.last_block_number().unwrap(), 3);
+        let outcome = provider.take_state_above(1, 2).unwrap();
+        assert_eq!(outcome.first_block(), 2);
+        assert_eq!(outcome.len(), 1);
+        assert_eq!(tx.get::<tables::PlainAccountState>(Address::ZERO).unwrap(), None);
     }
 }

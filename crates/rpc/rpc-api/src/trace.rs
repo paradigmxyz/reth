@@ -7,10 +7,10 @@ use alloy_rpc_types_trace::{
     parity::*,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_rpc_eth_api::CallManyRequest;
 
 /// Ethereum trace API
-#[cfg_attr(not(feature = "client"), rpc(server, namespace = "trace"))]
-#[cfg_attr(feature = "client", rpc(server, client, namespace = "trace"))]
+#[rpc(server, namespace = "trace")]
 pub trait TraceApi<TxReq> {
     /// Executes the given call and returns a number of possible traces for it.
     #[method(name = "call")]
@@ -29,7 +29,7 @@ pub trait TraceApi<TxReq> {
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
-        calls: Vec<(TxReq, HashSet<TraceType>)>,
+        calls: CallManyRequest<Vec<(TxReq, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>>;
 

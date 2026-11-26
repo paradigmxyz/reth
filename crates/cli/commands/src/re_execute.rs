@@ -150,16 +150,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                 let db_at = {
                     |block_number: u64| {
-                        let provider = provider_factory
-                            .database_provider_ro()?
-                            .disable_long_read_transaction_safety();
+                        let provider = state_provider_factory.long_read_consistent_provider()?;
                         let hash = provider.block_hash(block_number)?.ok_or_else(|| {
                             eyre::eyre!("hash for block {block_number} not found in the database")
                         })?;
                         eyre::Ok(StateProviderDatabase(
-                            state_provider_factory
-                                .state_provider_from_database(provider, hash)
-                                .into_evm_state_provider(),
+                            provider.state_by_hash(hash, false)?.into_evm_state_provider(),
                         ))
                     }
                 };
@@ -172,10 +168,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     // Atomically grab the next chunk of blocks.
                     let chunk_start =
                         next_block.fetch_add(blocks_per_chunk, Ordering::Relaxed);
-                    if chunk_start >= max_block {
+                    if chunk_start > max_block {
                         break;
                     }
-                    let chunk_end = (chunk_start + blocks_per_chunk).min(max_block);
+                    let chunk_end = (chunk_start + blocks_per_chunk).min(max_block + 1);
 
                     let mut executor = evm_config.batch_executor(db_at(chunk_start - 1)?);
                     let mut executor_created = Instant::now();

@@ -244,7 +244,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn prune_table_with_iterator_early_exit_does_not_overconsume() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
@@ -298,7 +298,7 @@ mod tests {
         assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), total - 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn prune_table_with_iterator_consumes_to_end_reports_done() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();

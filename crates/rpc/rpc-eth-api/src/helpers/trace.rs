@@ -3,21 +3,27 @@
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
 use crate::{FromEthApiError, FromEvmError};
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eip7928::bal::DecodedBal;
+use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use evm2::evm::Bal as EvmBal;
-use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use evm2_inspectors::tracing::{
+    TraceLimitBehavior, TraceLimits, TracingInspector, TracingInspectorConfig,
+};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
+    execute::{BlockExecutor, BlockTransactionResult},
     ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
 use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
 use reth_storage_api::ProviderBlock;
 use reth_tasks::cancel::is_cancelled;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp, EvmTypes: evm2::EvmTypes> {
@@ -81,8 +87,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |this, mut db| {
-            let (inspector, result) =
-                this.inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))?;
+            let inspector = this.tracing_inspector(config);
+            let (inspector, result) = this.inspect(&mut db, evm_env, &tx_env, inspector)?;
             f(inspector, result, db)
         })
     }
@@ -117,7 +123,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
+        self.spawn_trace_transaction_in_block_with_inspector(
+            hash,
+            self.tracing_inspector(config),
+            f,
+        )
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -157,12 +167,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             else {
                 return Ok(None);
             };
-            let (target_tx, tx_info) = transaction.split();
+            let (_, tx_info) = transaction.split();
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             self.spawn_with_state_at_block(block.parent_hash(), move |this, mut db| {
-                let tx_env = this.evm_config().tx_env(target_tx);
                 let (inspector, result, _) = this.inspect_transaction_in_block(
                     &block,
                     &mut db,
@@ -171,7 +180,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     // returns transactions included in a block
                     tx_info.index.expect("transaction_and_block only returns block transactions")
                         as usize,
-                    &tx_env,
                     bal.as_deref(),
                 )?;
                 f(tx_info, inspector, result, db)
@@ -185,8 +193,9 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     ///
     /// If the block's cached BAL is given, it is attached to the database at the target index and
     /// no transactions are executed, see [`attach_bal_before_tx`]. Otherwise all transactions
-    /// before the target transaction are executed and their changes are written to the
-    /// _runtime_ db ([`StateCacheDb`]).
+    /// before the target transaction are executed through the block executor, see
+    /// [`Call::block_executor`], and their changes are written to the _runtime_ db
+    /// ([`StateCacheDb`]).
     ///
     /// If the target index is greater than or equal to the block's transaction count, all
     /// transactions are replayed.
@@ -205,24 +214,28 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.apply_pre_execution_changes(block, db)?;
 
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut evm = self.evm_config().evm_with_env(&mut *db, evm_env);
-        self.replay_transactions_until_with_evm(
-            &mut evm,
+        let mut executor = self.block_executor(block, db, evm_env)?;
+        self.replay_transactions_until_with_executor(
+            &mut executor,
             block.transactions_recovered(),
             target_tx_index,
         )?;
-        let cache = evm.take_state_cache();
-        drop(evm);
+        let cache = executor.evm_mut().take_state_cache();
+        drop(executor);
         db.cache.merge(cache);
         Ok(())
     }
 
-    /// Executes the target transaction with the configured inspector on the state right before
-    /// the transaction.
+    /// Executes the block's transaction at the target index with the configured inspector on the
+    /// state right before the transaction.
     ///
-    /// If the block's cached BAL is given, the state is positioned by attaching the BAL at the
-    /// target index, see [`attach_bal_before_tx`]. Otherwise all transactions before the target
-    /// transaction are replayed without inspection first.
+    /// The transaction is executed through the block executor, see [`Call::block_executor`]. If
+    /// the block's cached BAL is given, the state is positioned by attaching the BAL at the target
+    /// index, see [`attach_bal_before_tx`], and the executor is told the transaction's position
+    /// with [`BlockExecutor::set_block_access_index`]. Otherwise all transactions before the
+    /// target transaction are replayed through the executor without inspection first.
+    ///
+    /// Returns [`EthApiError::InvalidParams`] if the block has no transaction at that index.
     #[expect(clippy::type_complexity)]
     fn inspect_transaction_in_block<I>(
         &self,
@@ -230,12 +243,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         db: &mut StateCacheDb,
         inspector: I,
         target_tx_index: usize,
-        target_tx_env: &TxEnvFor<Self::Evm>,
         bal: Option<&DecodedBal<Arc<EvmBal>>>,
     ) -> Result<(I, TxResultWithStateFor<Self::Evm>, EvmEnvFor<Self::Evm>), Self::Error>
     where
         I: evm2::Inspector<EvmTypesFor<Self::Evm>> + 'static,
     {
+        let Some(target_tx) = block.transactions_recovered().nth(target_tx_index) else {
+            return Err(EthApiError::InvalidParams(format!(
+                "tx_index {target_tx_index} out of bounds for block with {} transactions",
+                block.transaction_count()
+            ))
+            .into())
+        };
+
         if let Some(bal) = bal {
             // the BAL also covers the block's pre-execution changes
             attach_bal_before_tx(db, bal, target_tx_index);
@@ -244,21 +264,24 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         }
 
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut evm = self.evm_config().evm_with_env(&mut *db, evm_env.clone());
+        let mut executor = self.block_executor(block, db, evm_env.clone())?;
 
-        if bal.is_none() {
-            self.replay_transactions_until_with_evm(
-                &mut evm,
+        if bal.is_some() {
+            executor
+                .set_block_access_index(BlockAccessIndex::from_tx_index(target_tx_index as u64));
+        } else {
+            self.replay_transactions_until_with_executor(
+                &mut executor,
                 block.transactions_recovered(),
                 target_tx_index,
             )?;
         }
-
-        let (inspector, result) = evm
-            .transact_with_inspector(target_tx_env, inspector)
+        let (inspector, result) = executor
+            .inspect_transaction_without_commit(target_tx, inspector)
+            .map(|(inspector, output)| (inspector, output.into_result()))
             .map_err(Self::Error::from_evm_err)?;
-        let cache = evm.take_state_cache();
-        drop(evm);
+        let cache = executor.evm_mut().take_state_cache();
+        drop(executor);
         db.cache.merge(cache);
         Ok((inspector, result, evm_env))
     }
@@ -287,12 +310,20 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
+        // The transactions of the block share one trace byte budget, since they share one response.
+        let budget = Arc::new(RequestTraceBudget::new(self.trace_limits()));
         self.trace_block_until_with_inspector(
             block_id,
             block,
             highest_index,
-            move || TracingInspector::new(config),
-            f,
+            {
+                let budget = Arc::clone(&budget);
+                move || TracingInspector::new(config).with_limits(budget.limits())
+            },
+            move |tx_info, ctx| {
+                budget.charge(ctx.inspector.recorded_bytes());
+                f(tx_info, ctx)
+            },
         )
     }
 
@@ -362,18 +393,18 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let tx_count = max_transactions.min(block.body().transaction_count());
 
                 let mut results = Vec::new();
-                let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
+                let mut executor = this.block_executor(&block, &mut db, evm_env)?;
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
                     }
-                    let tx_env = this.evm_config().tx_env(tx.cloned());
-                    let (inspector, result) = evm
-                        .transact_with_inspector(&tx_env, inspector_setup())
+                    let tx_hash = *tx.tx_hash();
+                    let (inspector, output) = executor
+                        .inspect_transaction_without_commit(tx, inspector_setup())
                         .map_err(Self::Error::from_evm_err)?;
                     let tx_info = TransactionInfo {
-                        hash: Some(*tx.tx_hash()),
+                        hash: Some(tx_hash),
                         index: Some(idx as u64),
                         block_hash: Some(block_hash),
                         block_number: Some(block_number),
@@ -382,11 +413,16 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                     };
                     let item = f(
                         tx_info,
-                        TracingCtx { result: &result, db: evm.state_db_mut(), inspector },
+                        TracingCtx {
+                            result: output.result(),
+                            db: executor.evm_mut().state_db_mut(),
+                            inspector,
+                        },
                     )?;
-                    // the EVM is dropped after the last transaction, so its state needs no commit
+                    // the executor is dropped after the last transaction, so its state needs no
+                    // commit
                     if idx + 1 < tx_count {
-                        evm.commit_state(&result.pending_state);
+                        executor.commit_transaction(output).map_err(Self::Error::from_evm_err)?;
                     }
                     results.push(item);
                 }
@@ -463,6 +499,22 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
 
+    /// Returns the limits for the tracers of the trace and debug APIs.
+    ///
+    /// A traced transaction that records more than the configured
+    /// [`max_trace_bytes`](reth_rpc_eth_types::EthApiSettings::max_trace_bytes) halts with an
+    /// error.
+    fn trace_limits(&self) -> TraceLimits {
+        TraceLimits::default()
+            .set_max_recorded_bytes(self.eth_api_settings().max_trace_bytes)
+            .set_behavior(TraceLimitBehavior::Halt)
+    }
+
+    /// Returns a [`TracingInspector`] for the config, bounded by [`Self::trace_limits`].
+    fn tracing_inspector(&self, config: TracingInspectorConfig) -> TracingInspector {
+        TracingInspector::new(config).with_limits(self.trace_limits())
+    }
+
     /// Applies chain-specific state transitions required before executing a block.
     ///
     /// Note: This should only be called when tracing an entire block vs individual transactions.
@@ -485,5 +537,40 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&reth_execution_types::BundleSource(&changes));
         Ok(changes)
+    }
+}
+
+/// The trace bytes a request has left for the transactions it traces after each other.
+///
+/// The trace byte limit of [`Trace::trace_limits`] applies to each traced transaction, and a
+/// tracer starts its count over for every transaction. Requests that trace several transactions
+/// into one response take each one's limits from this budget and charge what it recorded, so that
+/// together they record at most the limit.
+#[derive(Debug)]
+pub struct RequestTraceBudget {
+    limits: TraceLimits,
+    /// Bytes recorded by the transactions traced so far. They are traced one after the other, so
+    /// relaxed ordering suffices.
+    recorded: AtomicUsize,
+}
+
+impl RequestTraceBudget {
+    /// Creates the budget of a request traced with `limits`.
+    pub const fn new(limits: TraceLimits) -> Self {
+        Self { limits, recorded: AtomicUsize::new(0) }
+    }
+
+    /// Returns the limits for the next transaction: the request's, with the byte limit lowered to
+    /// the bytes left.
+    pub fn limits(&self) -> TraceLimits {
+        let recorded = self.recorded.load(Ordering::Relaxed);
+        self.limits.set_max_recorded_bytes(
+            self.limits.max_recorded_bytes.map(|max| max.saturating_sub(recorded)),
+        )
+    }
+
+    /// Takes `recorded` bytes, what a transaction traced with [`Self::limits`] recorded.
+    pub fn charge(&self, recorded: usize) {
+        self.recorded.fetch_add(recorded, Ordering::Relaxed);
     }
 }

@@ -31,7 +31,7 @@ nybbles = { workspace = true, features = ["rlp"] }
 thiserror.workspace = true
 
 # evm
-evm2.workspace = true
+evm2 = { workspace = true, features = ["block"] }
 
 # `serde` feature
 serde = { workspace = true, optional = true }
@@ -47,6 +47,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["serde"] }
 reth-codecs = { workspace = true, features = ["alloy"] }
 alloy-eips.workspace = true
@@ -69,6 +70,7 @@ serde_with.workspace = true
 [features]
 default = ["std"]
 std = [
+    "reth-concurrency/std",
     "alloy-consensus/std",
     "alloy-genesis/std",
     "alloy-primitives/std",
@@ -100,6 +102,7 @@ account-ext = [
 eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
 serde = [
     "dep:serde",
+    "evm2/serde",
     "arrayvec?/serde",
     "bytes?/serde",
     "nybbles/serde",
@@ -122,6 +125,7 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "dep:plain_hasher",
     "dep:hash-db",
     "arbitrary",

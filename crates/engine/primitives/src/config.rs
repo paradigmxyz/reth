@@ -1,7 +1,7 @@
 //! Engine tree configuration.
 
 use alloy_eips::merge::EPOCH_SLOTS;
-use core::time::Duration;
+use core::{num::NonZeroUsize, time::Duration};
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
@@ -147,9 +147,6 @@ pub struct TreeConfig {
     /// This is used as a cutoff to prevent long-running sequential block execution when we receive
     /// a batch of downloaded blocks.
     max_execute_block_batch_size: usize,
-    /// Whether to always compare trie updates from the state root task to the trie updates from
-    /// the regular state root calculation.
-    always_compare_trie_updates: bool,
     /// Whether to disable state cache.
     disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
@@ -228,6 +225,8 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
+    /// BAL read-set prewarm threads; `None` uses the production pool's default.
+    bal_prewarm_threads: Option<NonZeroUsize>,
     /// Whether block execution reuses transaction prewarming results.
     prewarm_reuse: bool,
     /// Whether to skip trie state-root computation during engine validation.
@@ -263,7 +262,6 @@ impl Default for TreeConfig {
             max_invalid_header_cache_length: DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH,
             invalid_header_hit_eviction_threshold: DEFAULT_INVALID_HEADER_HIT_EVICTION_THRESHOLD,
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
-            always_compare_trie_updates: false,
             disable_state_cache: false,
             disable_prewarming: false,
             txpool_prewarming: false,
@@ -287,6 +285,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_prewarm_threads: None,
             prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
@@ -314,7 +313,6 @@ impl TreeConfig {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         max_execute_block_batch_size: usize,
-        always_compare_trie_updates: bool,
         disable_state_cache: bool,
         disable_prewarming: bool,
         state_provider_metrics: bool,
@@ -355,7 +353,6 @@ impl TreeConfig {
             max_invalid_header_cache_length,
             invalid_header_hit_eviction_threshold,
             max_execute_block_batch_size,
-            always_compare_trie_updates,
             disable_state_cache,
             disable_prewarming,
             txpool_prewarming: false,
@@ -379,6 +376,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_prewarm_threads: None,
             prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
@@ -467,12 +465,6 @@ impl TreeConfig {
     /// Returns whether txpool prewarming is enabled.
     pub const fn txpool_prewarming(&self) -> bool {
         self.txpool_prewarming
-    }
-
-    /// Returns whether to always compare trie updates from the state root task to the trie updates
-    /// from the regular state root calculation.
-    pub const fn always_compare_trie_updates(&self) -> bool {
-        self.always_compare_trie_updates
     }
 
     /// Returns the cross-block cache size.
@@ -631,16 +623,6 @@ impl TreeConfig {
     /// Enables or disables txpool transaction prewarming.
     pub const fn with_txpool_prewarming(mut self, enabled: bool) -> Self {
         self.txpool_prewarming = enabled;
-        self
-    }
-
-    /// Setter for whether to always compare trie updates from the state root task to the trie
-    /// updates from the regular state root calculation.
-    pub const fn with_always_compare_trie_updates(
-        mut self,
-        always_compare_trie_updates: bool,
-    ) -> Self {
-        self.always_compare_trie_updates = always_compare_trie_updates;
         self
     }
 
@@ -848,6 +830,17 @@ impl TreeConfig {
     /// Setter for whether to disable BAL state prefetching during prewarm.
     pub const fn without_bal_batch_io(mut self, disable_bal_batch_io: bool) -> Self {
         self.disable_bal_batch_io = disable_bal_batch_io;
+        self
+    }
+
+    /// Returns the BAL read-set prewarm pool size, or `None` for the production default.
+    pub const fn bal_prewarm_threads(&self) -> Option<NonZeroUsize> {
+        self.bal_prewarm_threads
+    }
+
+    /// Sets the nonzero number of BAL read-set prewarm workers per engine.
+    pub const fn with_bal_prewarm_threads(mut self, threads: NonZeroUsize) -> Self {
+        self.bal_prewarm_threads = Some(threads);
         self
     }
 

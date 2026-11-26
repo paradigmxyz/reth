@@ -34,7 +34,7 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
                 DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
                 DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
@@ -435,8 +435,8 @@ pub struct NetworkArgs {
     /// Only peers with IP addresses within these ranges will be allowed to connect.
     ///
     /// Example: --netrestrict "192.168.0.0/16,10.0.0.0/8"
-    #[arg(long, value_name = "NETRESTRICT")]
-    pub netrestrict: Option<String>,
+    #[arg(long, value_name = "NETRESTRICT", value_parser = IpFilter::from_cidr_string)]
+    pub netrestrict: Option<IpFilter>,
 
     /// Enforce EIP-868 ENR fork ID validation for discovered peers.
     ///
@@ -536,6 +536,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             max_pending_pool_imports: self.max_pending_pool_imports,
+            max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
             tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
@@ -584,7 +585,7 @@ impl NetworkArgs {
         let peers_file = self.peers_file.clone().unwrap_or(default_peers_file);
 
         // Configure peer connections
-        let ip_filter = self.ip_filter().unwrap_or_default();
+        let ip_filter = self.ip_filter();
         let peers_config = config
             .peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
@@ -592,7 +593,9 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.resolved_max_inbound_peers())
             .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter)
-            .with_enforce_enr_fork_id(self.enforce_enr_fork_id);
+            // The flag can only enable enforcement, so the reth.toml value applies when it is not
+            // passed.
+            .with_enforce_enr_fork_id(self.enforce_enr_fork_id || config.peers.enforce_enr_fork_id);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key, executor)
@@ -690,7 +693,7 @@ impl NetworkArgs {
     ) -> Result<SecretKey, SecretKeyError> {
         if let Some(b256) = &self.p2p_secret_key_hex {
             // Use the B256 value directly (already validated as 32 bytes)
-            SecretKey::from_slice(b256.as_slice()).map_err(SecretKeyError::SecretKeyDecodeError)
+            SecretKey::from_secret_bytes(b256.0).map_err(SecretKeyError::SecretKeyDecodeError)
         } else {
             // Load from file (either provided path or default)
             let secret_key_path = self.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
@@ -698,15 +701,9 @@ impl NetworkArgs {
         }
     }
 
-    /// Creates an IP filter from the netrestrict argument.
-    ///
-    /// Returns an error if the CIDR format is invalid.
-    pub fn ip_filter(&self) -> Result<IpFilter, ipnet::AddrParseError> {
-        if let Some(netrestrict) = &self.netrestrict {
-            IpFilter::from_cidr_string(netrestrict)
-        } else {
-            Ok(IpFilter::allow_all())
-        }
+    /// Returns the IP filter from the netrestrict argument, allowing all IPs if it is not set.
+    pub fn ip_filter(&self) -> IpFilter {
+        self.netrestrict.clone().unwrap_or_default()
     }
 }
 
@@ -1533,7 +1530,7 @@ mod tests {
         let secret_key = args.secret_key(default_path).unwrap();
 
         // Verify the secret key matches the hex input
-        assert_eq!(alloy_primitives::hex::encode(secret_key.secret_bytes()), hex);
+        assert_eq!(alloy_primitives::hex::encode(secret_key.to_secret_bytes()), hex);
     }
 
     #[test]
@@ -1542,9 +1539,9 @@ mod tests {
             CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "192.168.0.0/16"])
                 .args;
 
-        assert_eq!(args.netrestrict, Some("192.168.0.0/16".to_string()));
+        assert_eq!(args.netrestrict, Some(IpFilter::from_cidr_string("192.168.0.0/16").unwrap()));
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
         assert!(!ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
@@ -1559,9 +1556,12 @@ mod tests {
         ])
         .args;
 
-        assert_eq!(args.netrestrict, Some("192.168.0.0/16,10.0.0.0/8".to_string()));
+        assert_eq!(
+            args.netrestrict,
+            Some(IpFilter::from_cidr_string("192.168.0.0/16,10.0.0.0/8").unwrap())
+        );
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
         assert!(ip_filter.is_allowed(&"10.5.10.20".parse().unwrap()));
@@ -1574,7 +1574,7 @@ mod tests {
             CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "2001:db8::/32"])
                 .args;
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"2001:db8::1".parse().unwrap()));
         assert!(!ip_filter.is_allowed(&"2001:db9::1".parse().unwrap()));
@@ -1585,7 +1585,7 @@ mod tests {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
         assert_eq!(args.netrestrict, None);
 
-        let ip_filter = args.ip_filter().unwrap();
+        let ip_filter = args.ip_filter();
         assert!(!ip_filter.has_restrictions());
         assert!(ip_filter.is_allowed(&"192.168.1.1".parse().unwrap()));
         assert!(ip_filter.is_allowed(&"10.0.0.1".parse().unwrap()));
@@ -1593,11 +1593,14 @@ mod tests {
 
     #[test]
     fn netrestrict_invalid_cidr() {
-        let args =
-            CommandParser::<NetworkArgs>::parse_from(["reth", "--netrestrict", "invalid-cidr"])
-                .args;
-
-        assert!(args.ip_filter().is_err());
+        for cidr in ["invalid-cidr", "10.0.0.0/33", "192.168.0.0/16,10.0.0.0/33"] {
+            let Err(err) =
+                CommandParser::<NetworkArgs>::try_parse_from(["reth", "--netrestrict", cidr])
+            else {
+                panic!("{cidr} should be rejected")
+            };
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{cidr}");
+        }
     }
 
     #[test]
@@ -1609,7 +1612,7 @@ mod tests {
                 .network_config::<EthNetworkPrimitives>(
                     &Config::default(),
                     MAINNET.clone(),
-                    SecretKey::from_byte_array(&[1u8; 32]).unwrap(),
+                    SecretKey::from_secret_bytes([1u8; 32]).unwrap(),
                     PathBuf::new(),
                     Runtime::test(),
                 )
@@ -1641,7 +1644,7 @@ mod tests {
         };
 
         // Build the network config using a deterministic secret key
-        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
         let builder = args.network_config::<EthNetworkPrimitives>(
             &Config::default(),
             MAINNET.clone(),
@@ -1665,7 +1668,7 @@ mod tests {
         let enr = "enr:-IS4QHCYrYZbAKWCBRlAy5zzaDZXJBGkcnh4MHcBFZntXNFrdvJjX04jRzjzCBOonrkTfj499SZuOh8R33Ls8RRcy5wBgmlkgnY0gmlwhH8AAAGJc2VjcDI1NmsxoQPKY0yuDUmstAHYpMa2_oxVtw0RW_QAdpzBQA8yWM0xOIN1ZHCCdl8";
         let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303";
         let config = Config { bootnodes: vec![enr.parse().unwrap()], ..Default::default() };
-        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
 
         let boot_nodes = |args: &NetworkArgs| {
             args.network_config::<EthNetworkPrimitives>(
@@ -1685,5 +1688,34 @@ mod tests {
 
         let args = NetworkArgs { bootnodes: Some(vec![enode.parse().unwrap()]), ..args };
         assert_eq!(boot_nodes(&args), vec![enode.parse::<TrustedPeer>().unwrap()]);
+    }
+
+    #[test]
+    fn network_config_enforce_enr_fork_id_from_config_or_cli() {
+        let secret_key = SecretKey::from_secret_bytes([1u8; 32]).unwrap();
+
+        let enforced = |args: &NetworkArgs, config: &Config| {
+            args.network_config::<EthNetworkPrimitives>(
+                config,
+                MAINNET.clone(),
+                secret_key,
+                PathBuf::from("peers.json"),
+                Runtime::test(),
+            )
+            .build_with_noop_provider(MAINNET.clone())
+            .peers_config
+            .enforce_enr_fork_id
+        };
+
+        let args = NetworkArgs { no_persist_peers: true, ..Default::default() };
+        let mut config = Config::default();
+        assert!(!enforced(&args, &config));
+
+        config.peers.enforce_enr_fork_id = true;
+        assert!(enforced(&args, &config));
+
+        config.peers.enforce_enr_fork_id = false;
+        let args = NetworkArgs { enforce_enr_fork_id: true, ..args };
+        assert!(enforced(&args, &config));
     }
 }
