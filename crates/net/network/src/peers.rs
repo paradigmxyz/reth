@@ -936,6 +936,11 @@ impl PeersManager {
 
                 // a temporary peer is removed however its session ends
                 remove_peer = peer.is_temporary();
+                if remove_peer && peer.state.is_incoming() {
+                    // Only a failed dial leaves a cooldown without a row, so inbound sessions
+                    // under fresh identities cannot evict the deadlines of failed candidates.
+                    backoff_until = None;
+                }
 
                 self.connection_info.decr_state(peer.state);
                 peer.state = PeerConnectionState::Idle;
@@ -5421,19 +5426,26 @@ mod tests {
         );
         let refused_until = *peers.candidate_cooldowns.peek(&candidate).unwrap();
 
-        // an inbound session of the same identity ends with a shorter backoff.
+        peers.backoff_peer_until(candidate, std::time::Instant::now());
+        assert_eq!(peers.candidate_cooldowns.peek(&candidate), Some(&refused_until));
+    }
+
+    #[tokio::test]
+    async fn test_inbound_temporary_peer_leaves_no_cooldown() {
+        let mut peers = PeersManager::new(PeersConfig::default());
+        let peer_id = PeerId::random();
         assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
-        let inbound_addr = "5.6.7.8:40404".parse().unwrap();
-        peers.on_incoming_session_established(candidate, inbound_addr);
+        let addr = "5.6.7.8:40404".parse().unwrap();
+        peers.on_incoming_session_established(peer_id, addr);
         peers.on_active_session_dropped(
-            &inbound_addr,
-            &candidate,
+            &addr,
+            &peer_id,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
                 DisconnectReason::TooManyPeers,
             )),
         );
-        assert!(!peers.peers.contains_key(&candidate));
-        assert_eq!(peers.candidate_cooldowns.peek(&candidate), Some(&refused_until));
+        assert!(!peers.peers.contains_key(&peer_id));
+        assert!(peers.candidate_cooldowns.is_empty());
     }
 
     #[tokio::test]
