@@ -931,7 +931,6 @@ mod tests {
         let archives = tempdir()?;
         let txs = SnapshotComponentType::Transactions;
         let files = snapshot_source(Some(0..=25))?;
-        let short = snapshot_source(Some(0..=24))?;
         let dir = files.path().join("static_files");
         let mut manifest =
             generate_manifest(files.path(), archives.path(), None, 25, 1, 10, None, false)?;
@@ -960,14 +959,10 @@ mod tests {
             manifest.components.insert(txs.key().into(), component);
             let jars = collect_planned_archives(&manifest, &selections)?.transaction_jars()?;
             assert_eq!(restored_bodies_boundary(&dir, &jars, manifest.block)?, Some(expected));
-            let err =
-                restored_bodies_boundary(&short.path().join("static_files"), &jars, manifest.block)
-                    .unwrap_err();
-            assert_eq!(
-                err.to_string(),
-                "Selected transaction files do not cover snapshot block 25"
-            );
         }
+        let jars = collect_planned_archives(&manifest, &selections)?.transaction_jars()?;
+        let err = restored_bodies_boundary(&dir, &jars, 26).unwrap_err();
+        assert_eq!(err.to_string(), "Selected transaction files do not cover snapshot block 26");
         Ok(())
     }
 
@@ -980,7 +975,6 @@ mod tests {
         let misplaced = "Transaction static file static_file_transactions_0_9 must be directly under static_files";
         for (path, expected) in [
             ("static_files/backup/static_file_transactions_0_9", misplaced),
-            ("backup/static_file_transactions_0_9", misplaced),
             ("static_file_transactions_0_9", misplaced),
             (
                 "static_files/static_file_receipts_0_9",

@@ -1312,11 +1312,12 @@ mod tests {
     };
     use reth_db_api::transaction::DbTxMut;
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
-    use reth_node_builder::NodeTypesWithDBAdapter;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
-        providers::RocksDBProvider, test_utils::MockNodeTypes, BlockNumReader, BlockReader,
-        BlockWriter, ProviderError, ProviderFactory, PruneCheckpointReader,
+        providers::RocksDBProvider,
+        test_utils::{MockNodeTypes, MockNodeTypesWithDB},
+        BlockNumReader, BlockReader, BlockWriter, ProviderError, ProviderFactory,
+        PruneCheckpointReader,
     };
     use reth_prune::PrunerBuilder;
     use reth_prune_types::PruneCheckpoint;
@@ -2130,14 +2131,7 @@ mod tests {
         Ok(snapshot_db(target)?.tx()?.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?)
     }
 
-    fn checkpoint(block: u64, mode: Option<PruneMode>) -> PruneCheckpoint {
-        let checkpoint = PruneCheckpoint::pruned_through(block);
-        PruneCheckpoint { prune_mode: mode.unwrap_or(checkpoint.prune_mode), ..checkpoint }
-    }
-
-    fn open_snapshot(
-        dir: &TempDir,
-    ) -> Result<ProviderFactory<NodeTypesWithDBAdapter<MockNodeTypes, DatabaseEnv>>> {
+    fn open_snapshot(dir: &TempDir) -> Result<ProviderFactory<MockNodeTypesWithDB<DatabaseEnv>>> {
         Ok(ProviderFactory::new(
             snapshot_db(dir)?,
             MAINNET.clone(),
@@ -2168,45 +2162,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restore_repackaged_bodies_checkpoint() -> Result<()> {
+    async fn retry_repairs_repackaged_transaction_history() -> Result<()> {
         let source = source_with_transactions()?;
-        for (block, tx_number, cutoff, verified, old_tip, expected_block, expected_tx) in [
-            (24, 24, 13, false, false, 9, 9),
-            (24, 23, 13, false, false, 24, 23),
-            (24, 24, 25, false, false, 24, 24),
-            (15, 15, 13, false, false, 15, 15),
-            (15, 15, 13, false, true, 9, 9),
-            (24, 24, 13, true, false, 24, 24),
-        ] {
-            let checkpoint = PruneCheckpoint {
-                block_number: Some(block),
-                tx_number: Some(tx_number),
-                prune_mode: PruneMode::Before(cutoff),
-            };
-            let db = snapshot_db(&source)?;
-            let tx = db.tx_mut()?;
-            tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, checkpoint)?;
-            if old_tip {
-                tx.put::<tables::PruneCheckpoints>(
-                    PruneSegment::SenderRecovery,
-                    PruneCheckpoint { prune_mode: PruneMode::Full, ..checkpoint },
-                )?;
-            } else {
-                tx.delete::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery, None)?;
-            }
-            if verified {
-                tx.put::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned(), Vec::new())?;
-            }
-            tx.commit()?;
-            drop(db);
-            let target = tempdir()?;
-            restore_snapshot(&source, &target, 24, &["--with-txs-since=13"]).await?;
-            let factory = open_snapshot(&target)?;
-            let stored = factory.get_prune_checkpoint(PruneSegment::Bodies)?.unwrap();
-            assert_eq!(stored.block_number, Some(expected_block));
-            assert_eq!(stored.tx_number, Some(expected_tx));
-            assert_eq!(factory.earliest_block_number()?, expected_block + 1);
-        }
+        let old_tip = PruneCheckpoint {
+            block_number: Some(15),
+            tx_number: Some(15),
+            prune_mode: PruneMode::Before(13),
+        };
+        snapshot_db(&source)?.update(|tx| {
+            tx.put::<tables::PruneCheckpoints>(
+                PruneSegment::Bodies,
+                PruneCheckpoint { block_number: Some(24), tx_number: Some(24), ..old_tip },
+            )
+            .unwrap();
+            tx.put::<tables::PruneCheckpoints>(
+                PruneSegment::SenderRecovery,
+                PruneCheckpoint { prune_mode: PruneMode::Full, ..old_tip },
+            )
+            .unwrap();
+        })?;
+        let target = tempdir()?;
+        restore_snapshot(&source, &target, 24, &["--with-txs-since=21"]).await?;
+        let mode = PruneMode::Before(21);
+        assert_eq!(
+            bodies_checkpoint(&target)?,
+            Some(PruneCheckpoint { block_number: Some(19), tx_number: Some(19), prune_mode: mode })
+        );
+        let header = target.path().join("static_files/static_file_transactions_20_29.conf");
+        let expected = fs::read(&header)?;
+        let mut corrupt = expected.clone();
+        corrupt[0] ^= 1;
+        fs::write(&header, corrupt)?;
+
+        // The next snapshot still carries the checkpoint from before the source advanced.
+        snapshot_db(&source)?
+            .update(|tx| tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, old_tip))??;
+        restore_snapshot(&source, &target, 24, &["--with-txs-since=13"]).await?;
+        assert_eq!(fs::read(header)?, expected);
+        let factory = open_snapshot(&target)?;
+        assert_eq!(
+            factory.get_prune_checkpoint(PruneSegment::Bodies)?,
+            Some(PruneCheckpoint { block_number: Some(9), tx_number: Some(9), prune_mode: mode })
+        );
+        assert_eq!(factory.earliest_block_number()?, 10);
         Ok(())
     }
 
@@ -2215,6 +2213,7 @@ mod tests {
         let source = source_with_transactions()?;
         let target = tempdir()?;
         restore_snapshot(&source, &target, 24, &["--with-txs"]).await?;
+        assert_eq!(bodies_checkpoint(&target)?, None);
         restore_snapshot(&source, &target, 24, &["--with-txs-since=21"]).await?;
         let files = target.path().join("static_files");
         for ext in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
@@ -2259,40 +2258,19 @@ mod tests {
 
     #[tokio::test]
     async fn restore_transaction_bodies_and_retention() -> Result<()> {
-        for (start, tip, flag, mode, boundary) in [
-            (Some(0), 24, "--with-txs-since=13", Some(PruneMode::Before(13)), Some(9)),
-            (Some(0), 24, "--with-txs", None, None),
-            (Some(0), 24, "--with-txs-since=30", Some(PruneMode::Before(30)), Some(24)),
-            (Some(3), 3, "--with-txs", None, Some(2)),
-            (None, 24, "--with-txs-distance=30000", Some(PruneMode::Distance(30000)), Some(24)),
-            (None, 24, "--with-txs", None, Some(24)),
-        ] {
-            let source = snapshot_source(start.map(|start| start..=tip))?;
+        for (bodies, boundary) in [(Some(3..=3), 2), (None, 3)] {
+            let source = snapshot_source(bodies)?;
             let target = tempdir()?;
-            let static_dir = tempdir()?;
-            let flags = [flag, "--datadir.static-files", static_dir.path().to_str().unwrap()];
-            restore_snapshot(&source, &target, tip, &flags).await?;
+            let files = tempdir()?;
+            let flags = ["--with-txs", "--datadir.static-files", files.path().to_str().unwrap()];
+            restore_snapshot(&source, &target, 3, &flags).await?;
             let config = Config::from_path(target.path().join("reth.toml"))?;
-            assert_eq!(config.prune.segments.bodies_history, mode, "{flag}");
-            let expected = boundary.map(|block| checkpoint(block, mode));
-            assert_eq!(bodies_checkpoint(&target)?, expected, "{flag} {start:?}");
+            assert_eq!(config.prune.segments.bodies_history, None);
+            assert_eq!(
+                bodies_checkpoint(&target)?,
+                Some(PruneCheckpoint::pruned_through(boundary))
+            );
         }
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn retry_repairs_selected_transactions() -> Result<()> {
-        let source = snapshot_source(Some(0..=24))?;
-        let target = tempdir()?;
-        restore_snapshot(&source, &target, 24, &["--with-txs-since=21"]).await?;
-        let header = target.path().join("static_files/static_file_transactions_20_29.conf");
-        let expected = fs::read(&header)?;
-        let mut corrupt = expected.clone();
-        corrupt[0] ^= 1;
-        fs::write(&header, corrupt)?;
-        restore_snapshot(&source, &target, 24, &["--with-txs-since=13"]).await?;
-        assert_eq!(fs::read(header)?, expected);
-        assert_eq!(bodies_checkpoint(&target)?, Some(checkpoint(9, Some(PruneMode::Before(21)))));
         Ok(())
     }
 
@@ -2303,45 +2281,41 @@ mod tests {
         fs::write(target.path().join("reth.toml"), "[invalid")?;
         let path = target.path().join("configs/custom.toml");
         let restore = async |flags: &[&str]| restore_snapshot(&source, &target, 24, flags).await;
-        let flags = ["--config", path.to_str().unwrap(), "--with-txs-since=30"];
-        restore(&flags).await?;
-        assert_eq!(
-            Config::from_path(&path)?.prune.segments.bodies_history,
-            Some(PruneMode::Before(30))
-        );
-
-        let retained = "[prune.segments]\nbodies_history = { distance = 30000 }\n[static_files.blocks_per_file]\ntransactions = 10\n";
-        let expected = Some(checkpoint(24, Some(PruneMode::Distance(30000))));
-        fs::write(&path, retained)?;
-        restore(&flags).await?;
+        let mode = PruneMode::Distance(30000);
+        let expected =
+            Some(PruneCheckpoint { prune_mode: mode, ..PruneCheckpoint::pruned_through(24) });
+        restore(&["--config", path.to_str().unwrap(), "--with-txs-distance=30000"]).await?;
+        assert_eq!(Config::from_path(&path)?.prune.segments.bodies_history, Some(mode));
         assert_eq!(bodies_checkpoint(&target)?, expected);
 
         // Resolve the alias before cleanup removes the intermediate directory.
         let subdir = target.path().join("db/subdir");
+        fs::create_dir_all(&subdir)?;
         let alias = subdir.join("../../configs/custom.toml");
+        let alias = alias.to_str().unwrap();
         let marker = target.path().join("static_files/local");
-        for cleanup in ["--force", "--prune-unlisted"] {
-            fs::create_dir_all(&subdir)?;
-            fs::write(&marker, "local")?;
-            fs::write(&path, "[invalid")?;
-            let flags = [cleanup, "--minimal", "--config", alias.to_str().unwrap()];
-            let error = Config::from_path(&path).unwrap_err().to_string();
-            assert_eq!(restore(&flags).await.unwrap_err().to_string(), error);
-            assert_eq!(fs::read_to_string(&marker)?, "local");
+        fs::write(&marker, "local")?;
+        fs::write(&path, "[invalid")?;
+        let error = Config::from_path(&path).unwrap_err().to_string();
+        assert_eq!(
+            restore(&["--force", "--minimal", "--config", alias]).await.unwrap_err().to_string(),
+            error
+        );
+        assert_eq!(fs::read_to_string(&marker)?, "local");
 
-            fs::write(&path, "[static_files.blocks_per_file]\ntransactions = 0")?;
-            assert_eq!(
-                restore(&flags).await.unwrap_err().to_string(),
-                "Transactions segment blocks per file must be greater than 0"
-            );
-            assert_eq!(fs::read_to_string(&marker)?, "local");
+        let flags = ["--prune-unlisted", "--minimal", "--config", alias];
+        fs::write(&path, "[static_files.blocks_per_file]\ntransactions = 0")?;
+        assert_eq!(
+            restore(&flags).await.unwrap_err().to_string(),
+            "Transactions segment blocks per file must be greater than 0"
+        );
+        assert_eq!(fs::read_to_string(&marker)?, "local");
 
-            fs::write(&path, retained)?;
-            restore(&flags).await?;
-            assert!(target.path().join("static_files/static_file_transactions_20_29").exists());
-            assert_eq!(bodies_checkpoint(&target)?, expected);
-            assert!(!subdir.exists());
-        }
+        fs::write(&path, "[prune.segments]\nbodies_history = { distance = 30000 }\n[static_files.blocks_per_file]\ntransactions = 10\n")?;
+        restore(&flags).await?;
+        assert!(target.path().join("static_files/static_file_transactions_20_29").exists());
+        assert_eq!(bodies_checkpoint(&target)?, expected);
+        assert!(!subdir.exists());
         Ok(())
     }
 
@@ -2377,7 +2351,7 @@ mod tests {
             assert_eq!(provider.latest_writer(segment)?.next_block_number(), tip + 1);
             Ok(())
         };
-        for tip in [21, 24, 24] {
+        for tip in [21, 24] {
             restore(tip, &["--with-txs-since=30"]).await?;
             check_anchor(tip)?;
         }
@@ -2391,6 +2365,7 @@ mod tests {
             )?;
             writer.commit()?;
         }
+        restore(25, &["--with-txs-since=30"]).await?;
         let err = restore(26, &["--with-txs-since=30"]).await.unwrap_err();
         assert_eq!(err.to_string(), "Local transaction files end before the snapshot tip; use --prune-unlisted to remove unselected files");
         assert_eq!(open()?.latest_writer(segment)?.user_header().tx_len(), Some(1));

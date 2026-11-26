@@ -149,7 +149,7 @@ async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     assert_eq!(server.requests(), vec![("/snapshot/manifest.json".into(), None)]);
 
     // Same-size corruption must be detected by checksum, not just the file length.
-    fs::write(static_files.join("receipts-1"), b"corrupt-1.tar.zst").unwrap();
+    fs::write(static_files.join("receipts-1"), b"Receipts-1.tar.zst").unwrap();
     server.clear_requests();
     success(download(&server, dir.path(), &args));
     assert_eq!(fs::read(static_files.join("receipts-1")).unwrap(), b"receipts-1.tar.zst");
@@ -265,21 +265,6 @@ async fn wrong_chain_is_rejected_before_force_removes_data() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn explicit_archive_source_and_datadir_allow_other_chains() {
-    let mut snapshot = Snapshot::new();
-    snapshot.manifest["chain_id"] = json!(42431);
-    let server = snapshot.serve(true).await;
-    let dir = tempfile::tempdir().unwrap();
-    success(download(&server, dir.path(), &["--archive"]));
-    assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
-    assert_eq!(
-        fs::read(dir.path().join("static_files/receipts-0")).unwrap(),
-        b"receipts-0.tar.zst"
-    );
-    assert!(dir.path().join("reth.toml").exists());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bad_output_checksum_prevents_finalization() {
     let mut snapshot = Snapshot::new();
     snapshot.manifest["components"]["state"]["output_files"][0]["blake3"] =
@@ -332,6 +317,12 @@ async fn completion_only_suggests_startup_for_matching_chain() {
             })
             .unwrap();
         assert_eq!(suffix, expected_suffix);
+        assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
+        assert_eq!(
+            fs::read(dir.path().join("static_files/receipts-0")).unwrap(),
+            b"receipts-0.tar.zst"
+        );
+        assert!(dir.path().join("reth.toml").exists());
     }
 }
 
@@ -392,6 +383,9 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
             flags.push("--with-rocksdb");
         }
         run("download", target.path(), &flags);
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(target.path().join("reth.toml")).unwrap()).unwrap();
+        assert_eq!(config["prune"]["segments"]["bodies_history"]["before"].as_integer(), Some(100));
         let start_node = || {
             let node = Reth::at(RETH)
                 .instance(0)

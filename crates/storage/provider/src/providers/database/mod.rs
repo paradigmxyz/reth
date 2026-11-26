@@ -1648,9 +1648,20 @@ mod tests {
         assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
         assert_eq!(factory.get_prune_checkpoint(PruneSegment::Bodies)?, Some(legacy));
 
-        // A verified source boundary inside a physically retained jar still expires its bodies.
         let provider = factory.provider_rw()?;
+        for ambiguous in [
+            PruneCheckpoint { tx_number: Some(0), ..legacy },
+            PruneCheckpoint { prune_mode: PruneMode::Before(6), ..legacy },
+            PruneCheckpoint { block_number: Some(3), ..legacy },
+        ] {
+            assert_eq!(
+                files.snapshot_bodies_checkpoint(provider.tx_ref(), ambiguous, 0, 5)?,
+                ambiguous
+            );
+        }
+        // A verified source boundary inside a physically retained jar still expires its bodies.
         provider.write_metadata(keys::VERIFIED_SNAPSHOT_BODIES, Vec::new())?;
+        assert_eq!(files.snapshot_bodies_checkpoint(provider.tx_ref(), legacy, 0, 5)?, legacy);
         let pruned = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(3) };
         provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
         provider.commit()?;
