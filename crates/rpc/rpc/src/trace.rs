@@ -209,7 +209,7 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        db.commit_source(&res.pending_state)
+                        db.commit_pending(&res.pending_state)
                     }
                 }
 
@@ -1070,6 +1070,47 @@ mod tests {
             .await,
             [U256::from(0x1234); 2]
         );
+    }
+
+    #[tokio::test]
+    async fn trace_call_many_created_account_ignores_seeded_storage() {
+        let provider = MockEthProvider::default();
+        let sender = Address::with_last_byte(0x11);
+        provider.add_account(sender, ExtendedAccount::new(0, U256::from(10u128.pow(18))));
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+        let api = TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default());
+
+        // The first call creates a contract that returns slot 0, at an address whose slot 0 the
+        // state override seeds; the created account's storage starts empty for the second call.
+        let created = sender.create(0);
+        let create = TransactionRequest::default()
+            .from(sender)
+            .input(bytes!("6a60005460005260206000f3600052600b6015f3").into());
+        let read = TransactionRequest::default().from(sender).to(created);
+        let state = StateOverride::from_iter([(
+            created,
+            alloy_rpc_types_eth::state::AccountOverride {
+                state_diff: Some([(B256::ZERO, B256::with_last_byte(42))].into_iter().collect()),
+                ..Default::default()
+            },
+        )]);
+        let results = api
+            .trace_call_many(
+                vec![(create, HashSet::default()), (read, HashSet::default())],
+                None,
+                EvmOverrides::state(Some(state)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(U256::from_be_slice(&results[1].output), U256::ZERO);
     }
 
     #[tokio::test]
