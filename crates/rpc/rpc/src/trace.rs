@@ -108,6 +108,7 @@ where
             [&trace_request.trace_types],
             calls_gas(self.eth_api().call_gas_limit(), [&trace_request.call]),
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -146,6 +147,7 @@ where
             [&trace_types],
             tx.gas_limit(),
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -185,6 +187,7 @@ where
             calls.iter().map(|(_, trace_types)| trace_types),
             calls_gas(self.eth_api().call_gas_limit(), calls.iter().map(|(call, _)| call)),
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -262,6 +265,7 @@ where
             [&trace_types],
             tx.gas_limit(),
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         )
         .saturating_add(execution_weight_mib(0, block.header().gas_used(), 0));
         let memory =
@@ -650,6 +654,7 @@ where
             std::iter::repeat_n(&trace_types, block.body().transactions().len()),
             block.header().gas_used(),
             self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
         );
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
@@ -992,15 +997,16 @@ pub struct BlockStorageAccess {
 }
 
 /// Returns the most memory, in MiB, that parity traces of calls with the `trace_types` of each
-/// call and `gas` gas in total may hold, where each call may record `max_trace_bytes`.
+/// call and `gas` gas in total may hold, where the calls share `max_trace_bytes` of recorded
+/// steps and a response of at most `max_response_size` bytes.
 ///
 /// Call traces grow with the frames the execution creates. A `vmTrace` records up to a step per
-/// gas, which the trace byte budget bounds per call, and a `stateDiff` the state the execution
-/// touches.
+/// gas, which both limits bound, and a `stateDiff` the state the execution touches.
 fn parity_trace_weight_mib<'a>(
     trace_types: impl IntoIterator<Item = &'a HashSet<TraceType>>,
     gas: u64,
     max_trace_bytes: Option<usize>,
+    max_response_size: Option<usize>,
 ) -> u64 {
     let (mut calls, mut steps) = (0u64, false);
     for trace_types in trace_types {
@@ -1011,10 +1017,11 @@ fn parity_trace_weight_mib<'a>(
     let mut recorded = gas.saturating_mul(4);
     if steps {
         let step_bytes = gas.saturating_mul(64);
-        recorded = recorded.saturating_add(max_trace_bytes.map_or(step_bytes, |max| {
-            // The recording and the response built from it.
-            step_bytes.min((max as u64).saturating_mul(2).saturating_mul(calls))
-        }));
+        let limit = max_trace_bytes.into_iter().chain(max_response_size).min();
+        // The recording, the response built from it and the copy sent.
+        recorded = recorded.saturating_add(
+            limit.map_or(step_bytes, |limit| step_bytes.min(limit as u64)).saturating_mul(3),
+        );
     }
     bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
 }
@@ -1884,18 +1891,20 @@ mod tests {
     #[test]
     fn parity_trace_weights() {
         let types = |names: &[TraceType]| names.iter().copied().collect::<HashSet<_>>();
-        let max_trace_bytes = Some(320 << 20);
+        let (max_trace_bytes, max_response_size) = (Some(320 << 20), Some(160 << 20));
+        let weight = |calls: &[HashSet<TraceType>], gas| {
+            parity_trace_weight_mib(calls, gas, max_trace_bytes, max_response_size)
+        };
 
-        assert_eq!(
-            parity_trace_weight_mib([&types(&[TraceType::Trace])], 10_000_000, max_trace_bytes),
-            55
-        );
-        assert_eq!(
-            parity_trace_weight_mib([&types(&[TraceType::VmTrace])], 10_000_000, max_trace_bytes),
-            665
-        );
-        // The trace byte budget bounds the steps each call records.
+        assert_eq!(weight(&[types(&[TraceType::Trace])], 10_000_000), 55);
+        // The response size bounds the steps.
+        assert_eq!(weight(&[types(&[TraceType::VmTrace])], 10_000_000), 535);
+        // The calls share both limits.
+        assert_eq!(weight(&vec![types(&[TraceType::VmTrace]); 64], 50_000_000), 939);
         let calls = [types(&[TraceType::Trace]), types(&[TraceType::StateDiff])];
-        assert_eq!(parity_trace_weight_mib(&calls, 10_000_000, Some(1 << 20)), 63);
+        assert_eq!(
+            parity_trace_weight_mib(&calls, 10_000_000, Some(1 << 20), max_response_size),
+            62
+        );
     }
 }
