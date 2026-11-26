@@ -26,11 +26,15 @@ pub trait TraceApi<TxReq> {
     /// Performs multiple call traces on top of the same block, defaulting to latest when no block
     /// is specified. Each call is executed with the preceding calls applied first, allowing
     /// dependent transactions to be traced.
+    ///
+    /// A state override applies once before the first call, and a block override to every call.
     #[method(name = "callMany")]
     async fn trace_call_many(
         &self,
         calls: CallManyRequest<Vec<(TxReq, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<Vec<TraceResults>>;
 
     /// Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.

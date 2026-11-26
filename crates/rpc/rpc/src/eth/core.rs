@@ -1117,7 +1117,11 @@ mod tests {
             2
         );
         assert_eq!(
-            trace_api.trace_call_many(trace_calls(transfers(2)), None).await.unwrap().len(),
+            trace_api
+                .trace_call_many(trace_calls(transfers(2)), None, Default::default())
+                .await
+                .unwrap()
+                .len(),
             2
         );
         assert_eq!(
@@ -1137,7 +1141,7 @@ mod tests {
             );
             assert_eq!(
                 trace_api
-                    .trace_call_many(trace_calls(calls.clone()), None)
+                    .trace_call_many(trace_calls(calls.clone()), None, Default::default())
                     .await
                     .unwrap_err()
                     .to_string(),
@@ -1164,7 +1168,7 @@ mod tests {
         );
         assert_eq!(
             trace_api
-                .trace_call_many(trace_calls(too_many.clone()), None)
+                .trace_call_many(trace_calls(too_many.clone()), None, Default::default())
                 .await
                 .unwrap_err()
                 .to_string(),
