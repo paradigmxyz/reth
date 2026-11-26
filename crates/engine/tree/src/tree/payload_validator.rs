@@ -117,7 +117,11 @@ use alloy_eip7928::{
 };
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
 use alloy_primitives::{map::B256Set, B256};
+use alloy_rpc_types_debug::ExecutionWitness;
+use reth_engine_primitives::PayloadWitnessRequests;
+use reth_evm::witness::ExecutionWitnessRecord;
 use reth_tasks::LazyHandle;
+use reth_trie::ExecutionWitnessMode;
 
 use crate::tree::{
     payload_processor::receipt_root_task::{IndexedReceipt, ReceiptRootTaskHandle},
@@ -128,7 +132,7 @@ use crate::tree::{
     },
 };
 use alloy_primitives::Address;
-use evm2::evm::{AccountInfo, Bal as EvmBal};
+use evm2::evm::{AccountInfo, Bal as EvmBal, CacheDB, Database, Db};
 use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
 use reth_consensus::{ConsensusError, FullConsensus, ReceiptRootBloom};
 use reth_engine_primitives::{
@@ -138,7 +142,7 @@ use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, BlockExecutor,
     BlockExecutorFactory, BlockExecutorFor, BlockTransactionResult, ConfigureEvm, Evm as _,
-    EvmEnvFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, OnStateHook, SpecFor,
+    EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, ExecutionCtxFor, OnStateHook, SpecFor,
 };
 use reth_execution_cache::{CacheFillMode, CacheStats};
 use reth_execution_types::DecodedEvmBal;
@@ -299,6 +303,8 @@ where
     txpool_prewarm: Option<txpool_prewarm::Handle<Evm::Primitives, P, Evm>>,
     /// Scratch buffer reused for BAL hash encoding across validated blocks.
     bal_hash_buf: Vec<u8>,
+    /// Outstanding RPC requests for execution witnesses.
+    witness_requests: Option<PayloadWitnessRequests>,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -355,7 +361,15 @@ where
             state_root_strategy: Arc::new(DefaultStateRootStrategy::default()),
             txpool_prewarm: None,
             bal_hash_buf: Vec::new(),
+            witness_requests: None,
         }
+    }
+
+    /// Connects request-scoped witness capture to the Engine API.
+    pub fn with_witness_requests(mut self, requests: PayloadWitnessRequests) -> Self {
+        requests.enable();
+        self.witness_requests = Some(requests);
+        self
     }
 
     /// Sets the state-root strategy used by payload validation.
@@ -598,7 +612,12 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        let sequential_reason = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let witness_request = self.witness_requests.as_ref().and_then(|r| r.pending(&input.hash()));
+        let mut witness = None;
+        // The serial path retains the complete execution read set and still rebuilds and
+        // validates the supplied BAL. Choose it before preparing state-root streaming tasks.
+        let sequential_reason = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()))
+            .or(witness_request.is_some().then_some("witness"));
         let parallel_bal_execution = sequential_reason.is_none();
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
@@ -729,6 +748,7 @@ where
                     &input,
                     &mut handle,
                     execution_state_hook,
+                    witness_request.as_ref().map(|_| (&mut witness, &state_provider_factory)),
                 ),
                 Err(err) => Err(err.into()),
             }
@@ -901,6 +921,30 @@ where
             .into())
         }
 
+        if let Some(request) = witness_request &&
+            let Some(witness) = witness
+        {
+            // Publish only after consensus, BAL, receipts and state-root validation. An invalid
+            // submission may claim the same hash as a concurrent valid request.
+            let witness = witness.and_then(|(mut witness, first_header)| {
+                let mut header = parent_block.clone();
+                loop {
+                    witness.headers.push(alloy_rlp::encode(header.header()).into());
+                    if header.number() <= first_header {
+                        break;
+                    }
+                    let hash = header.parent_hash();
+                    header = self
+                        .sealed_header_by_hash(hash, ctx.state())
+                        .map_err(|err| err.to_string())?
+                        .ok_or_else(|| format!("witness ancestor {hash} not found"))?;
+                }
+                witness.headers.reverse();
+                Ok(super::witness::encode_witness(witness))
+            });
+            request.publish(witness);
+        }
+
         let timing_stats = state_provider_stats.filter(|_| slow_block_enabled).map(|stats| {
             self.calculate_timing_stats(
                 &block,
@@ -1016,6 +1060,10 @@ where
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
         state_hook: Option<StateRootUpdateHook>,
+        witness: Option<(
+            &mut Option<Result<(ExecutionWitness, u64), String>>,
+            &OverlayStateProviderFactory<P, N>,
+        )>,
     ) -> Result<
         (BlockExecutionOutput<N::Receipt>, Vec<Address>, ReceiptRootReceiver, Option<ExecutedBal>),
         InsertBlockErrorKind,
@@ -1032,24 +1080,28 @@ where
         let transaction_count = input.transaction_count();
         let (receipt_tx, result_rx) = self.spawn_receipt_root_task(transaction_count);
         let executed_tx_index = Arc::clone(handle.executed_tx_index());
-        // Reuse validation reads must not alter a block's access list.
-        let prewarm_results = handle.prewarm_results().filter(|_| !input.has_block_access_list());
+        // Reuse validation reads must not alter a block's access list. Reused results also skip
+        // code and block hash reads, which a witness must record.
+        let prewarm_results = handle
+            .prewarm_results()
+            .filter(|_| !input.has_block_access_list() && witness.is_none());
         let execution_start = Instant::now();
         let evm_config = self.evm_config.clone().with_jit_support();
         let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
 
+        // Witness capture keeps every parent-state read in a cache that outlives the executor.
+        let mut witness_db = None;
         let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
             .in_scope(|| {
                 let db = StateProviderDatabase::new(state_provider);
-                let evm = if self.config.precompile_cache_disabled() {
-                    evm_config.evm_with_env(db, env.evm_env)
-                } else {
-                    evm_config.evm_with_precompile_cache(
-                        db,
+                let evm = if witness.is_some() {
+                    self.block_evm(
+                        &evm_config,
+                        witness_db.insert(CacheDB::new(Db::new(db))),
                         env.evm_env,
-                        self.precompile_cache_map.clone(),
-                        true,
                     )
+                } else {
+                    self.block_evm(&evm_config, db, env.evm_env)
                 };
                 let mut executor =
                     evm_config.block_executor_factory().create_executor(evm, execution_ctx);
@@ -1081,12 +1133,63 @@ where
         let built_bal =
             built_bal.map(|bal| ExecutedBal { alloy: (&bal).into(), evm: Arc::new(bal) });
 
+        if let Some((witness, state_provider_factory)) = witness &&
+            let Some(mut db) = witness_db
+        {
+            let codes = ExecutionWitnessRecord::commit_execution(&mut db, &output.state);
+            let first_header = db
+                .cache
+                .block_hashes
+                .keys()
+                .map(|number| number.saturating_to::<u64>())
+                .min()
+                .unwrap_or_else(|| input.num_hash().number.saturating_sub(1));
+            *witness = Some(
+                // Execution uses a lightweight provider; proofs need the same parent overlay's
+                // trie cursors, which are available through its full database provider.
+                state_provider_factory
+                    .database_provider_ro()
+                    .and_then(|provider| {
+                        ExecutionWitnessRecord::new(&db)
+                            .with_canonical_codes(codes)
+                            .into_execution_witness_without_headers(
+                                &provider,
+                                ExecutionWitnessMode::Canonical,
+                            )
+                    })
+                    .map(|witness| (witness, first_header))
+                    .map_err(|err| err.to_string()),
+            );
+        }
+
         let execution_duration = execution_start.elapsed();
         self.metrics.record_block_execution(&output, execution_duration);
         self.metrics.record_block_execution_gas_bucket(output.result.gas_used, execution_duration);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_duration, "Executed block");
 
         Ok((output, senders, result_rx, built_bal))
+    }
+
+    /// Creates the block execution EVM, caching precompile results unless disabled.
+    fn block_evm<'a, DB>(
+        &self,
+        evm_config: &Evm,
+        db: DB,
+        evm_env: EvmEnvFor<Evm>,
+    ) -> EvmFor<'a, Evm>
+    where
+        DB: Database + 'a,
+    {
+        if self.config.precompile_cache_disabled() {
+            evm_config.evm_with_env(db, evm_env)
+        } else {
+            evm_config.evm_with_precompile_cache(
+                db,
+                evm_env,
+                self.precompile_cache_map.clone(),
+                true,
+            )
+        }
     }
 
     /// Returns `None` when the BAL execute path should be used for this block, or else the first
