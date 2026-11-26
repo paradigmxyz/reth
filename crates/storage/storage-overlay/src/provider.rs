@@ -1638,6 +1638,8 @@ mod tests {
 
     /// The trie cursors and the multiproof calculator of the overlay read the trie tables with
     /// the key encoding of the settings, and return the same nodes and proofs for every encoding.
+    /// Node tests miss a wrong encoding here, because the engine falls back to the sequential
+    /// state root when the proof workers fail.
     #[test]
     fn trie_reads_match_across_trie_key_encodings() {
         // Enough accounts and slots for branch nodes below the roots of both tries.
