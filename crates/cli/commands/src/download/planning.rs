@@ -209,49 +209,14 @@ pub(super) fn restored_bodies_boundary(
     verifier: &OutputVerifier<'_>,
 ) -> Result<Option<u64>> {
     let tip = manifest.block;
-    let (Some(component), Some(distance)) = (
-        manifest.component(SnapshotComponentType::Transactions),
-        selection.and_then(|selection| selection_archive_distance(selection, tip)),
-    ) else {
+    let Some(distance) = selection.and_then(|selection| selection_archive_distance(selection, tip))
+    else {
         return Ok(Some(tip))
     };
-    let archives = match component {
-        ComponentManifest::Chunked(chunked) => {
-            let first = manifest.start_chunk_for_distance(chunked, distance);
-            let tip_chunk = tip / chunked.blocks_per_file;
-            if first > tip_chunk || tip_chunk >= chunked.num_chunks() || chunked.total_blocks < tip
-            {
-                return Ok(Some(tip))
-            }
-            // At equality the last file can end at tip (legacy height) or tip - 1 (block count).
-            if chunked.total_blocks == tip {
-                let outputs =
-                    chunked.chunk_output_files.get(tip_chunk as usize).into_iter().flatten();
-                let boundary = transaction_file_boundary(tip, outputs, verifier)?;
-                if boundary != (tip_chunk * chunked.blocks_per_file).checked_sub(1) {
-                    return Ok(boundary)
-                }
-            }
-            return Ok((first * chunked.blocks_per_file).checked_sub(1))
-        }
-        ComponentManifest::Single(archive) => std::slice::from_ref(archive),
-        ComponentManifest::Files(set) => &set.archives,
-    };
-    transaction_file_boundary(
-        tip,
-        archives.iter().flat_map(|archive| &archive.output_files),
-        verifier,
-    )
-}
-
-/// Finds the continuous suffix when the manifest does not give an exact range.
-fn transaction_file_boundary<'a>(
-    tip: u64,
-    outputs: impl IntoIterator<Item = &'a OutputFileChecksum>,
-    verifier: &OutputVerifier<'_>,
-) -> Result<Option<u64>> {
+    let archives =
+        manifest.snapshot_archives_for_distance(SnapshotComponentType::Transactions, distance);
     let mut ranges = Vec::new();
-    for output in outputs {
+    for output in archives.iter().flat_map(|archive| &archive.output_files) {
         if let Some(path) = static_file_relative_path(output.relative_path()?) &&
             path.extension().is_some_and(|ext| ext == CONFIG_FILE_EXTENSION)
         {

@@ -515,11 +515,7 @@ impl SnapshotManifest {
     }
 
     /// Returns the first chunk needed for a distance measured from the declared snapshot block.
-    pub(super) fn start_chunk_for_distance(
-        &self,
-        chunked: &ChunkedArchive,
-        distance: Option<u64>,
-    ) -> u64 {
+    fn start_chunk_for_distance(&self, chunked: &ChunkedArchive, distance: Option<u64>) -> u64 {
         let Some(distance) = distance else { return 0 };
         // The final archive may extend past the snapshot block. Counting back from its end
         // would shift the requested history window forward and could skip a required chunk.

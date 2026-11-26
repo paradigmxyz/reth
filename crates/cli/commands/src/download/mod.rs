@@ -601,9 +601,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         .await?;
 
         let config = self.download_config(&selections, &prepared.manifest, preset);
-        self.finalize_modular_download(&selections, &prepared.manifest, &config, target_dir)?;
-
-        Ok(Some(prepared))
+        reth_tasks::spawn_blocking(move || {
+            self.finalize_modular_download(
+                &selections,
+                &prepared.manifest,
+                &config,
+                &prepared.data_dir,
+            )?;
+            Ok(Some(prepared))
+        })
+        .await?
     }
 
     /// Resolves the exact modular archive plan and manifest context without downloading or
@@ -1206,6 +1213,8 @@ mod tests {
     };
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_node_api::NodeTypes;
+    use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
     use reth_prune_types::{PruneCheckpoint, PruneSegment};
     use reth_stages_types::{StageCheckpoint, StageId};
     use reth_static_file_types::StaticFileSegment;
@@ -1979,6 +1988,30 @@ mod tests {
                 "{flag}"
             );
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_transaction_file_starting_mid_chunk() -> Result<()> {
+        let source = tempdir()?;
+        snapshot_db(&source)?;
+        let static_files = source.path().join("static_files");
+        fs::create_dir_all(&static_files)?;
+        {
+            let provider = StaticFileProviderBuilder::read_write(&static_files)
+                .with_blocks_per_file(10)
+                .build::<<MockNodeTypes as NodeTypes>::Primitives>()?;
+            let mut writer = provider.get_writer(3, StaticFileSegment::Transactions)?;
+            writer.set_block_range(3..=3);
+            writer.commit()?;
+        }
+
+        let target = tempdir()?;
+        restore_snapshot(&source, &target, 3, "--with-txs").await?;
+        assert_eq!(
+            snapshot_db(&target)?.tx()?.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
+            Some(PruneCheckpoint::pruned_through(2))
+        );
         Ok(())
     }
 
