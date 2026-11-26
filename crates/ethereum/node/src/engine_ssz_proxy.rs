@@ -1405,6 +1405,10 @@ mod tests {
             let capabilities: serde_json::Value = serde_json::from_slice(&body).unwrap();
             let endpoints = capabilities["fork_scoped_endpoints"].as_array().unwrap();
             assert_eq!(endpoints.iter().any(|endpoint| endpoint == "payloads/witness"), enabled);
+            assert_eq!(
+                endpoints.iter().any(|endpoint| endpoint == "payloads/{payloadId}/witness"),
+                enabled
+            );
         }
         assert_eq!(
             parse_engine_path("/engine/v1/payloads/witness"),
@@ -1849,19 +1853,6 @@ mod tests {
         assert!(decoded_attrs.withdrawals.as_ref().unwrap().is_empty());
         assert_eq!(decoded_attrs.parent_beacon_block_root, Some(B256::with_last_byte(3)));
         assert!(custody_columns.is_none());
-    }
-
-    #[tokio::test]
-    async fn built_payload_witness_is_only_advertised_when_configured() {
-        for enabled in [false, true] {
-            let body = handle_capabilities(enabled).into_body().collect().await.unwrap().to_bytes();
-            let capabilities: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            let endpoints = capabilities["fork_scoped_endpoints"].as_array().unwrap();
-            assert_eq!(
-                endpoints.iter().any(|endpoint| endpoint == "payloads/{payloadId}/witness"),
-                enabled
-            );
-        }
     }
 
     #[tokio::test]
