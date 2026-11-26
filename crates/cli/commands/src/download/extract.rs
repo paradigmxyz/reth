@@ -582,22 +582,29 @@ fn write_regular_file<R: Read>(
     }
     ensure_inside(root, parent)?;
 
-    fs::remove_file_if_exists(dest)?;
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(dest)
-        .map_err(|error| FsPathError::create_file(error, dest))?;
+    // Like `tar`, create a new file instead of writing through an existing one, and remove an
+    // existing one only when it blocks the create, so other create failures keep it.
+    let create = || std::fs::OpenOptions::new().write(true).create_new(true).open(dest);
+    let file = match create() {
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            fs::remove_file_if_exists(dest)?;
+            create()
+        }
+        result => result,
+    }
+    .map_err(|error| FsPathError::create_file(error, dest))?;
     // Copying zero-fills the whole buffer before the first read, so a small file gets a buffer
     // of its own size.
     let capacity = entry.size().min(EXTRACTED_FILE_WRITE_SIZE as u64) as usize;
     let mut writer = BufWriter::with_capacity(capacity, file);
-    let written = io::copy(entry, &mut writer)?;
-    let file = writer.into_inner().map_err(|error| error.into_error())?;
+    let written = io::copy(entry, &mut writer)
+        .wrap_err_with(|| format!("failed to unpack `{}`", dest.display()))?;
+    let file = writer.into_inner().map_err(|error| FsPathError::write(error.into_error(), dest))?;
     eyre::ensure!(written == entry.size(), "Archive entry ended early: {}", dest.display());
 
     if let Ok(mode) = entry.header().mode() {
-        file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))?;
+        file.set_permissions(std::fs::Permissions::from_mode(mode & 0o777))
+            .wrap_err_with(|| format!("failed to set permissions of `{}`", dest.display()))?;
     }
     // Like `tar`, read the time as signed seconds, so times before the epoch are kept, avoid zero
     // times, and set the access time too. Times `SystemTime` cannot represent are skipped.
@@ -607,7 +614,8 @@ fn write_regular_file<R: Read>(
         let modified =
             if secs < 0 { UNIX_EPOCH.checked_sub(offset) } else { UNIX_EPOCH.checked_add(offset) };
         if let Some(modified) = modified {
-            file.set_times(FileTimes::new().set_accessed(modified).set_modified(modified))?;
+            file.set_times(FileTimes::new().set_accessed(modified).set_modified(modified))
+                .wrap_err_with(|| format!("failed to set times of `{}`", dest.display()))?;
         }
     }
     Ok(())
@@ -616,8 +624,11 @@ fn write_regular_file<R: Read>(
 /// Fails unless `dir` resolves to a path inside `root`, so archive entries cannot escape `root`
 /// through symlinks.
 fn ensure_inside(root: &Path, dir: &Path) -> Result<()> {
+    let canonicalize = |path: &Path| {
+        path.canonicalize().wrap_err_with(|| format!("failed to canonicalize `{}`", path.display()))
+    };
     eyre::ensure!(
-        dir.canonicalize()?.starts_with(root.canonicalize()?),
+        canonicalize(dir)?.starts_with(canonicalize(root)?),
         "Archive entry would unpack outside of {}",
         root.display()
     );
@@ -1473,6 +1484,41 @@ mod tests {
         assert_eq!(metadata.accessed().unwrap(), time);
         assert_eq!(metadata.permissions().mode() & 0o777, 0o600);
         assert_eq!(fs::read(&path).unwrap(), b"data");
+    }
+
+    #[test]
+    fn regular_file_errors_name_the_file() {
+        let data = (0..1 << 20).map(|i| (i % 251) as u8).collect::<Vec<_>>();
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(data.len() as u64);
+        header.set_mode(0o600);
+        header.set_cksum();
+        archive.append_data(&mut header, "db/data", data.as_slice()).unwrap();
+        let tar = archive.into_inner().unwrap();
+        // The first frame ends within the file's data and the second is cut short, so decoding
+        // fails while the file is written.
+        let split = tar.len() / 2;
+        let mut compressed = zstd::encode_all(&tar[..split], 0).unwrap();
+        compressed.extend_from_slice(&zstd::encode_all(&tar[split..], 0).unwrap()[..8]);
+
+        let target = tempfile::tempdir().unwrap();
+        let error = extract_archive_raw(
+            compressed.as_slice(),
+            CompressionFormat::Zstd,
+            target.path(),
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.chain().map(ToString::to_string).collect::<Vec<_>>(),
+            [
+                format!("failed to extract archive into `{}`", target.path().display()),
+                format!("failed to unpack `{}`", target.path().join("db/data").display()),
+                "incomplete frame".to_string(),
+            ]
+        );
     }
 
     #[test]
