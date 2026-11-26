@@ -165,7 +165,7 @@ where
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 // The calls share one trace byte budget, since they share one response.
-                let mut trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
+                let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 
