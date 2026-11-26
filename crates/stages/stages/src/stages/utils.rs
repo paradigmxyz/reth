@@ -10,7 +10,7 @@ use reth_db_api::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
         AccountBeforeTx, AddressStorageKey, BlockNumberAddress, ShardedKey,
     },
-    table::{Decode, Decompress, Table},
+    table::{Decode, Decompress, Key, Table},
     transaction::DbTx,
     BlockNumberList,
 };
@@ -23,8 +23,12 @@ use reth_provider::{
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, StorageChangeSetReader};
-use std::{hash::Hash, ops::RangeBounds};
-use tracing::info;
+use std::{
+    hash::{BuildHasher, Hash},
+    mem::size_of,
+    ops::RangeBounds,
+};
+use tracing::{debug, info};
 
 /// Number of blocks before pushing indices from cache to [`Collector`]
 const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
@@ -33,8 +37,8 @@ const DEFAULT_CACHE_THRESHOLD: u64 = 100_000;
 /// [`Collector`].
 ///
 /// ## Process
-/// The function utilizes a `HashMap` cache with a structure of `PartialKey` (`P`) (Address or
-/// Address.StorageKey) to `BlockNumberList`. When the cache exceeds its capacity, its contents are
+/// The function utilizes a [`HistoryIndexCache`] with a structure of `PartialKey` (`P`) (Address or
+/// Address.StorageKey) to block numbers. When the cache exceeds its capacity, its contents are
 /// moved to a [`Collector`]. Here, each entry's key is a concatenation of `PartialKey` and the
 /// highest block number in its list.
 ///
@@ -61,59 +65,23 @@ where
 {
     let mut changeset_cursor = provider.tx_ref().cursor_read::<CS>()?;
 
-    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<P, Vec<u64>> = HashMap::default();
-
-    let mut collect = |cache: &mut HashMap<P, Vec<u64>>| {
-        for (key, indices) in cache.drain() {
-            let last = *indices.last().expect("qed");
-            collector
-                .insert(sharded_key_factory(key, last), BlockNumberList::new_pre_sorted(indices))?;
-        }
-        Ok::<(), StageError>(())
-    };
+    let mut cache =
+        HistoryIndexCache::new(etl_config, HashMap::<_, _>::default(), sharded_key_factory);
 
     // observability
     let total_changesets = provider.tx_ref().entries::<CS>()?;
     let interval = (total_changesets / 1000).max(1);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
     for (idx, entry) in changeset_cursor.walk_range(range)?.enumerate() {
         let (block_number, key) = partial_key_factory(entry?);
-        cache.entry(key).or_default().push(block_number);
+        cache.insert(block_number, key)?;
 
         if idx > 0 && idx.is_multiple_of(interval) && total_changesets > 1000 {
             info!(target: "sync::stages::index_history", progress = %format_args!("{:.4}%", (idx as f64 / total_changesets as f64) * 100.0), "Collecting indices");
         }
-
-        // Make sure we only flush the cache every DEFAULT_CACHE_THRESHOLD blocks.
-        if current_block_number != block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-            if flush_counter > DEFAULT_CACHE_THRESHOLD {
-                collect(&mut cache)?;
-                flush_counter = 0;
-            }
-        }
     }
-    collect(&mut cache)?;
 
-    Ok(collector)
-}
-
-/// Allows collecting indices from a cache with a custom insert fn
-fn collect_indices<K, F>(
-    cache: impl Iterator<Item = (K, Vec<u64>)>,
-    mut insert_fn: F,
-) -> Result<(), StageError>
-where
-    F: FnMut(K, Vec<u64>) -> Result<(), StageError>,
-{
-    for (key, indices) in cache {
-        insert_fn(key, indices)?
-    }
-    Ok(())
+    cache.finish()
 }
 
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
@@ -125,15 +93,7 @@ pub(crate) fn collect_account_history_indices<Provider>(
 where
     Provider: DBProvider + ChangeSetReader + StaticFileProviderFactory,
 {
-    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: AddressMap<Vec<u64>> = AddressMap::default();
-
-    let mut insert_fn = |address: Address, indices: Vec<u64>| {
-        let last = indices.last().expect("indices is non-empty");
-        collector
-            .insert(ShardedKey::new(address, *last), BlockNumberList::new_pre_sorted(indices))?;
-        Ok(())
-    };
+    let mut cache = HistoryIndexCache::new(etl_config, AddressMap::default(), ShardedKey::new);
 
     // Convert range bounds to concrete range
     let range = to_range(range);
@@ -144,32 +104,19 @@ where
 
     let walker = static_file_provider.walk_account_changeset_range(range);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
-
     for changeset_result in walker {
         let (block_number, AccountBeforeTx { address, .. }) = changeset_result?;
-        cache.entry(address).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
+        if cache.insert(block_number, address)? {
             info!(
                 target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
+                processed_blocks = block_number.saturating_sub(start_block),
+                current_block = block_number,
                 "Collecting indices"
             );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
         }
     }
-    collect_indices(cache.into_iter(), insert_fn)?;
 
-    Ok(collector)
+    cache.finish()
 }
 
 /// Collects storage history indices using a provider that implements `StorageChangeSetReader`.
@@ -181,17 +128,13 @@ pub(crate) fn collect_storage_history_indices<Provider>(
 where
     Provider: DBProvider + StorageChangeSetReader + StaticFileProviderFactory,
 {
-    let mut collector = Collector::new(etl_config.file_size, etl_config.dir.clone());
-    let mut cache: HashMap<AddressStorageKey, Vec<u64>> = HashMap::default();
-
-    let mut insert_fn = |key: AddressStorageKey, indices: Vec<u64>| {
-        let last = indices.last().expect("qed");
-        collector.insert(
-            StorageShardedKey::new(key.0 .0, key.0 .1, *last),
-            BlockNumberList::new_pre_sorted(indices),
-        )?;
-        Ok::<(), StageError>(())
-    };
+    let mut cache = HistoryIndexCache::new(
+        etl_config,
+        HashMap::<_, _>::default(),
+        |AddressStorageKey((address, storage_key)), highest_block_number| {
+            StorageShardedKey::new(address, storage_key, highest_block_number)
+        },
+    );
 
     let range = to_range(range);
     let start_block = range.start;
@@ -199,33 +142,19 @@ where
 
     let walker = static_file_provider.walk_storage_changeset_range(range);
 
-    let mut flush_counter = 0;
-    let mut current_block_number = u64::MAX;
-
     for changeset_result in walker {
         let (BlockNumberAddress((block_number, address)), storage) = changeset_result?;
-        cache.entry(AddressStorageKey((address, storage.key))).or_default().push(block_number);
-
-        if block_number != current_block_number {
-            current_block_number = block_number;
-            flush_counter += 1;
-        }
-
-        if flush_counter > DEFAULT_CACHE_THRESHOLD {
+        if cache.insert(block_number, AddressStorageKey((address, storage.key)))? {
             info!(
                 target: "sync::stages::index_history",
-                processed_blocks = current_block_number.saturating_sub(start_block) + 1,
-                current_block = current_block_number,
+                processed_blocks = block_number.saturating_sub(start_block),
+                current_block = block_number,
                 "Collecting indices"
             );
-            collect_indices(cache.drain(), &mut insert_fn)?;
-            flush_counter = 0;
         }
     }
 
-    collect_indices(cache.into_iter(), insert_fn)?;
-
-    Ok(collector)
+    cache.finish()
 }
 
 /// Loads account history indices into the database via `EitherWriter`.
@@ -622,4 +551,151 @@ where
 
     list.clear();
     Ok(())
+}
+
+/// Buffers the block numbers of each history key before they move to an ETL [`Collector`].
+///
+/// The cache moves its entries to the collector at the first block boundary after
+/// [`DEFAULT_CACHE_THRESHOLD`] blocks, or after its estimated heap use reaches half the ETL file
+/// size, whichever comes first, so the cache does not grow with the number of distinct keys in the
+/// block range. Entries move only at block boundaries, so two collector entries of one key never
+/// end at the same block.
+struct HistoryIndexCache<P, K: Key, F, S> {
+    collector: Collector<K, BlockNumberList>,
+    /// Creates the collector key from a partial key and its highest block number.
+    sharded_key: F,
+    indices: HashMap<P, Vec<u64>, S>,
+    /// Estimated heap bytes held by `indices`.
+    size_bytes: usize,
+    /// Value of `size_bytes` at which the cache flushes on the next block boundary.
+    max_size_bytes: usize,
+    /// Number of blocks inserted since the last [`DEFAULT_CACHE_THRESHOLD`] flush.
+    blocks: u64,
+    /// Block number of the last insert.
+    current_block: Option<BlockNumber>,
+}
+
+impl<P, K, F, S> HistoryIndexCache<P, K, F, S>
+where
+    P: Eq + Hash,
+    K: Key,
+    F: Fn(P, BlockNumber) -> K,
+    S: BuildHasher,
+{
+    fn new(etl_config: &EtlConfig, indices: HashMap<P, Vec<u64>, S>, sharded_key: F) -> Self {
+        Self {
+            collector: Collector::new(etl_config.file_size, etl_config.dir.clone()),
+            sharded_key,
+            indices,
+            size_bytes: 0,
+            max_size_bytes: etl_config.file_size / 2,
+            blocks: 0,
+            current_block: None,
+        }
+    }
+
+    /// Adds `block_number` to the indices of `key`.
+    ///
+    /// Block numbers must not decrease between calls. Returns `true` if the cache reached
+    /// [`DEFAULT_CACHE_THRESHOLD`] blocks and flushed to the collector before the insert. A flush
+    /// at the size bound does not reset the block count, so the `true` results keep a fixed cadence
+    /// for progress logs.
+    fn insert(&mut self, block_number: BlockNumber, key: P) -> Result<bool, StageError> {
+        let mut flushed = false;
+        if self.current_block != Some(block_number) {
+            if self.blocks >= DEFAULT_CACHE_THRESHOLD {
+                self.flush()?;
+                self.blocks = 0;
+                flushed = true;
+            } else if self.size_bytes >= self.max_size_bytes {
+                debug!(
+                    target: "sync::stages::index_history",
+                    current_block = block_number,
+                    size_bytes = self.size_bytes,
+                    "Flushing history index cache at size bound"
+                );
+                self.flush()?;
+            }
+            self.current_block = Some(block_number);
+            self.blocks += 1;
+        }
+
+        let indices = self.indices.entry(key).or_default();
+        let capacity = indices.capacity();
+        if capacity == 0 {
+            // A new key: its map slot plus one hashbrown control byte.
+            self.size_bytes += size_of::<(P, Vec<u64>)>() + 1;
+        }
+        indices.push(block_number);
+        self.size_bytes += (indices.capacity() - capacity) * size_of::<u64>();
+
+        Ok(flushed)
+    }
+
+    /// Moves all buffered indices to the collector.
+    fn flush(&mut self) -> Result<(), StageError> {
+        for (key, indices) in self.indices.drain() {
+            let last = *indices.last().expect("indices is non-empty");
+            self.collector
+                .insert((self.sharded_key)(key, last), BlockNumberList::new_pre_sorted(indices))?;
+        }
+        self.size_bytes = 0;
+        Ok(())
+    }
+
+    /// Flushes the remaining indices and returns the collector.
+    fn finish(mut self) -> Result<Collector<K, BlockNumberList>, StageError> {
+        self.flush()?;
+        Ok(self.collector)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::Rng;
+    use reth_testing_utils::generators;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    #[test]
+    fn history_index_cache_flushes_by_size() {
+        const KEYS_PER_BLOCK: usize = 50;
+        const BLOCKS: u64 = 2_000;
+
+        let mut rng = generators::rng();
+        let mut cache = HistoryIndexCache::new(
+            &EtlConfig::new(None, 128 * 1024),
+            AddressMap::default(),
+            ShardedKey::new,
+        );
+        let mut history = BTreeMap::<Address, Vec<u64>>::new();
+        let mut flushes = 0;
+        for block in 0..BLOCKS {
+            let addresses = (0..KEYS_PER_BLOCK)
+                .map(|_| Address::left_padding_from(&rng.random_range(0..20_000u64).to_be_bytes()))
+                .collect::<BTreeSet<_>>();
+            for address in addresses {
+                let size_bytes = cache.size_bytes;
+                // The block threshold does not fire in `BLOCKS` blocks, so all flushes come from
+                // the size bound.
+                assert!(!cache.insert(block, address).unwrap());
+                flushes += (cache.size_bytes < size_bytes) as usize;
+                history.entry(address).or_default().push(block);
+            }
+        }
+        assert!(flushes > 10, "cache flushed {flushes} times");
+
+        // The collector entries of each key hold its blocks in order.
+        let mut collector = cache.finish().unwrap();
+        let mut collected = BTreeMap::<Address, Vec<u64>>::new();
+        for entry in collector.iter().unwrap() {
+            let (key, value) = entry.unwrap();
+            let key = ShardedKey::<Address>::decode_owned(key).unwrap();
+            let blocks =
+                BlockNumberList::decompress_owned(value).unwrap().iter().collect::<Vec<_>>();
+            assert_eq!(key.highest_block_number, *blocks.last().unwrap());
+            collected.entry(key.key).or_default().extend(blocks);
+        }
+        assert_eq!(collected, history);
+    }
 }

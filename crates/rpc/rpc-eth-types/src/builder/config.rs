@@ -109,7 +109,7 @@ pub struct EthConfig {
     pub raw_tx_forwarder: ForwardConfig,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     pub rpc_evm_memory_limit: u64,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     ///
@@ -169,7 +169,7 @@ impl Default for EthConfig {
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
-            rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_memory_limit: 100 * 1024 * 1024,
             force_blob_sidecar_upcasting: false,
             max_response_size: None,
             max_active_filters: Some(DEFAULT_MAX_ACTIVE_FILTERS),
@@ -283,7 +283,7 @@ impl EthConfig {
         self
     }
 
-    /// Configures the maximum memory the EVM can allocate per RPC request.
+    /// Configures the maximum memory the EVM can allocate per call frame in an RPC request.
     pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.rpc_evm_memory_limit = memory_limit;
         self

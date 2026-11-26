@@ -1,7 +1,8 @@
 //! Removes snapshot-managed data that the selected download plan does not list.
 
 use super::{
-    managed_datadir_path, planning::PlannedArchive, verify::OutputVerifier, MANAGED_DATADIR_PATHS,
+    extract::ensure_no_symlinks, managed_datadir_path, planning::PlannedArchive,
+    verify::OutputVerifier, MANAGED_DATADIR_PATHS,
 };
 use eyre::{Result, WrapErr};
 use reth_db::lockfile::StorageLock;
@@ -23,10 +24,10 @@ use tracing::info;
 /// an archive extracts without listing it is removed here and not restored, because the archive
 /// is reused once its listed outputs verify.
 ///
-/// A managed path that is itself a symlink is followed, because operators link whole data
-/// directories to other disks. Symlinks below it are removed rather than followed, so pruning
-/// never deletes files outside the data dir. Nested directories left empty are removed; the
-/// managed directories themselves are kept, since they may be mount points.
+/// Pruning rejects symlinks at managed paths under the data dir, just as extraction does.
+/// An explicitly configured static files directory is treated as a root, like the data dir itself.
+/// Symlinks below managed directories are removed rather than followed. Nested directories left
+/// empty are removed, but the managed directories themselves are kept.
 ///
 /// Fails if a running node holds the database lock, since pruning would otherwise delete its
 /// lock and files from under it.
@@ -35,6 +36,13 @@ pub(crate) fn prune_unlisted_outputs(
     target_dir: &Path,
     static_files_dir: Option<&Path>,
 ) -> Result<()> {
+    // Validate every managed path before pruning any of them.
+    for &entry in MANAGED_DATADIR_PATHS {
+        if entry != "static_files" || static_files_dir.is_none() {
+            ensure_no_symlinks(target_dir, Path::new(entry))?;
+        }
+    }
+
     let db_dir = target_dir.join("db");
     if db_dir.is_dir() {
         drop(StorageLock::try_acquire(&db_dir).wrap_err("refusing to prune a data dir in use")?);
@@ -122,7 +130,7 @@ mod tests {
             archive: SnapshotArchive {
                 url: "https://example.com/state.tar.zst".to_string(),
                 file_name: "state.tar.zst".to_string(),
-                size: 1,
+                size: Some(1),
                 blake3: None,
                 output_files: paths
                     .iter()
@@ -225,7 +233,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn prune_follows_a_symlinked_managed_directory() {
+    fn prune_refuses_a_symlinked_managed_directory() {
         let dir = tempdir().unwrap();
         let target = dir.path().join("datadir");
         let other_disk = dir.path().join("other-disk");
@@ -234,15 +242,19 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         std::os::unix::fs::symlink(&other_disk, target.join("static_files")).unwrap();
 
-        prune_unlisted_outputs(
+        let err = prune_unlisted_outputs(
             &planned_with_outputs(&["static_files/static_file_headers_0_499999"]),
             &target,
             None,
         )
-        .unwrap();
+        .unwrap_err();
 
+        assert_eq!(
+            err.to_string(),
+            format!("Archive path `{}` contains a symlink", target.join("static_files").display())
+        );
         assert!(std::fs::symlink_metadata(target.join("static_files")).unwrap().is_symlink());
         assert!(other_disk.join("static_file_headers_0_499999").exists());
-        assert!(!other_disk.join("static_file_headers_500000_999999").exists());
+        assert!(other_disk.join("static_file_headers_500000_999999").exists());
     }
 }
