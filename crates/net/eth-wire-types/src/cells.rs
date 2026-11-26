@@ -724,6 +724,40 @@ mod tests {
     }
 
     #[test]
+    fn decode_bounds_precede_element_decoding() {
+        // Each list holds one malformed element past its bound, which must not be decoded.
+        let mut payload = alloy_rlp::encode(B256::ZERO).repeat(MAX_INDEXED_CELL_HASHES);
+        payload.push(0x80);
+        let mut hashes = Vec::new();
+        Header { list: true, payload_length: payload.len() }.encode(&mut hashes);
+        hashes.extend_from_slice(&payload);
+        let masks = CellMasks::Indexed {
+            masks: vec![B128::ZERO, B128::repeat_byte(1)],
+            mask_ids: (0..MAX_INDEXED_CELL_HASHES).map(|index| (index % 2) as u8).collect(),
+        };
+        let mut request = hashes.clone();
+        masks.encode(&mut request);
+        assert_eq!(
+            GetCells::decode(&mut request.as_slice()),
+            Err(Error::Custom("invalid indexed cell counts"))
+        );
+        let mut response = hashes;
+        response.push(0xc0);
+        masks.encode(&mut response);
+        assert_eq!(
+            Cells::decode(&mut response.as_slice()),
+            Err(Error::Custom("invalid indexed cell counts"))
+        );
+        let mut response = alloy_rlp::encode(vec![B256::ZERO]);
+        response.extend_from_slice(&hex!("c3c0c180"));
+        B128::ZERO.encode(&mut response);
+        assert_eq!(
+            Cells::decode(&mut response.as_slice()),
+            Err(Error::Custom("invalid cell response dimensions"))
+        );
+    }
+
+    #[test]
     fn response_correlation_and_subsets() {
         let request = indexed(
             vec![B256::ZERO, B256::repeat_byte(1)],
