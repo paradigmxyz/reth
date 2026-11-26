@@ -133,7 +133,7 @@ where
     }
 
     /// Takes a tracing permit together with `weight_mib` MiB of the memory budget, see
-    /// [`SpawnBlocking::admit`].
+    /// [`SpawnBlocking::admit`](reth_rpc_eth_api::helpers::SpawnBlocking::admit).
     async fn admit_trace(&self, weight_mib: u64) -> Result<Admission, Eth::Error> {
         self.eth_api()
             .admit(self.inner.blocking_task_guard.semaphore(), weight_mib)
