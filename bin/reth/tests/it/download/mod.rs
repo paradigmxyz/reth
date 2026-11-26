@@ -4,7 +4,9 @@ use self::server::SnapshotServer;
 use super::{reth_ok, RETH};
 use alloy_node_bindings::Reth;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rlp::Decodable;
 use alloy_rpc_types_eth::error::EthRpcErrorCode;
+use reth_ethereum_primitives::Block;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -338,18 +340,33 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
     let chain = chain.to_str().unwrap();
     let source = tempfile::tempdir().unwrap();
     let archives = tempfile::tempdir().unwrap();
-    reth_ok(&[
-        "import",
-        "--db.max-size",
-        "256MB",
-        "--db.growth-step",
-        "8MB",
-        "--datadir",
-        source.path().to_str().unwrap(),
-        "--chain",
-        chain,
-        fixture.join("chain.rlp").to_str().unwrap(),
-    ]);
+    let blocks = fs::read(fixture.join("chain.rlp")).unwrap();
+    let mut next_block = blocks.as_slice();
+    for _ in 0..44 {
+        alloy_rlp::Header::decode_bytes(&mut next_block, true).unwrap();
+    }
+    let prefix = archives.path().join("prefix.rlp");
+    let suffix = archives.path().join("next.rlp");
+    fs::write(&prefix, &blocks[..blocks.len() - next_block.len()]).unwrap();
+    fs::write(&suffix, next_block).unwrap();
+    let expected = Block::decode(&mut next_block).unwrap();
+    assert!(next_block.is_empty());
+    assert_eq!(expected.body.transactions.len(), 6);
+    let import = |datadir: &Path, path: &Path| {
+        reth_ok(&[
+            "import",
+            "--chain",
+            chain,
+            "--db.max-size",
+            "256MB",
+            "--db.growth-step",
+            "8MB",
+            "--datadir",
+            datadir.to_str().unwrap(),
+            path.to_str().unwrap(),
+        ]);
+    };
+    import(source.path(), &prefix);
     // Pre-Cancun slot preimages are auxiliary to this restore and occupy a sparse 4 GiB file.
     fs::remove_dir_all(source.path().join("db/preimage")).unwrap();
     reth_ok(&[
@@ -364,7 +381,7 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
     let manifest = archives.path().join("manifest.json");
     let snapshot: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
     let tip = snapshot["block"].as_u64().unwrap();
-    assert_eq!(tip, 45);
+    assert_eq!(tip, 44);
     assert!(snapshot["components"]["rocksdb_indices"].is_object());
 
     for include_indices in [false, true] {
@@ -387,16 +404,19 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
             flags.push("--with-rocksdb");
         }
         reth_ok(&flags);
-        let node = Reth::at(RETH)
-            .instance(0)
-            .http_port(0)
-            .ws_port(0)
-            .auth_port(0)
-            .chain_or_path(chain)
-            .data_dir(target.path())
-            .disable_discovery()
-            .args(["--port", "0", "--max-outbound-peers", "0", "--max-inbound-peers", "0"])
-            .spawn();
+        let start_node = || {
+            Reth::at(RETH)
+                .instance(0)
+                .http_port(0)
+                .ws_port(0)
+                .auth_port(0)
+                .chain_or_path(chain)
+                .data_dir(target.path())
+                .disable_discovery()
+                .args(["--port", "0", "--max-outbound-peers", "0", "--max-inbound-peers", "0"])
+                .spawn()
+        };
+        let node = start_node();
         let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
         assert_eq!(rpc.get_block_number().await.unwrap(), tip);
         let capabilities: Value = rpc.client().request_noparams("eth_capabilities").await.unwrap();
@@ -406,7 +426,19 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         assert_eq!(error.code, i64::from(EthRpcErrorCode::PrunedHistory.code()));
         assert_eq!(
             error.message,
-            "pruned history unavailable: requested 45, earliest available 46"
+            "pruned history unavailable: requested 44, earliest available 45"
         );
+        drop(node);
+
+        import(target.path(), &suffix);
+        let node = start_node();
+        let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
+        assert_eq!(rpc.get_block_number().await.unwrap(), tip + 1);
+        let block = rpc.get_block_by_number((tip + 1).into()).await.unwrap().unwrap();
+        assert!(block.transactions.hashes().eq(expected
+            .body
+            .transactions
+            .iter()
+            .map(|tx| *tx.hash())));
     }
 }
