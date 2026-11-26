@@ -5106,6 +5106,11 @@ mod tests {
         assert_eq!(peers.candidates.len(), MAX_PEER_CANDIDATES as usize);
         assert!(peers.candidates.contains(&candidate));
         assert!(!peers.candidates.contains(&newest));
+
+        // a queued candidate still updates its entry in a full queue.
+        let moved = PeerAddr::from_tcp("1.2.3.5:30303".parse().unwrap());
+        peers.add_peer(candidate, moved, None);
+        assert_eq!(peers.candidates.peek(&candidate).unwrap().addr, moved);
     }
 
     #[tokio::test]
