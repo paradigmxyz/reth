@@ -42,7 +42,7 @@ pub use bal::{BalConfig, InMemoryBalStore, RocksDBBalStore};
 
 pub use reth_chain_state::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
-    CanonStateNotifications, CanonStateSubscriptions,
+    CanonStateNotifications, CanonStateSubscriptions, InMemoryState,
 };
 pub use reth_execution_types::*;
 /// Re-export `OriginalValuesKnown`

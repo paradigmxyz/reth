@@ -230,24 +230,24 @@ impl TestHarness {
 
         let (from_tree_tx, from_tree_rx) = unbounded_channel();
         let runtime = reth_tasks::Runtime::test();
-        let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
-        let overlay_manager = OverlayManager::with_worker_pool(
-            in_memory_state,
-            runtime.state_trie_overlay_worker_pool(),
-        );
+        let (_, in_memory_state_writer) = InMemoryState::new();
+        let overlay_manager =
+            OverlayManager::with_worker_pool(runtime.state_trie_overlay_worker_pool());
 
         let header = chain_spec.genesis_header().clone();
         let header = SealedHeader::seal_slow(header);
+        let canonical_block = header.num_hash();
+        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
+            in_memory_state_writer,
+        );
         let engine_api_tree_state = EngineApiTreeState::new(
             10,
             10,
             tree_config.invalid_header_hit_eviction_threshold(),
-            header.num_hash(),
+            canonical_block,
+            canonical_in_memory_state_writer.canonical_in_memory_state().in_memory_state().clone(),
             overlay_manager.clone(),
-        );
-        let canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
-            ChainInfoHeaders { canonical_head: header, safe: None, finalized: None },
-            in_memory_state_writer,
         );
 
         let (to_payload_service, payload_command_rx) = unbounded_channel();
@@ -1875,7 +1875,7 @@ fn backfill_finish_drops_in_memory_blocks_through_the_backfill_height() {
         .unwrap();
 
     let tree_state = &test_harness.tree.state.tree_state;
-    let in_memory_state = tree_state.overlay_manager.in_memory_state();
+    let in_memory_state = tree_state.in_memory_state();
     for block in &blocks[..=2] {
         let hash = block.recovered_block().hash();
         assert!(tree_state.executed_block_by_hash(hash).is_none());
@@ -1909,7 +1909,7 @@ fn backfill_finish_drops_in_memory_blocks_below_the_backfill_height_off_the_pers
         .unwrap();
 
     let tree_state = &test_harness.tree.state.tree_state;
-    let in_memory_state = tree_state.overlay_manager.in_memory_state();
+    let in_memory_state = tree_state.in_memory_state();
     for block in &blocks[..2] {
         let hash = block.recovered_block().hash();
         assert!(tree_state.executed_block_by_hash(hash).is_none());

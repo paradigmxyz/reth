@@ -368,16 +368,15 @@ impl Engine {
             .build()
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
         let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
-        let overlay_manager = OverlayManager::with_worker_pool(
-            in_memory_state,
-            runtime.state_trie_overlay_worker_pool(),
-        );
-        let factory = ProviderFactory::<FixtureNode>::new(
+        let overlay_manager =
+            OverlayManager::with_worker_pool(runtime.state_trie_overlay_worker_pool());
+        let factory = ProviderFactory::<FixtureNode>::new_with_in_memory_state(
             db.clone(),
             chain_spec.clone(),
             StaticFileProvider::read_write(datadir.join("static_files"))
                 .map_err(|err| Error::engine("failed to set up the engine", err))?,
             rocksdb.clone(),
+            in_memory_state,
             overlay_manager.clone(),
             runtime.clone(),
         )

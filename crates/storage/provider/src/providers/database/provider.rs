@@ -38,7 +38,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ExecutedBlock, InMemoryState};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -73,7 +73,7 @@ use reth_storage_api::{
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::{get_or_compute_cached_changesets_range, OverlayManager};
 use reth_trie::{
     bundle_state::{PlainStateReverts, PlainStorageChangeset, PlainStorageRevert, StateChangeset},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
@@ -212,8 +212,10 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` versions its cached iterators were created on for that long; see
     /// [`Self::history_rocksdb_snapshot`].
     rocksdb_history_snapshot: OnceLock<Option<OwnedRocksReadSnapshot>>,
+    /// Live in-memory state used when resolving trie reverts.
+    in_memory_state: InMemoryState<N::Primitives>,
     /// Manager for state trie overlays and cached changesets.
-    overlay_manager: OverlayManager<N::Primitives>,
+    overlay_manager: OverlayManager,
     /// Task runtime for spawning parallel I/O work.
     runtime: reth_tasks::Runtime,
     /// Path to the database directory.
@@ -366,10 +368,9 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Creates a provider with an inner read-write transaction.
+impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     #[expect(clippy::too_many_arguments)]
-    fn new_rw_inner(
+    fn new_inner(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -377,7 +378,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         commit_order: CommitOrder,
@@ -391,6 +393,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_state,
             overlay_manager,
             runtime,
             db_path,
@@ -402,7 +405,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             reader_txn_tracker: None,
         }
     }
+}
 
+impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction using normal commit order.
     #[expect(clippy::too_many_arguments)]
     pub fn new_rw(
@@ -413,12 +418,13 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
-        Self::new_rw_inner(
+        Self::new_inner(
             tx,
             chain_spec,
             static_file_provider,
@@ -426,6 +432,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_state,
             overlay_manager,
             runtime,
             db_path,
@@ -444,12 +451,13 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
-        Self::new_rw_inner(
+        Self::new_inner(
             tx,
             chain_spec,
             static_file_provider,
@@ -457,6 +465,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_state,
             overlay_manager,
             runtime,
             db_path,
@@ -886,9 +895,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             })?;
 
         // Calculate changesets before modifying hashed state used to reconstruct historical tries.
-        let trie_revert = self
-            .overlay_manager
-            .get_or_compute_cached_changesets_range(self, from..=finish.block_number)?;
+        let trie_revert = get_or_compute_cached_changesets_range(
+            &self.overlay_manager,
+            &self.in_memory_state,
+            &self.in_memory_state.snapshot(),
+            self,
+            from..=finish.block_number,
+        )?;
 
         let changed_accounts = self.account_changesets_range(from..)?;
 
@@ -1023,12 +1036,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
         db_path: PathBuf,
         metrics: Arc<DatabaseProviderMetrics>,
     ) -> Self {
-        Self {
+        Self::new_inner(
             tx,
             chain_spec,
             static_file_provider,
@@ -1036,16 +1050,13 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_state,
             overlay_manager,
             runtime,
             db_path,
-            rocksdb_history_snapshot: OnceLock::new(),
-            pending_rocksdb_batches: Default::default(),
-            commit_order: CommitOrder::Normal,
-            minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
+            CommitOrder::Normal,
             metrics,
-            reader_txn_tracker: None,
-        }
+        )
     }
 
     /// Consume `DbTx` or `DbTxMut`.

@@ -288,7 +288,7 @@ where
     /// Task runtime for spawning parallel work.
     runtime: reth_tasks::Runtime,
     /// Shared overlay manager.
-    overlay_manager: OverlayManager<Evm::Primitives>,
+    overlay_manager: OverlayManager,
     /// State-root strategy used to prepare per-block commitment tasks.
     #[debug(skip)]
     state_root_strategy: Arc<dyn StateRootStrategy<Evm::Primitives, P, Evm>>,
@@ -330,7 +330,7 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
-        overlay_manager: OverlayManager<N>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
@@ -1451,14 +1451,17 @@ where
         hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<OverlayStateProviderFactory<P, N>>> {
-        if !state.tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
+        let tree_state = state.tree_state();
+        if !tree_state.contains_hash(&hash) && self.provider.header(hash)?.is_none() {
             debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
             return Ok(None)
         }
 
         Ok(Some(OverlayStateProviderFactory::new(
             self.provider.clone(),
-            state.tree_state.overlay_manager.overlay_builder(hash),
+            hash,
+            tree_state.in_memory_state().clone(),
+            tree_state.overlay_manager.clone(),
         )))
     }
 

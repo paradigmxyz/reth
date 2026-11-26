@@ -135,7 +135,7 @@ where
     N: NodePrimitives,
 {
     executor: &'a reth_tasks::Runtime,
-    overlay_manager: &'a OverlayManager<N>,
+    overlay_manager: &'a OverlayManager,
     parent_hash: B256,
     parent_header: &'a N::BlockHeader,
     timestamp: u64,
@@ -166,7 +166,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(crate) const fn new(
         executor: &'a reth_tasks::Runtime,
-        overlay_manager: &'a OverlayManager<N>,
+        overlay_manager: &'a OverlayManager,
         parent_hash: B256,
         parent_header: &'a N::BlockHeader,
         timestamp: u64,
@@ -232,7 +232,7 @@ where
     Evm: ConfigureEvm<Primitives = N>,
 {
     executor: &'a reth_tasks::Runtime,
-    overlay_manager: &'a OverlayManager<N>,
+    overlay_manager: &'a OverlayManager,
     env: &'a ExecutionEnv<Evm>,
     parent_header: &'a SealedHeader<N::BlockHeader>,
     state_provider_factory: OverlayStateProviderFactory<P, N>,
@@ -263,7 +263,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub(crate) const fn new(
         executor: &'a reth_tasks::Runtime,
-        overlay_manager: &'a OverlayManager<N>,
+        overlay_manager: &'a OverlayManager,
         env: &'a ExecutionEnv<Evm>,
         parent_header: &'a SealedHeader<N::BlockHeader>,
         state_provider_factory: OverlayStateProviderFactory<P, N>,
@@ -814,9 +814,9 @@ pub struct PendingSparseTrie {
 /// Publishes a matching completed root for reuse after its block has been accepted.
 ///
 /// Does nothing if the producer has not handed off a trie or its root differs.
-pub fn publish_sparse_trie<N: NodePrimitives>(
+pub fn publish_sparse_trie(
     pending_trie_rx: &mpsc::Receiver<PendingSparseTrie>,
-    overlay_manager: &OverlayManager<N>,
+    overlay_manager: &OverlayManager,
     block_hash: B256,
     state_root: B256,
 ) {
@@ -1073,7 +1073,7 @@ where
 #[derive(Debug)]
 struct SparseTrieStateRootJob<N: NodePrimitives, P> {
     pending_trie_rx: mpsc::Receiver<PendingSparseTrie>,
-    overlay_manager: OverlayManager<N>,
+    overlay_manager: OverlayManager,
     handle: StateRootHandle,
     state_provider_factory: OverlayStateProviderFactory<P, N>,
     executor: reth_tasks::Runtime,
@@ -1258,7 +1258,7 @@ mod tests {
     use alloy_primitives::{map::HashMap, Address, U256};
     use evm2::evm::AccountInfo;
     use rand::Rng;
-    use reth_chain_state::test_utils::TestBlockBuilder;
+    use reth_chain_state::{test_utils::TestBlockBuilder, InMemoryState};
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::EthPrimitives;
@@ -1333,7 +1333,7 @@ mod tests {
 
         for timeout in [None, Some(Duration::from_secs(1))] {
             for (finish, matching_root) in [(false, true), (true, true), (true, false)] {
-                let overlay_manager = OverlayManager::<EthPrimitives>::default();
+                let overlay_manager = OverlayManager::default();
                 let block = RecoveredBlock::new_unhashed(
                     reth_ethereum_primitives::Block {
                         header: alloy_consensus::Header {
@@ -1373,7 +1373,9 @@ mod tests {
                     ),
                     state_provider_factory: OverlayStateProviderFactory::new(
                         provider.clone(),
-                        overlay_manager.overlay_builder(genesis_hash),
+                        genesis_hash,
+                        InMemoryState::<EthPrimitives>::read_only(),
+                        overlay_manager.clone(),
                     ),
                     executor: runtime.clone(),
                     timeout,
@@ -1417,7 +1419,9 @@ mod tests {
                     &runtime,
                     OverlayStateProviderFactory::new(
                         factory,
-                        OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                        genesis_hash,
+                        InMemoryState::read_only(),
+                        OverlayManager::default(),
                     ),
                     StateRootTaskOptions::<EthPrimitives> {
                         parent_header: SealedHeader::new(Default::default(), genesis_hash),
@@ -1442,7 +1446,7 @@ mod tests {
     #[reth_concurrency::test]
     fn publication_does_not_wait_for_worker() {
         let (pending_trie_tx, pending_trie_rx) = mpsc::channel();
-        let overlay_manager = OverlayManager::<EthPrimitives>::default();
+        let overlay_manager = OverlayManager::default();
         let (done_tx, done_rx) = mpsc::channel();
         let worker = std::thread::spawn(move || {
             publish_sparse_trie(&pending_trie_rx, &overlay_manager, B256::ZERO, B256::ZERO);
@@ -1464,7 +1468,9 @@ mod tests {
             &runtime,
             OverlayStateProviderFactory::new(
                 factory,
-                OverlayManager::<EthPrimitives>::default().overlay_builder(genesis_hash),
+                genesis_hash,
+                InMemoryState::read_only(),
+                OverlayManager::default(),
             ),
             StateRootTaskOptions::<EthPrimitives> {
                 parent_header: SealedHeader::new(Default::default(), genesis_hash),
@@ -1652,7 +1658,7 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
         let runtime = reth_tasks::Runtime::test();
-        let overlay_manager = OverlayManager::<EthPrimitives>::default();
+        let overlay_manager = OverlayManager::default();
         let config = TreeConfig::default()
             .with_has_enough_parallelism(true)
             .with_share_sparse_trie_with_payload_builder(true);
@@ -1661,6 +1667,7 @@ mod tests {
             10,
             config.invalid_header_hit_eviction_threshold(),
             alloy_eips::BlockNumHash::new(0, genesis_hash),
+            InMemoryState::read_only(),
             overlay_manager.clone(),
         );
         let mut root_from_regular = state_root(accumulated_state.clone());
@@ -1687,6 +1694,12 @@ mod tests {
                 state_root: if reuse { root_from_regular } else { B256::ZERO },
                 ..Default::default()
             };
+            let state_provider_factory = OverlayStateProviderFactory::new(
+                provider_factory.clone(),
+                genesis_hash,
+                state.tree_state().in_memory_state().clone(),
+                overlay_manager.clone(),
+            );
             let mut state_root_handle = <DefaultStateRootStrategy as StateRootStrategy<
                 EthPrimitives,
                 _,
@@ -1700,10 +1713,7 @@ mod tests {
                     &parent_header,
                     1,
                     &mut state,
-                    OverlayStateProviderFactory::new(
-                        provider_factory.clone(),
-                        overlay_manager.overlay_builder(genesis_hash),
-                    ),
+                    state_provider_factory,
                     &config,
                 ),
             )

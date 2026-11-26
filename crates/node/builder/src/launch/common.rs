@@ -38,6 +38,7 @@ use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
+use reth_chain_state::InMemoryState;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
@@ -477,7 +478,7 @@ where
     /// check.**
     pub async fn create_provider_factory<N, Evm>(
         &self,
-        overlay_manager: OverlayManager<N::Primitives>,
+        overlay_manager: OverlayManager,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
     ) -> eyre::Result<ProviderFactory<N>>
@@ -486,6 +487,7 @@ where
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         self.create_provider_factory_with_recovery::<N, Evm>(
+            InMemoryState::read_only(),
             overlay_manager,
             rocksdb_provider,
             disabled_stages,
@@ -498,7 +500,8 @@ where
     /// run left half-committed, before the consistency check.
     pub async fn create_provider_factory_with_recovery<N, Evm>(
         &self,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
@@ -558,11 +561,12 @@ where
                 prune_config.minimum_pruning_distance,
             );
         let bal_store = BalStoreHandle::new(bal_store);
-        let factory = ProviderFactory::new(
+        let factory = ProviderFactory::new_with_in_memory_state(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            in_memory_state,
             overlay_manager,
             self.task_executor().clone(),
         )?
@@ -716,7 +720,7 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N, Evm>(
         self,
-        overlay_manager: OverlayManager<N::Primitives>,
+        overlay_manager: OverlayManager,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
@@ -725,6 +729,7 @@ where
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         self.with_provider_factory_and_recovery::<N, Evm>(
+            InMemoryState::read_only(),
             overlay_manager,
             rocksdb_provider,
             disabled_stages,
@@ -737,7 +742,8 @@ where
     /// run left half-committed, before the consistency check.
     pub async fn with_provider_factory_and_recovery<N, Evm>(
         self,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
@@ -748,6 +754,7 @@ where
     {
         let factory = self
             .create_provider_factory_with_recovery::<N, Evm>(
+                in_memory_state,
                 overlay_manager,
                 rocksdb_provider,
                 disabled_stages,

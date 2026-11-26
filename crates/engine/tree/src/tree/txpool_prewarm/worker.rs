@@ -357,11 +357,13 @@ mod tests {
     use crossbeam_channel::{unbounded, Sender};
     use evm2::BaseEvmTypes;
     use parking_lot::{Mutex, RwLock};
+    use reth_chain_state::InMemoryState;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
+    use reth_storage_overlay::OverlayManager;
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},
@@ -428,7 +430,9 @@ mod tests {
                 evm_env,
                 state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
-                    reth_storage_overlay::OverlayManager::default().overlay_builder(parent_hash),
+                    parent_hash,
+                    InMemoryState::read_only(),
+                    OverlayManager::default(),
                 ),
                 results,
             };

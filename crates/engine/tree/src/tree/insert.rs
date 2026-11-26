@@ -511,10 +511,11 @@ where
         } else {
             self.canonical_in_memory_state_writer.insert_executed(executed.clone());
         }
-        self.state
-            .tree_state
-            .overlay_manager
-            .precompute_child_execution_overlays(executed.recovered_block().hash());
+        let tree_state = &self.state.tree_state;
+        tree_state.overlay_manager.precompute_child_execution_overlays(
+            tree_state.in_memory_state(),
+            executed.recovered_block().hash(),
+        );
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 

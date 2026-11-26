@@ -88,8 +88,10 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// Executed blocks that are not on disk yet.
+    in_memory_state: InMemoryState<N::Primitives>,
     /// Manager for state trie overlays and cached changesets.
-    overlay_manager: OverlayManager<N::Primitives>,
+    overlay_manager: OverlayManager,
     /// Store for block access lists.
     bal_store: BalStoreHandle,
     /// Task runtime for spawning parallel I/O work.
@@ -113,23 +115,43 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Database
 }
 
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
-    /// Create new database provider factory.
+    /// Creates a database provider factory for storage whose blocks are all on disk.
     ///
-    /// `overlay_manager` carries the in-memory state that [`Self::in_memory_state`] returns. A
-    /// default manager has a read-only in-memory state, which never has blocks: that fits storage
-    /// whose blocks are all on disk.
+    /// As with [`Self::new_with_in_memory_state`], call [`Self::check_consistency`] after
+    /// creation to detect inconsistent storage backends.
+    pub fn new(
+        db: N::DB,
+        chain_spec: Arc<N::ChainSpec>,
+        static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
+        overlay_manager: OverlayManager,
+        runtime: reth_tasks::Runtime,
+    ) -> ProviderResult<Self> {
+        Self::new_with_in_memory_state(
+            db,
+            chain_spec,
+            static_file_provider,
+            rocksdb_provider,
+            InMemoryState::read_only(),
+            overlay_manager,
+            runtime,
+        )
+    }
+
+    /// Creates a database provider factory using the node's live in-memory state.
     ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after
     /// creation to ensure consistency between the database and static files.
     /// If the function returns unwind targets, the caller MUST unwind the
     /// inner database to the minimum of the two targets to ensure consistency.
-    pub fn new(
+    pub fn new_with_in_memory_state(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        in_memory_state: InMemoryState<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
@@ -146,6 +168,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
+            in_memory_state.clone(),
             overlay_manager.clone(),
             runtime.clone(),
             db.path(),
@@ -162,6 +185,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
+            in_memory_state,
             overlay_manager,
             bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
             runtime,
@@ -171,7 +195,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         })
     }
 
-    /// Create new database provider factory and perform consistency checks.
+    /// Creates a factory for storage whose blocks are all on disk and performs consistency checks.
     ///
     /// This will call [`Self::check_consistency`] internally and return
     /// [`ProviderError::MustUnwind`] if inconsistencies are found. It may also
@@ -182,7 +206,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
         Self::new(db, chain_spec, static_file_provider, rocksdb_provider, overlay_manager, runtime)
@@ -204,7 +228,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns the shared overlay manager.
-    pub const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
+    pub const fn overlay_manager(&self) -> &OverlayManager {
         &self.overlay_manager
     }
 
@@ -324,10 +348,9 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self.db
     }
 
-    /// Returns the in-memory state of the overlay manager of this factory, which holds the
-    /// executed blocks that are not on disk yet, canonical or not.
+    /// Returns the executed blocks that are not on disk yet, canonical or not.
     pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
-        self.overlay_manager.in_memory_state()
+        &self.in_memory_state
     }
 }
 
@@ -356,15 +379,14 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
-    /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
-    /// instance.
+    /// Opens a database by path whose blocks are all on disk. The factory owns the database.
     pub fn new_with_database_path<P: AsRef<Path>>(
         path: P,
         chain_spec: Arc<N::ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager<N::Primitives>,
+        overlay_manager: OverlayManager,
         runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
@@ -405,6 +427,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
+            self.in_memory_state.clone(),
             self.overlay_manager.clone(),
             self.runtime.clone(),
             self.db.path(),
@@ -428,6 +451,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
                 self.storage.clone(),
                 self.storage_settings.clone(),
                 self.rocksdb_provider.clone(),
+                self.in_memory_state.clone(),
                 self.overlay_manager.clone(),
                 self.runtime.clone(),
                 self.db.path(),
@@ -456,6 +480,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
+            self.in_memory_state.clone(),
             self.overlay_manager.clone(),
             self.runtime.clone(),
             self.db.path(),
@@ -1022,6 +1047,7 @@ where
             storage,
             storage_settings,
             rocksdb_provider,
+            in_memory_state: _,
             overlay_manager,
             bal_store,
             runtime,
@@ -1059,6 +1085,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage: self.storage.clone(),
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
+            in_memory_state: self.in_memory_state.clone(),
             overlay_manager: self.overlay_manager.clone(),
             bal_store: self.bal_store.clone(),
             runtime: self.runtime.clone(),

@@ -63,7 +63,7 @@ pub fn create_test_provider_factory_with_chain_spec(
     create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
         chain_spec,
         genesis_block_number,
-        OverlayManager::default(),
+        InMemoryState::read_only(),
     )
 }
 
@@ -77,7 +77,7 @@ pub fn create_test_provider_factory_with_in_memory_state_writer(
         create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
             chain_spec,
             genesis_block_number,
-            OverlayManager::new(in_memory_state),
+            in_memory_state,
         ),
         in_memory_state_writer,
     )
@@ -100,14 +100,14 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     create_test_provider_factory_with_node_types_and_genesis(
         chain_spec,
         0,
-        OverlayManager::default(),
+        InMemoryState::read_only(),
     )
 }
 
 fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
     genesis_block_number: u64,
-    overlay_manager: OverlayManager<N::Primitives>,
+    in_memory_state: InMemoryState<N::Primitives>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     // Create a single temp directory that contains all data dirs (db, static_files, rocksdb).
     // TempDatabase will clean up the entire directory on drop.
@@ -122,7 +122,7 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
     // Create database with the datadir path so TempDatabase cleans up everything on drop
     let db = reth_db::test_utils::create_test_rw_db_with_datadir(&datadir_path);
 
-    ProviderFactory::new(
+    ProviderFactory::new_with_in_memory_state(
         db,
         chain_spec,
         StaticFileProviderBuilder::read_write(static_files_path)
@@ -133,7 +133,8 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
-        overlay_manager,
+        in_memory_state,
+        OverlayManager::default(),
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")

@@ -18,6 +18,7 @@ use reth_provider::{
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
     TransactionVariant,
 };
+use reth_storage_overlay::compute_block_trie_updates;
 use reth_trie::{HashedPostState, KeccakKeyHasher, SortedTrieData};
 use std::sync::Arc;
 use tracing::{debug, instrument, trace, warn};
@@ -382,12 +383,16 @@ where
             number = ?block.number(),
             "computing block trie updates",
         );
-        let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = self
-            .state
-            .tree_state
-            .overlay_manager
-            .compute_block_trie_updates(&db_provider, block.number())?;
+        let tree_state = &self.state.tree_state;
+        let in_memory_state = tree_state.in_memory_state();
+        let db_provider =
+            in_memory_state.snapshot_during(|| self.provider.database_provider_ro()).transpose()?;
+        let trie_updates = compute_block_trie_updates(
+            &tree_state.overlay_manager,
+            in_memory_state,
+            &db_provider,
+            block.number(),
+        )?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);

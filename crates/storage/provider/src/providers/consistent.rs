@@ -31,7 +31,7 @@ use reth_storage_api::{
     StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayBuilder, OverlayManager, OverlayStateProvider, OwnedProvider};
+use reth_storage_overlay::{OverlayManager, OverlayStateProvider, OwnedProvider};
 use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -51,7 +51,7 @@ pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider, with the in-memory blocks tracked while its transaction opened.
     storage_provider: Snapshotted<DatabaseProviderRO<N::DB, N>, N::Primitives>,
     /// Manager of the overlays built over this view.
-    overlay_manager: OverlayManager<N::Primitives>,
+    overlay_manager: OverlayManager,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -136,11 +136,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             return Err(ProviderError::StateUnavailableDuringSync)
         }
 
-        let mut overlay_builder = self.overlay_manager.overlay_builder(block_hash);
-        if !cache_trie_reverts {
-            overlay_builder = overlay_builder.without_trie_revert_caching();
-        }
-        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
+        Ok(Box::new(self.into_overlay_provider(block_hash, cache_trie_reverts, None)))
     }
 
     /// Returns the state after `parent_hash` with `block`, a block built on it that is not tracked,
@@ -150,12 +146,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         parent_hash: B256,
         block: ExecutedBlock<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let overlay_builder = match self.in_memory().state_by_hash(parent_hash) {
-            Some(parent) => self.overlay_manager.overlay_builder_for_state(parent),
-            None => self.overlay_manager.overlay_builder(parent_hash),
-        }
-        .with_appended_block(block);
-        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
+        Ok(Box::new(self.into_overlay_provider(parent_hash, true, Some(block))))
     }
 
     /// Returns `true` if this view's state tables have advanced past its finished block, as they
@@ -172,18 +163,32 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// blocks against this view's in-memory blocks.
     pub(crate) fn into_overlay_provider(
         self,
-        overlay_builder: OverlayBuilder<N::Primitives>,
+        parent_hash: B256,
+        cache_trie_reverts: bool,
+        appended_block: Option<ExecutedBlock<N::Primitives>>,
     ) -> OverlayStateProvider<OwnedProvider<DatabaseProviderRO<N::DB, N>>, N::Primitives> {
-        overlay_builder.into_provider(self.storage_provider)
+        OverlayStateProvider::from_snapshot(
+            self.storage_provider,
+            parent_hash,
+            self.canonical_in_memory_state.in_memory_state().clone(),
+            self.overlay_manager,
+            cache_trie_reverts,
+            appended_block,
+        )
     }
 
     /// Returns an overlay state provider borrowing this view's database provider, resolving
     /// in-memory blocks against this view's in-memory blocks.
     pub(crate) fn overlay_provider(
         &self,
-        overlay_builder: OverlayBuilder<N::Primitives>,
+        parent_hash: B256,
     ) -> OverlayStateProvider<&DatabaseProviderRO<N::DB, N>, N::Primitives> {
-        overlay_builder.into_provider_ref(&self.storage_provider)
+        OverlayStateProvider::from_snapshot_ref(
+            &self.storage_provider,
+            parent_hash,
+            self.canonical_in_memory_state.in_memory_state().clone(),
+            self.overlay_manager.clone(),
+        )
     }
 
     // Helper function to convert range bounds

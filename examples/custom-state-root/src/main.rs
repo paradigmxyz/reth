@@ -148,7 +148,7 @@ where
         self,
         ctx: &reth_ethereum::node::builder::AddOnsContext<'_, N>,
         tree_config: TreeConfig,
-        overlay_manager: OverlayManager<EthPrimitives>,
+        overlay_manager: OverlayManager,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.inner.build_tree_validator(ctx, tree_config, overlay_manager).await?;
         let state_root_strategy: Arc<dyn StateRootStrategy<EthPrimitives, N::Provider, N::Evm>> =

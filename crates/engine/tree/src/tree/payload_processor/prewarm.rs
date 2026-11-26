@@ -1042,6 +1042,7 @@ mod tests {
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use evm2::{evm::EmptyDB, BaseEvmTypes};
+    use reth_chain_state::InMemoryState;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
@@ -1062,7 +1063,9 @@ mod tests {
             saved_cache: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                B256::ZERO,
+                InMemoryState::read_only(),
+                OverlayManager::default(),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),
@@ -1125,7 +1128,9 @@ mod tests {
                 saved_cache: None,
                 provider: OverlayStateProviderFactory::new(
                     provider.clone(),
-                    OverlayManager::default().overlay_builder(B256::ZERO),
+                    B256::ZERO,
+                    InMemoryState::read_only(),
+                    OverlayManager::default(),
                 ),
                 bal_prewarm_pool: None,
                 metrics: PrewarmMetrics::default(),
@@ -1167,7 +1172,9 @@ mod tests {
         provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
         ctx.provider = OverlayStateProviderFactory::new(
             provider,
-            OverlayManager::default().overlay_builder(B256::ZERO),
+            B256::ZERO,
+            InMemoryState::read_only(),
+            OverlayManager::default(),
         );
         assert!(ctx.evm_for_ctx().evm.is_some());
         let tx = Recovered::new_unchecked(
@@ -1214,7 +1221,9 @@ mod tests {
             saved_cache: Some(saved_cache),
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                B256::ZERO,
+                InMemoryState::read_only(),
+                OverlayManager::default(),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {

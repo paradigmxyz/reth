@@ -94,7 +94,7 @@ where
     /// Validator for incoming payloads.
     pub payload_validator: V,
     /// Overlay manager for state on top of the database.
-    pub overlay_manager: OverlayManager<N::Primitives>,
+    pub overlay_manager: OverlayManager,
     /// Engine tree configuration.
     pub tree_config: TreeConfig,
     /// Sender for sync metric events.

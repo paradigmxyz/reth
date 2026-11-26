@@ -192,12 +192,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         };
         // Peers choose the root, so its reverts stay out of the cache the engine shares.
         Ok(Some(Box::new(HistoricalStateRangeView {
-            provider: provider.into_overlay_provider(
-                self.database
-                    .overlay_manager()
-                    .overlay_builder(block_hash)
-                    .without_trie_revert_caching(),
-            ),
+            provider: provider.into_overlay_provider(block_hash, false, None),
         })))
     }
 }
@@ -1063,8 +1058,7 @@ impl<N: ProviderNodeTypes> StateReader for BlockchainProvider<N> {
         let storage_changeset = provider.storage_changeset(block)?;
 
         let Some(block_hash) = provider.block_hash(block)? else { return Ok(None) };
-        let state_provider = consistent_provider
-            .overlay_provider(self.database.overlay_manager().overlay_builder(block_hash));
+        let state_provider = consistent_provider.overlay_provider(block_hash);
         let (state, reverts) = provider.populate_bundle_state(
             account_changeset,
             storage_changeset,
@@ -3802,12 +3796,13 @@ mod tests {
         canonical_in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![executed] });
 
-        // `latest` reuses the canonical `Arc<BlockState>` chain, while the hash-based lookup
-        // rebuilds an equivalent chain from the overlay manager's block graph. Both must observe
-        // the same in-memory account and storage values.
+        // Opening a separate overlay from the head hash must observe the same in-memory
+        // account and storage values as the blockchain provider's lookups.
         let rebuilt_from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
-            provider.database.overlay_manager().overlay_builder(block_hash),
+            block_hash,
+            provider.database.in_memory_state().clone(),
+            provider.database.overlay_manager().clone(),
         )
         .database_provider_ro()?;
 
@@ -4204,7 +4199,7 @@ mod tests {
         let snapshot = view.in_memory();
         canonical_in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
 
-        assert!(!factory.overlay_manager().in_memory_state().contains(&persisted.hash));
+        assert!(!factory.in_memory_state().contains(&persisted.hash));
         assert_eq!(snapshot.state_by_hash(persisted.hash).unwrap().hash(), persisted.hash);
         assert_eq!(snapshot.canonical_head().unwrap().hash(), persisted.hash);
         Ok(())

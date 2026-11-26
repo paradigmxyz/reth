@@ -1518,7 +1518,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-        overlay_manager: OverlayManager<PrimitivesTy<Node::Types>>,
+        overlay_manager: OverlayManager,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
 }
 
@@ -1566,7 +1566,7 @@ where
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-        overlay_manager: OverlayManager<PrimitivesTy<Node::Types>>,
+        overlay_manager: OverlayManager,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());

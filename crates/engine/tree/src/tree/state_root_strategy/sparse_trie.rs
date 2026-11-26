@@ -1656,6 +1656,7 @@ enum SparseTrieTaskMessage {
 mod tests {
     use super::*;
     use alloy_primitives::{B256, U256};
+    use reth_chain_state::{EthPrimitives, InMemoryState};
     use reth_db_common::init::init_genesis;
     use reth_provider::test_utils::create_test_provider_factory;
     use reth_storage_overlay::{OverlayManager, OverlayStateProviderFactory};
@@ -1679,8 +1680,9 @@ mod tests {
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            anchor_hash,
+            InMemoryState::<EthPrimitives>::read_only(),
+            OverlayManager::default(),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
             runtime,
@@ -2279,8 +2281,9 @@ mod tests {
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            anchor_hash,
+            InMemoryState::<EthPrimitives>::read_only(),
+            OverlayManager::default(),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
@@ -2360,8 +2363,9 @@ mod tests {
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            anchor_hash,
+            InMemoryState::<EthPrimitives>::read_only(),
+            OverlayManager::default(),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
@@ -2412,8 +2416,9 @@ mod tests {
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            anchor_hash,
+            InMemoryState::<EthPrimitives>::read_only(),
+            OverlayManager::default(),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,
@@ -2496,8 +2501,9 @@ mod tests {
         let anchor_hash = init_genesis(&provider_factory).expect("failed to initialize genesis");
         let state_provider_factory = OverlayStateProviderFactory::new(
             provider_factory,
-            OverlayManager::<reth_chain_state::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            anchor_hash,
+            InMemoryState::<EthPrimitives>::read_only(),
+            OverlayManager::default(),
         );
         let proof_worker_handle = ProofWorkerHandle::new(
             &runtime,

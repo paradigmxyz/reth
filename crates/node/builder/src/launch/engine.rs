@@ -116,10 +116,8 @@ impl<B> EngineNodeLauncher<B> {
         // Create the in-memory state of this node with the writer of its blocks, and the overlay
         // manager that will be shared across the provider and engine.
         let (in_memory_state, in_memory_state_writer) = InMemoryState::<N::Primitives>::new();
-        let overlay_manager = OverlayManager::with_worker_pool(
-            in_memory_state,
-            ctx.task_executor.state_trie_overlay_worker_pool(),
-        );
+        let overlay_manager =
+            OverlayManager::with_worker_pool(ctx.task_executor.state_trie_overlay_worker_pool());
         let disabled_stages = N::disabled_stages();
 
         // setup the launch context
@@ -136,6 +134,7 @@ impl<B> EngineNodeLauncher<B> {
             // Create the provider factory with the shared overlay manager, letting the backfill
             // finish writes an earlier run left half-committed before the consistency check
             .with_provider_factory_and_recovery::<_, <CB::Components as NodeComponents<T>>::Evm>(
+                in_memory_state,
                 overlay_manager.clone(),
                 rocksdb_provider,
                 disabled_stages,

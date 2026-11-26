@@ -12,6 +12,7 @@ use error::InsertBlockFatalError;
 use payload_build::PayloadBuildTracker;
 use reth_chain_state::{
     CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, ExecutionTimingStats,
+    InMemoryState,
 };
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{
@@ -112,7 +113,8 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
-        overlay_manager: OverlayManager<N>,
+        in_memory_state: InMemoryState<N>,
+        overlay_manager: OverlayManager,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -120,7 +122,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, overlay_manager),
+            tree_state: TreeState::new(canonical_block, in_memory_state, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -419,7 +421,7 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
-        overlay_manager: OverlayManager<N>,
+        overlay_manager: OverlayManager,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
@@ -441,6 +443,7 @@ where
             config.max_invalid_header_cache_length(),
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().in_memory_state().clone(),
             overlay_manager,
         );
 
@@ -712,10 +715,11 @@ where
                         } else {
                             self.canonical_in_memory_state_writer.insert_executed(block.clone());
                         }
-                        self.state
-                            .tree_state
-                            .overlay_manager
-                            .precompute_child_execution_overlays(block_num_hash.hash);
+                        let tree_state = &self.state.tree_state;
+                        tree_state.overlay_manager.precompute_child_execution_overlays(
+                            tree_state.in_memory_state(),
+                            block_num_hash.hash,
+                        );
                         self.metrics
                             .engine
                             .executed_blocks
