@@ -351,7 +351,7 @@ mod tests {
         validate::{TransactionValidationOutcome, ValidTransaction},
         TransactionOrigin,
     };
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::U256;
     use metrics::atomics::AtomicU64;
     use std::sync::atomic::Ordering;
 
@@ -448,7 +448,7 @@ mod tests {
                 bytecode_hash: None,
                 transaction: ValidTransaction::Valid(transaction),
                 propagate: false,
-                authorities: Some(Vec::<Address>::new()),
+                authorities: Some(Vec::new()),
             }
         }
     }
