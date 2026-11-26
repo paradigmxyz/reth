@@ -128,11 +128,7 @@ impl CallManyBudget {
     /// Returns an error if `calls` exceeds [`DEFAULT_MAX_CALL_MANY_CALLS`]. A `gas_cap` of `0`
     /// disables the gas budget, as it disables the RPC gas cap.
     pub fn new(calls: usize, gas_cap: u64) -> Result<Self, EthApiError> {
-        if calls > DEFAULT_MAX_CALL_MANY_CALLS {
-            return Err(EthApiError::InvalidParams(format!(
-                "call count {calls} exceeds limit {DEFAULT_MAX_CALL_MANY_CALLS}"
-            )))
-        }
+        Self::check_calls(calls)?;
         Ok(Self {
             gas_cap,
             remaining_gas: (gas_cap != 0).then_some(gas_cap),
@@ -146,6 +142,16 @@ impl CallManyBudget {
     /// An empty bundle counts as one call, so requests of empty bundles are bounded too.
     pub fn for_bundles<T>(bundles: &[Bundle<T>], gas_cap: u64) -> Result<Self, EthApiError> {
         Self::new(bundles.iter().map(|bundle| bundle.transactions.len().max(1)).sum(), gas_cap)
+    }
+
+    /// Returns [`EthApiError::InvalidParams`] if `calls` exceeds [`DEFAULT_MAX_CALL_MANY_CALLS`].
+    pub fn check_calls(calls: usize) -> Result<(), EthApiError> {
+        if calls > DEFAULT_MAX_CALL_MANY_CALLS {
+            return Err(EthApiError::InvalidParams(format!(
+                "call count {calls} exceeds limit {DEFAULT_MAX_CALL_MANY_CALLS}"
+            )))
+        }
+        Ok(())
     }
 
     /// Admits the request's next call, lowering the gas limit of `tx_env` to the gas left for the

@@ -4,7 +4,7 @@ use crate::{
     helpers::{
         Call, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi,
     },
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, SimulateV1Request,
+    CallManyRequest, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, SimulateV1Request,
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
@@ -271,7 +271,7 @@ pub trait EthApi<
     #[method(name = "callMany")]
     async fn call_many(
         &self,
-        bundles: Vec<Bundle<TxReq>>,
+        bundles: CallManyRequest<Vec<Bundle<TxReq>>>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>>;
@@ -799,10 +799,11 @@ where
     /// Handler for: `eth_callMany`
     async fn call_many(
         &self,
-        bundles: Vec<Bundle<RpcTxReq<T::NetworkTypes>>>,
+        bundles: CallManyRequest<Vec<Bundle<RpcTxReq<T::NetworkTypes>>>>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>> {
+        let bundles = bundles.into_inner()?;
         trace!(target: "rpc::eth", ?bundles, ?state_context, ?state_override, "Serving eth_callMany");
         Ok(EthCall::call_many(self, bundles, state_context, state_override).await?)
     }
