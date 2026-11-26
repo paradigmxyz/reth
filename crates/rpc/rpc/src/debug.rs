@@ -41,7 +41,10 @@ use reth_rpc_eth_api::{
     AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    memory_budget::{bytes_to_mib, calls_gas, execution_weight_mib, traced_calls_bytes},
+    memory_budget::{
+        bytes_to_mib, calls_gas, execution_weight_mib, proof_weight_mib, traced_calls_bytes,
+        Admission,
+    },
     utils::CallManyBudget,
     EthApiError, StateCacheDb, TransactionSource,
 };
@@ -129,18 +132,26 @@ where
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
+    /// Takes a tracing permit together with `weight_mib` MiB of the memory budget, see
+    /// [`SpawnBlocking::admit`].
+    async fn admit_trace(&self, weight_mib: u64) -> Result<Admission, Eth::Error> {
+        self.eth_api()
+            .admit(self.inner.blocking_task_guard.semaphore(), weight_mib)
+            .await
+            .map_err(Eth::Error::from_eth_err)
+    }
+
     /// Traces every transaction of a block through the block executor, see
     /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor), where `gas` is the
     /// most gas its transactions can use.
     ///
-    /// A supplied permit stays with the worker if the waiting request times out or is dropped.
+    /// The admission stays with the worker if the waiting request times out or is dropped.
     async fn trace_block(
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
         gas: u64,
-        permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         let weight = geth_trace_weight_mib(
             &opts,
@@ -149,12 +160,10 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let _permit = permit;
-                let _memory = memory;
+                let _admission = admission;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
                 eth_api.apply_pre_execution_changes(&block, &mut db)?;
@@ -322,8 +331,6 @@ where
         rlp_block: Bytes,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
-        let permit =
-            self.acquire_trace_permit().await.map_err(|_| EthApiError::InternalEthError)?;
         let block: ProviderBlock<Eth::Provider> = Decodable::decode(&mut rlp_block.as_ref())
             .map_err(BlockError::RlpDecodeRawBlock)
             .map_err(Eth::Error::from_eth_err)?;
@@ -349,7 +356,7 @@ where
         // Dropping the replay cancels it before its next transaction.
         tokio::time::timeout(
             RAW_BLOCK_TRACE_TIMEOUT,
-            self.trace_block(Arc::new(block), evm_env, opts, gas, Some(permit)),
+            self.trace_block(Arc::new(block), evm_env, opts, gas),
         )
         .await
         .map_err(|_| {
@@ -375,7 +382,7 @@ where
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
         let gas = block.header().gas_used();
-        self.trace_block(block, evm_env, opts, gas, None).await
+        self.trace_block(block, evm_env, opts, gas).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -402,15 +409,14 @@ where
             self.eth_api().eth_api_settings().max_response_size,
         )
         .saturating_add(execution_weight_mib(0, block.header().gas_used(), 0));
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
 
         let interrupt = JsTraceInterrupt::new(&opts)?;
         let tracer_interrupt = interrupt.clone();
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
             move |eth_api, mut db| {
-                let _memory = memory;
+                let _admission = admission;
                 // configure env for the target transaction
                 let (tx, tx_info) = transaction.split();
                 let tx_hash = *tx.tx_hash();
@@ -484,8 +490,7 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
 
         // Check if we need to replay transactions for a specific tx_index
         if let Some(tx_idx) = tx_index {
@@ -496,7 +501,7 @@ where
                     tx_idx as usize,
                     tracing_options,
                     overrides,
-                    memory,
+                    admission,
                 )
                 .await;
         }
@@ -506,7 +511,7 @@ where
         let this = self.clone();
         let trace =
             self.eth_api().spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let _memory = memory;
+                let _admission = admission;
                 let inspector =
                     new_debug_inspector(tracing_options).map_err(Eth::Error::from_eth_err)?;
                 let limits = ResponseBudget::new(
@@ -541,7 +546,7 @@ where
         tx_index: usize,
         tracing_options: GethDebugTracingOptions,
         overrides: EvmOverrides,
-        memory: Option<OwnedSemaphorePermit>,
+        admission: Admission,
     ) -> Result<DebugTrace, Eth::Error> {
         // Get the target block to check transaction count
         let (block, bal) = self
@@ -571,7 +576,7 @@ where
         let trace = self.eth_api().spawn_with_state_at_block(
             block.parent_hash(),
             move |eth_api, mut db| {
-                let _memory = memory;
+                let _admission = admission;
                 // 1. position the state before the transaction at the index
                 eth_api.replay_block_until(&mut db, &block, tx_index, bal.as_deref())?;
 
@@ -637,8 +642,7 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
 
         // we're essentially replaying the transactions in the block here, hence we need the state
         // that points to the beginning of the block, which is the state at the parent block
@@ -658,7 +662,7 @@ where
 
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
-                let _memory = memory;
+                let _admission = admission;
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
 
@@ -772,8 +776,15 @@ where
         mode: ExecutionWitnessMode,
     ) -> Result<ExecutionWitness, Eth::Error> {
         let block_number = block.header().number();
+        let admission = self
+            .admit_trace(execution_witness_weight_mib(
+                block.body().transactions().len() as u64,
+                block.header().gas_used(),
+            ))
+            .await?;
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let _admission = admission;
                 let output = eth_api
                     .evm_config()
                     .executor(&mut db)
@@ -1261,16 +1272,31 @@ where
                         break
                     }
                 };
-                let permit = tokio::select! {
-                    _ = sink.closed() => break,
-                    permit = this.acquire_trace_permit() => match permit {
-                        Ok(permit) => permit,
-                        Err(err) => {
+                // Notifications are not bound by the response size limit. A stream waits for the
+                // memory it needs instead of failing, and holds it until its notification is sent.
+                let weight = geth_trace_weight_mib(
+                    &opts,
+                    block.header().gas_used(),
+                    block.body().transactions().len() as u64,
+                    this.eth_api().eth_api_settings().max_trace_bytes,
+                    None,
+                );
+                let admission = loop {
+                    let admission = tokio::select! {
+                        _ = sink.closed() => None,
+                        admission = this.eth_api().admit(this.inner.blocking_task_guard.semaphore(), weight) => Some(admission),
+                    };
+                    match admission {
+                        Some(Ok(admission)) => break Some(admission),
+                        Some(Err(EthApiError::MemoryBudgetExhausted { .. })) => {}
+                        Some(Err(err)) => {
                             tracing::debug!(target: "rpc::debug", %err, "Failed to acquire trace permit");
-                            break
+                            break None
                         }
+                        None => break None,
                     }
                 };
+                let Some(_admission) = admission else { break };
                 if sink.is_closed() {
                     break
                 }
@@ -1281,7 +1307,6 @@ where
                         break
                     }
                 };
-                drop(permit);
 
                 if traces.is_empty() && number != end_number {
                     continue
@@ -1330,7 +1355,6 @@ where
         block: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1342,7 +1366,6 @@ where
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_block(self, block.into(), opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1354,7 +1377,6 @@ where
         tx_hash: B256,
         opts: Option<GethDebugTracingOptions>,
     ) -> RpcResult<DebugTrace> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_transaction(self, tx_hash, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1367,7 +1389,6 @@ where
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<DebugTrace> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call(self, request, block_id, opts.unwrap_or_default())
             .await
             .map_err(Into::into)
@@ -1382,7 +1403,6 @@ where
         // Decoding is bounded by the call limit, so malformed input is rejected without waiting
         // for a tracing permit.
         let bundles = bundles.into_inner()?;
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_trace_call_many(self, bundles, state_context, opts).await.map_err(Into::into)
     }
 
@@ -1392,7 +1412,6 @@ where
         block: BlockId,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness(self, block, mode).await.map_err(Into::into)
     }
 
@@ -1402,7 +1421,6 @@ where
         hash: B256,
         mode: Option<ExecutionWitnessMode>,
     ) -> RpcResult<ExecutionWitness> {
-        let _permit = self.acquire_trace_permit().await;
         Self::debug_execution_witness_by_block_hash(self, hash, mode).await.map_err(Into::into)
     }
 
@@ -1617,7 +1635,6 @@ where
         block_hash: B256,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>> {
-        let _permit = self.acquire_trace_permit().await;
         let entry = self
             .inner
             .bad_block_store
@@ -1633,7 +1650,7 @@ where
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
         let gas = unvalidated_block_gas(&entry.block);
-        self.trace_block(entry.block.clone(), evm_env, opts, gas, None).await.map_err(Into::into)
+        self.trace_block(entry.block.clone(), evm_env, opts, gas).await.map_err(Into::into)
     }
 }
 
@@ -1951,6 +1968,16 @@ fn tracer_recorded_bytes(
         // A JavaScript tracer keeps whatever its code collects.
         GethDebugTracerType::JsTracer(_) => u64::MAX,
     }
+}
+
+/// Returns the most memory, in MiB, that the execution witness of a block of `transactions` with
+/// `gas` gas used may hold.
+///
+/// Every slot or account the block touches costs at least a cold `SLOAD` and adds its trie path
+/// to the witness, which the response holds once more as hex.
+const fn execution_witness_weight_mib(transactions: u64, gas: u64) -> u64 {
+    execution_weight_mib(transactions, gas, 1)
+        .saturating_add(proof_weight_mib(0, gas / COLD_SLOAD_GAS).saturating_mul(3))
 }
 
 /// Returns the most gas the transactions of a block that was not validated can use: their gas
@@ -2374,7 +2401,7 @@ mod tests {
         let opts: GethDebugTracingCallOptions =
             serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
 
-        let held = eth_api.acquire_memory_budget(64).await.unwrap();
+        let held = eth_api.memory_budget().unwrap().acquire(64).await.unwrap();
         let err = debug_api.debug_trace_call(call.clone(), None, opts.clone()).await.unwrap_err();
         assert_eq!(
             err.to_string(),
@@ -2416,7 +2443,7 @@ mod tests {
         let block = Block { header, body: BlockBody { transactions, ..Default::default() } };
         let opts = serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
 
-        let _held = eth_api.acquire_memory_budget(64).await.unwrap();
+        let _held = eth_api.memory_budget().unwrap().acquire(64).await.unwrap();
         let err = debug_api
             .debug_trace_raw_block(alloy_rlp::encode(&block).into(), opts)
             .await
@@ -2425,6 +2452,13 @@ mod tests {
             err.to_string(),
             "request needs 26 MiB of the RPC memory budget, which is in use"
         );
+    }
+
+    #[test]
+    fn execution_witness_weights() {
+        // Every touched slot's trie path, held once raw and twice as hex.
+        assert_eq!(execution_witness_weight_mib(100, 30_000_000), 359);
+        assert_eq!(execution_witness_weight_mib(0, 0), 13);
     }
 
     #[test]

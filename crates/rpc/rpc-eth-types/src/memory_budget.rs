@@ -5,11 +5,17 @@
 //! the whole budget takes all of it and runs alone. A request waits at most [`MEMORY_BUDGET_WAIT`]
 //! for its units and then fails with [`EthApiError::MemoryBudgetExhausted`], so that the caller can
 //! retry elsewhere instead of queueing behind the work the node is doing.
+//!
+//! A request that also needs a permit to run, such as a tracing permit, takes both with [`admit`],
+//! which never holds one while waiting for the other.
 
 use crate::EthApiError;
 use alloy_rpc_types_eth::TransactionRequest;
 use std::{num::NonZeroU32, sync::Arc, time::Duration};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::{
+    sync::{OwnedSemaphorePermit, Semaphore},
+    time::Instant,
+};
 
 /// How long a request waits for its share of the memory budget before it fails.
 pub const MEMORY_BUDGET_WAIT: Duration = Duration::from_millis(200);
@@ -63,13 +69,79 @@ impl RpcMemoryBudget {
     /// [`EthApiError::MemoryBudgetExhausted`] if the units are not available within
     /// [`MEMORY_BUDGET_WAIT`].
     pub async fn acquire(&self, weight_mib: u64) -> Result<OwnedSemaphorePermit, EthApiError> {
-        let units = u32::try_from(weight_mib).unwrap_or(u32::MAX).clamp(1, self.total_mib);
-        match tokio::time::timeout(MEMORY_BUDGET_WAIT, self.units.clone().acquire_many_owned(units))
-            .await
+        self.acquire_until(weight_mib, Instant::now() + MEMORY_BUDGET_WAIT).await
+    }
+
+    /// Takes a permit of `permits` and `weight_mib` MiB of the budget together.
+    ///
+    /// The request waits for the permit without holding any of the budget, and for the budget
+    /// without holding the permit, so that requests queued for one hold none of the other. Returns
+    /// [`EthApiError::MemoryBudgetExhausted`] once it has waited [`MEMORY_BUDGET_WAIT`] for the
+    /// budget.
+    pub async fn acquire_with(
+        &self,
+        permits: &Arc<Semaphore>,
+        weight_mib: u64,
+    ) -> Result<Admission, EthApiError> {
+        let deadline = Instant::now() + MEMORY_BUDGET_WAIT;
+        loop {
+            let permit =
+                permits.clone().acquire_owned().await.map_err(|_| EthApiError::InternalEthError)?;
+            if let Ok(memory) = self.units.clone().try_acquire_many_owned(self.units(weight_mib)) {
+                return Ok(Admission { _permit: permit, _memory: Some(memory) })
+            }
+            drop(permit);
+            let memory = self.acquire_until(weight_mib, deadline).await?;
+            if let Ok(permit) = permits.clone().try_acquire_owned() {
+                return Ok(Admission { _permit: permit, _memory: Some(memory) })
+            }
+        }
+    }
+
+    /// Returns the units a request of `weight_mib` MiB takes: at least one, at most all.
+    fn units(&self, weight_mib: u64) -> u32 {
+        u32::try_from(weight_mib).unwrap_or(u32::MAX).clamp(1, self.total_mib)
+    }
+
+    /// Takes `weight_mib` MiB of the budget, waiting for it until `deadline`.
+    async fn acquire_until(
+        &self,
+        weight_mib: u64,
+        deadline: Instant,
+    ) -> Result<OwnedSemaphorePermit, EthApiError> {
+        match tokio::time::timeout_at(
+            deadline,
+            self.units.clone().acquire_many_owned(self.units(weight_mib)),
+        )
+        .await
         {
             Ok(Ok(permit)) => Ok(permit),
             Ok(Err(_)) => Err(EthApiError::InternalEthError),
             Err(_) => Err(EthApiError::MemoryBudgetExhausted { weight_mib }),
+        }
+    }
+}
+
+/// A request's permit to run and the memory budget it took, both held until it is dropped.
+#[derive(Debug)]
+pub struct Admission {
+    _permit: OwnedSemaphorePermit,
+    _memory: Option<OwnedSemaphorePermit>,
+}
+
+/// Takes a permit of `permits` and, if memory is budgeted, `weight_mib` MiB of `budget`, see
+/// [`RpcMemoryBudget::acquire_with`].
+pub async fn admit(
+    budget: Option<&RpcMemoryBudget>,
+    permits: &Arc<Semaphore>,
+    weight_mib: u64,
+) -> Result<Admission, EthApiError> {
+    match budget {
+        Some(budget) => budget.acquire_with(permits, weight_mib).await,
+        None => {
+            let permit =
+                permits.clone().acquire_owned().await.map_err(|_| EthApiError::InternalEthError)?;
+            Ok(Admission { _permit: permit, _memory: None })
         }
     }
 }
@@ -180,6 +252,47 @@ mod tests {
         );
         drop(permit);
         assert_eq!(budget.available_mib(), 100);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn admission_holds_no_budget_while_queued_for_permit() {
+        let budget = budget(100);
+        let permits = Arc::new(Semaphore::new(1));
+        let running = budget.acquire_with(&permits, 10).await.unwrap();
+        let queued = tokio::spawn({
+            let (budget, permits) = (budget.clone(), permits.clone());
+            async move { budget.acquire_with(&permits, 50).await.map(drop) }
+        });
+        tokio::time::sleep(MEMORY_BUDGET_WAIT * 2).await;
+        // Queued past the budget's wait, it holds none of the budget and has not failed.
+        assert_eq!(budget.available_mib(), 90);
+        assert!(!queued.is_finished());
+        drop(running);
+        queued.await.unwrap().unwrap();
+        assert_eq!(budget.available_mib(), 100);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn admission_holds_no_permit_while_waiting_for_budget() {
+        let budget = budget(100);
+        let permits = Arc::new(Semaphore::new(1));
+        let held = budget.acquire(100).await.unwrap();
+        let waiting = tokio::spawn({
+            let (budget, permits) = (budget.clone(), permits.clone());
+            async move { budget.acquire_with(&permits, 10).await.map(drop) }
+        });
+        tokio::time::sleep(MEMORY_BUDGET_WAIT / 2).await;
+        assert_eq!(permits.available_permits(), 1);
+        drop(held);
+        waiting.await.unwrap().unwrap();
+
+        let _held = budget.acquire(100).await.unwrap();
+        let err = budget.acquire_with(&permits, 10).await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "request needs 10 MiB of the RPC memory budget, which is in use"
+        );
+        assert_eq!(permits.available_permits(), 1);
     }
 
     #[test]

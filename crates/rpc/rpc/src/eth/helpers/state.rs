@@ -173,7 +173,7 @@ mod tests {
         )
         .memory_budget_mb(NonZeroU32::new(8))
         .build();
-        let _held = eth_api.acquire_memory_budget(8).await.unwrap();
+        let _held = eth_api.memory_budget().unwrap().acquire(8).await.unwrap();
 
         let keys = vec![JsonStorageKey::from(B256::ZERO)];
         let err = eth_api.get_proof(Address::random(), keys, None).unwrap().await.unwrap_err();

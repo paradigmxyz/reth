@@ -103,18 +103,15 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
 
             let blocks = simulate::simulated_block_count(&block_state_calls, parent.number())
                 .min(max_simulate_blocks);
-            let permit = self
-                .acquire_owned_blocking_io()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
-            // Taken after the permit, so that a queued request holds none of the budget. The
-            // budget's wait is bounded, so a permit is never held for long waiting for it.
-            let memory =
-                self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, blocks)).await?;
+            let admission = self
+                .admit(
+                    self.blocking_io_task_guard(),
+                    execution_weight_mib(calls as u64, gas, blocks),
+                )
+                .await?;
 
             self.spawn_with_state_at_block(state_at, move |this, db| {
-                let _permit = permit;
-                let _memory = memory;
+                let _admission = admission;
                 let state_provider = db.db.into_inner().into_inner().0;
                 let mut db = CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
                     (&state_provider).into_evm_state_provider(),
@@ -327,13 +324,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 bundles.iter().map(|bundle| bundle.transactions.len().max(1)).sum::<usize>();
             let gas =
                 calls_gas(self.call_gas_limit(), bundles.iter().flat_map(|b| &b.transactions));
-            let permit = self
-                .acquire_owned_blocking_io()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
-            // Taken after the permit, so that a queued request holds none of the budget.
-            let memory =
-                self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, 0)).await?;
+            let admission = self
+                .admit(self.blocking_io_task_guard(), execution_weight_mib(calls as u64, gas, 0))
+                .await?;
 
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();
@@ -378,8 +371,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             }
 
             self.spawn_with_state_at_block(at, move |this, mut db| {
-                let _permit = permit;
-                let _memory = memory;
+                let _admission = admission;
                 let mut all_results = Vec::with_capacity(bundles.len());
 
                 if replay_block_txs {

@@ -2,7 +2,10 @@
 //! are executed on the `tokio` runtime.
 
 use futures::Future;
-use reth_rpc_eth_types::{EthApiError, RpcMemoryBudget};
+use reth_rpc_eth_types::{
+    memory_budget::{self, Admission},
+    EthApiError, RpcMemoryBudget,
+};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     CancelOnDrop, Runtime,
@@ -48,23 +51,20 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
     /// Required so that types wrapping an API forward the budget instead of disabling it.
     fn memory_budget(&self) -> Option<&RpcMemoryBudget>;
 
-    /// Takes `weight_mib` MiB of the [`memory_budget`](Self::memory_budget), see
-    /// [`RpcMemoryBudget::acquire`].
+    /// Takes a permit of `permits` together with `weight_mib` MiB of the
+    /// [`memory_budget`](Self::memory_budget), see [`RpcMemoryBudget::acquire_with`].
     ///
-    /// Returns `None` if memory is not budgeted. Requests that can hold a lot of memory, such as
-    /// traces, proofs and simulations, should move the permit into the task doing their work, so
-    /// that the memory stays taken until that work ends even if the request is dropped.
-    fn acquire_memory_budget(
+    /// Requests that can hold a lot of memory, such as traces, proofs and simulations, should move
+    /// the admission into the task doing their work, so that the permit and the memory stay taken
+    /// until that work ends even if the request is dropped.
+    fn admit(
         &self,
+        permits: &Arc<Semaphore>,
         weight_mib: u64,
-    ) -> impl Future<Output = Result<Option<OwnedSemaphorePermit>, EthApiError>> + Send {
+    ) -> impl Future<Output = Result<Admission, EthApiError>> + Send {
         let budget = self.memory_budget().cloned();
-        async move {
-            match budget {
-                Some(budget) => budget.acquire(weight_mib).await.map(Some),
-                None => Ok(None),
-            }
-        }
+        let permits = permits.clone();
+        async move { memory_budget::admit(budget.as_ref(), &permits, weight_mib).await }
     }
 
     /// Acquires a permit from the tracing task semaphore.

@@ -27,13 +27,13 @@ use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::{TraceAddressIndex, TraceApiServer};
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{LoadTransaction, RequestTraceBudget, Trace, TraceExt},
+    helpers::{LoadTransaction, RequestTraceBudget, SpawnBlocking, Trace, TraceExt},
     CallManyRequest, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     cache::db::apply_block_overrides,
     error::EthApiError,
-    memory_budget::{bytes_to_mib, calls_gas, execution_weight_mib, traced_calls_bytes},
+    memory_budget::{bytes_to_mib, calls_gas, execution_weight_mib, traced_calls_bytes, Admission},
     utils::CallManyBudget,
     EthConfig, TransactionSource,
 };
@@ -76,6 +76,18 @@ impl<Eth> TraceApi<Eth> {
         self.inner.blocking_task_guard.clone().acquire_owned().await
     }
 
+    /// Takes a tracing permit together with `weight_mib` MiB of the memory budget, see
+    /// [`SpawnBlocking::admit`].
+    async fn admit_trace(&self, weight_mib: u64) -> Result<Admission, Eth::Error>
+    where
+        Eth: SpawnBlocking,
+    {
+        self.eth_api()
+            .admit(self.inner.blocking_task_guard.semaphore(), weight_mib)
+            .await
+            .map_err(Eth::Error::from_eth_err)
+    }
+
     /// Access the underlying `Eth` API.
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
@@ -110,14 +122,13 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                let _memory = memory;
+                let _admission = admission;
                 let inspector = this.eth_api().tracing_inspector(config);
                 let (inspector, res) =
                     this.eth_api().inspect(&mut *db, evm_env, &tx_env, inspector)?;
@@ -149,8 +160,7 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
@@ -162,7 +172,7 @@ where
                 config,
                 at,
                 move |inspector, res, mut db| {
-                    let _memory = memory;
+                    let _admission = admission;
                     inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
@@ -189,15 +199,14 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
         let at = block_id.unwrap_or_default();
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
-                let _memory = memory;
+                let _admission = admission;
                 let mut evm_env = evm_env;
                 // The calls share one trace byte budget, since they share one response.
                 let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
@@ -268,12 +277,11 @@ where
             self.eth_api().eth_api_settings().max_response_size,
         )
         .saturating_add(execution_weight_mib(0, block.header().gas_used(), 0));
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, mut db| {
-                let _memory = memory;
+                let _admission = admission;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &mut db)
@@ -497,6 +505,7 @@ where
             .into())
         }
 
+        let call_traces = HashSet::from_iter([TraceType::Trace]);
         let mut all_traces = Vec::new();
         let block_buffer_size =
             self.inner.eth_config.max_tracing_requests.clamp(1, TRACE_FILTER_BLOCK_BUFFER_SIZE);
@@ -521,11 +530,18 @@ where
                 .map(|block| {
                     let this = self.clone();
                     let matcher = matcher.clone();
+                    let call_traces = &call_traces;
 
                     let block_hash = block.hash();
 
                     async move {
-                        let permit = this.acquire_trace_permit().await;
+                        let weight = parity_trace_weight_mib(
+                            std::iter::repeat_n(call_traces, block.body().transactions().len()),
+                            block.header().gas_used(),
+                            this.eth_api().eth_api_settings().max_trace_bytes,
+                            this.eth_api().eth_api_settings().max_response_size,
+                        );
+                        let admission = this.admit_trace(weight).await?;
                         let traces = this
                             .eth_api()
                             .trace_block_until(
@@ -534,8 +550,8 @@ where
                                 None,
                                 TracingInspectorConfig::default_parity(),
                                 move |tx_info, ctx| {
-                                    // Keep the block replay permit inside the spawned replay task.
-                                    let _block_replay_permit = &permit;
+                                    // Keep the admission inside the spawned replay task.
+                                    let _admission = &admission;
                                     let mut traces = ctx
                                         .take_inspector()
                                         .into_parity_builder()
@@ -609,6 +625,16 @@ where
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
             return Err(EthApiError::HeaderNotFound(block_id).into());
         };
+        let weight = parity_trace_weight_mib(
+            std::iter::repeat_n(
+                &HashSet::from_iter([TraceType::Trace]),
+                block.body().transactions().len(),
+            ),
+            block.header().gas_used(),
+            self.eth_api().eth_api_settings().max_trace_bytes,
+            self.eth_api().eth_api_settings().max_response_size,
+        );
+        let admission = self.admit_trace(weight).await?;
 
         let mut traces = self
             .eth_api()
@@ -616,7 +642,9 @@ where
                 block_id,
                 Some(block.clone()),
                 TracingInspectorConfig::default_parity(),
-                |tx_info, ctx| {
+                move |tx_info, ctx| {
+                    // The admission is released once the block's traces are built.
+                    let _admission = &admission;
                     let traces = ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -656,8 +684,7 @@ where
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
         );
-        let memory =
-            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
+        let admission = self.admit_trace(weight).await?;
 
         self.eth_api()
             .trace_block_with(
@@ -666,7 +693,7 @@ where
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, ctx| {
                     // The permit is released once the block's traces are built.
-                    let _memory = &memory;
+                    let _admission = &admission;
                     let full_trace = ctx
                         .inspector
                         .into_parity_builder()
@@ -805,7 +832,6 @@ where
         state_overrides: Option<StateOverride>,
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
         let request =
             TraceCallRequest { call, trace_types, block_id, state_overrides, block_overrides };
         Self::trace_call(self, request).await.map_err(Into::into)
@@ -822,7 +848,6 @@ where
         // Decoding is bounded by the call limit, so malformed input is rejected without waiting
         // for a tracing permit.
         let calls = calls.into_inner()?;
-        let _permit = self.acquire_trace_permit().await;
         Self::trace_call_many(
             self,
             calls,
@@ -840,7 +865,6 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> RpcResult<TraceResults> {
-        let _permit = self.acquire_trace_permit().await;
         Self::trace_raw_transaction(self, data, trace_types, block_id).await.map_err(Into::into)
     }
 
@@ -850,7 +874,6 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<Vec<TraceResultsWithTransactionHash>>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::replay_block_transactions(self, block_id, trace_types).await.map_err(Into::into)
     }
 
@@ -860,7 +883,6 @@ where
         transaction: B256,
         trace_types: HashSet<TraceType>,
     ) -> RpcResult<Option<TraceResultsWithTransactionHash>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::replay_transaction(self, transaction, trace_types).await.map_err(Into::into)
     }
 
@@ -869,7 +891,6 @@ where
         &self,
         block_id: BlockId,
     ) -> RpcResult<Option<Vec<LocalizedTransactionTrace>>> {
-        let _permit = self.acquire_trace_permit().await;
         Self::trace_block(self, block_id).await.map_err(Into::into)
     }
 
@@ -1002,7 +1023,7 @@ pub struct BlockStorageAccess {
 ///
 /// Call traces grow with the frames the execution creates. A `vmTrace` records up to a step per
 /// gas, which both limits bound, and a `stateDiff` the state the execution touches.
-fn parity_trace_weight_mib<'a>(
+pub(crate) fn parity_trace_weight_mib<'a>(
     trace_types: impl IntoIterator<Item = &'a HashSet<TraceType>>,
     gas: u64,
     max_trace_bytes: Option<usize>,
@@ -1125,7 +1146,7 @@ mod tests {
         );
         let trace_types = HashSet::from_iter([TraceType::Trace]);
 
-        let _held = eth_api.acquire_memory_budget(64).await.unwrap();
+        let _held = eth_api.memory_budget().unwrap().acquire(64).await.unwrap();
         let err = api
             .trace_raw_transaction(tx.encoded_2718().into(), trace_types, None)
             .await
