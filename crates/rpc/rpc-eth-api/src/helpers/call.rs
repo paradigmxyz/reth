@@ -467,6 +467,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
 
     /// Creates [`AccessListResult`] for the [`RpcTxReq`] at the given
     /// [`BlockId`].
+    ///
+    /// Waits for a blocking IO permit, which the blocking task holds until both executions are
+    /// done, even if the returned future is dropped.
     fn create_access_list_with(
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
