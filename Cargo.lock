@@ -7920,7 +7920,6 @@ dependencies = [
  "alloy-node-bindings",
  "alloy-primitives",
  "alloy-provider",
- "alloy-rlp",
  "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "aquamarine",

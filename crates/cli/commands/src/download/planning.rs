@@ -128,8 +128,6 @@ pub(crate) struct PlannedArchive {
 pub(crate) struct PlannedDownloads {
     /// Concrete archives that still need reuse checks or processing.
     pub(crate) archives: Vec<PlannedArchive>,
-    /// Validated transaction jar names selected for the restore.
-    pub(super) transaction_jars: Vec<String>,
     /// Total compressed download size of all planned archives.
     pub(crate) total_download_size: u64,
     /// Total extracted plain-output size of all planned archives.
@@ -137,6 +135,53 @@ pub(crate) struct PlannedDownloads {
 }
 
 impl PlannedDownloads {
+    /// Collects transaction jars from the selected archives after all manifest formats have
+    /// been expanded. A jar's members can be distributed across archives.
+    pub(super) fn transaction_jars(&self) -> Result<Vec<String>> {
+        let files: HashSet<_> = self
+            .archives
+            .iter()
+            .filter(|planned| planned.ty == SnapshotComponentType::Transactions)
+            .flat_map(|planned| &planned.archive.output_files)
+            .map(|output| {
+                let path = Path::new(&output.path);
+                path.strip_prefix(".").unwrap_or(path)
+            })
+            .collect();
+        let mut jars = Vec::new();
+        for path in &files {
+            if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) &&
+                let Some((StaticFileSegment::Transactions, range)) =
+                    StaticFileSegment::parse_filename(name) &&
+                StaticFileSegment::Transactions.filename(&range) == name &&
+                path.extension().is_none_or(|ext| {
+                    ext == CONFIG_FILE_EXTENSION || ext == OFFSETS_FILE_EXTENSION
+                })
+            {
+                eyre::ensure!(
+                    path.parent() == Some(Path::new("static_files")),
+                    "Transaction static file {name} must be directly under static_files"
+                );
+                for extension in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
+                    let required = path.with_extension(extension);
+                    eyre::ensure!(
+                        files.contains(required.as_path()),
+                        "Incomplete transaction static file: missing {}",
+                        required.display()
+                    );
+                }
+                if path.extension().is_none() {
+                    jars.push(name.to_owned());
+                }
+            }
+        }
+        eyre::ensure!(
+            files.is_empty() || !jars.is_empty(),
+            "Selected transaction archives contain no transaction static files"
+        );
+        Ok(jars)
+    }
+
     /// Checks the existing node config before cleanup unless the download replaces it.
     pub(super) fn validate_retained_config(
         &self,
@@ -235,43 +280,6 @@ fn selection_archive_distance(
     }
 }
 
-/// Checks that every selected transaction jar has all its members, even across archives.
-/// Returns the data filenames directly under the static files directory.
-fn selected_transaction_jars<'a>(paths: impl Iterator<Item = &'a Path>) -> Result<Vec<String>> {
-    let files: HashSet<_> = paths.map(|path| path.strip_prefix(".").unwrap_or(path)).collect();
-    let mut jars = Vec::new();
-    for path in &files {
-        if let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) &&
-            let Some((StaticFileSegment::Transactions, range)) =
-                StaticFileSegment::parse_filename(name) &&
-            StaticFileSegment::Transactions.filename(&range) == name &&
-            path.extension()
-                .is_none_or(|ext| ext == CONFIG_FILE_EXTENSION || ext == OFFSETS_FILE_EXTENSION)
-        {
-            eyre::ensure!(
-                path.parent() == Some(Path::new("static_files")),
-                "Transaction static file {name} must be directly under static_files"
-            );
-            for extension in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
-                let required = path.with_extension(extension);
-                eyre::ensure!(
-                    files.contains(required.as_path()),
-                    "Incomplete transaction static file: missing {}",
-                    required.display()
-                );
-            }
-            if path.extension().is_none() {
-                jars.push(name.to_owned());
-            }
-        }
-    }
-    eyre::ensure!(
-        files.is_empty() || !jars.is_empty(),
-        "Selected transaction archives contain no transaction static files"
-    );
-    Ok(jars)
-}
-
 /// Returns the last block before the continuous range of selected bodies through the tip,
 /// or `None` when the range reaches genesis.
 pub(super) fn restored_bodies_boundary(
@@ -318,7 +326,6 @@ pub(crate) fn collect_planned_archives(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> Result<PlannedDownloads> {
     let mut archives = Vec::new();
-    let mut transaction_jars = Vec::new();
     let mut total_download_size = 0;
     let mut total_output_size = 0;
 
@@ -349,14 +356,6 @@ pub(crate) fn collect_planned_archives(
         total_output_size += manifest.output_size_for_distance(*ty, distance);
 
         let snapshot_archives = manifest.snapshot_archives_for_distance(*ty, distance);
-        if *ty == SnapshotComponentType::Transactions {
-            transaction_jars = selected_transaction_jars(
-                snapshot_archives
-                    .iter()
-                    .flat_map(|archive| &archive.output_files)
-                    .map(|output| Path::new(&output.path)),
-            )?;
-        }
         let component = ty.display_name().to_string();
         if !snapshot_archives.is_empty() {
             info!(target: "reth::cli",
@@ -380,7 +379,7 @@ pub(crate) fn collect_planned_archives(
     }
 
     sort_planned_archives(&mut archives);
-    Ok(PlannedDownloads { archives, transaction_jars, total_download_size, total_output_size })
+    Ok(PlannedDownloads { archives, total_download_size, total_output_size })
 }
 
 #[cfg(test)]
@@ -388,18 +387,6 @@ mod tests {
     use super::*;
     use crate::download::tests::transaction_snapshot;
     use tempfile::tempdir;
-
-    fn transaction_jar_outputs(start: u64, width: u64, size: u64) -> Vec<OutputFileChecksum> {
-        let end = start + width - 1;
-        ["", ".conf", ".off"]
-            .into_iter()
-            .map(|ext| OutputFileChecksum {
-                path: format!("static_files/static_file_transactions_{start}_{end}{ext}"),
-                size: if ext.is_empty() { size } else { 0 },
-                blake3: String::new(),
-            })
-            .collect()
-    }
 
     fn test_manifest_with_component_tip(block: u64, total_blocks: u64) -> SnapshotManifest {
         let chunk_count = total_blocks.div_ceil(10);
@@ -419,7 +406,13 @@ mod tests {
                     chunk_decompressed_sizes: (1..=chunk_count).map(|i| i * 100).collect(),
                     chunk_files: vec![],
                     chunk_output_files: (0..chunk_count)
-                        .map(|i| transaction_jar_outputs(i * 10, 10, (i + 1) * 100))
+                        .map(|i| {
+                            vec![OutputFileChecksum {
+                                path: format!("static_files/tx-{i}"),
+                                size: (i + 1) * 100,
+                                blake3: format!("h{i}"),
+                            }]
+                        })
                         .collect(),
                 }),
             )]),
@@ -479,14 +472,10 @@ mod tests {
             },
         ];
 
-        let downloads = PlannedDownloads {
-            archives: planned,
-            transaction_jars: vec![],
-            total_download_size: 30,
-            total_output_size: 5,
-        }
-        .partition_reusable(target_dir, None)
-        .unwrap();
+        let downloads =
+            PlannedDownloads { archives: planned, total_download_size: 30, total_output_size: 5 }
+                .partition_reusable(target_dir, None)
+                .unwrap();
         assert_eq!(downloads.total_archives(), 3);
 
         let names = |archives: &[PlannedArchive]| {
@@ -635,8 +624,16 @@ mod tests {
                 chunk_decompressed_sizes: vec![200, 300],
                 chunk_files: vec![],
                 chunk_output_files: vec![
-                    transaction_jar_outputs(0, 500_000, 200),
-                    transaction_jar_outputs(500_000, 500_000, 300),
+                    vec![OutputFileChecksum {
+                        path: "static_files/tx-0".to_string(),
+                        size: 200,
+                        blake3: "h1".to_string(),
+                    }],
+                    vec![OutputFileChecksum {
+                        path: "static_files/tx-1".to_string(),
+                        size: 300,
+                        blake3: "h2".to_string(),
+                    }],
                 ],
             }),
         );
@@ -879,12 +876,9 @@ mod tests {
 
     #[test]
     fn transaction_jar_outside_static_files_root_is_rejected() {
-        for directory in ["static_files/backup", "backup", ""] {
-            let path = Path::new(directory).join("static_file_transactions_0_9");
-            let members = ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION]
-                .map(|ext| path.with_extension(ext));
-            let err =
-                selected_transaction_jars(members.iter().map(|path| path.as_path())).unwrap_err();
+        for dir in ["static_files/backup", "backup", ""] {
+            let jar = Path::new(dir).join("static_file_transactions_0_9");
+            let err = plan_with_transaction_output(&jar).transaction_jars().unwrap_err();
             assert_eq!(err.to_string(), "Transaction static file static_file_transactions_0_9 must be directly under static_files");
         }
     }
@@ -894,34 +888,38 @@ mod tests {
         let archives = tempdir()?;
         let txs = SnapshotComponentType::Transactions;
         for actual_tip in [24, 25] {
-            let files = transaction_snapshot(actual_tip)?;
+            let files = transaction_snapshot(0, actual_tip)?;
+            let dir = files.path().join("static_files");
             let mut manifest =
                 generate_manifest(files.path(), archives.path(), None, 25, 1, 10, None, false)?;
-            let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(txs.key())
+            let Some(ComponentManifest::Chunked(mut chunks)) =
+                manifest.components.remove(txs.key())
             else {
                 panic!("missing transaction chunks")
             };
-            chunked.total_blocks = 25;
-            // A non-chunked archive can omit the middle file even if it exists on disk.
+            chunks.total_blocks = 25;
+            // The non-chunked selections omit the middle file that is still on disk.
             let archive = SingleArchive {
                 file: "transactions.tar.zst".into(),
                 size: 0,
                 decompressed_size: 0,
                 blake3: None,
-                output_files: [0, 2]
-                    .into_iter()
-                    .flat_map(|i| chunked.chunk_output_files[i].clone())
-                    .collect(),
+                output_files: [
+                    chunks.chunk_output_files[0].as_slice(),
+                    &chunks.chunk_output_files[2],
+                ]
+                .concat(),
             };
             let selections = BTreeMap::from([(txs, ComponentSelection::Since(13))]);
-            let check = |manifest: &SnapshotManifest, expected| -> Result<()> {
-                let jars = collect_planned_archives(manifest, &selections)?.transaction_jars;
-                let boundary = restored_bodies_boundary(
-                    &files.path().join("static_files"),
-                    &jars,
-                    manifest.block,
-                );
-                if actual_tip == 25 {
+            for (component, expected) in [
+                (ComponentManifest::Chunked(chunks), 9),
+                (ComponentManifest::Single(archive.clone()), 19),
+                (ComponentManifest::Files(ArchiveSet { archives: vec![archive] }), 19),
+            ] {
+                manifest.components.insert(txs.key().into(), component);
+                let jars = collect_planned_archives(&manifest, &selections)?.transaction_jars()?;
+                let boundary = restored_bodies_boundary(&dir, &jars, manifest.block);
+                if actual_tip == manifest.block {
                     assert_eq!(boundary?, Some(expected));
                 } else {
                     assert_eq!(
@@ -929,15 +927,6 @@ mod tests {
                         "Selected transaction files do not cover snapshot block 25"
                     );
                 }
-                Ok(())
-            };
-            check(&manifest, 9)?;
-            for component in [
-                ComponentManifest::Single(archive.clone()),
-                ComponentManifest::Files(ArchiveSet { archives: vec![archive] }),
-            ] {
-                manifest.components.insert(txs.key().to_owned(), component);
-                check(&manifest, 19)?;
             }
         }
         Ok(())
@@ -945,21 +934,20 @@ mod tests {
 
     #[test]
     fn transaction_plan_rejects_receipt_files() {
-        let ty = SnapshotComponentType::Transactions;
-        let mut manifest = test_manifest_with_component_tip(9, 10);
-        let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(ty.key())
-        else {
-            unreachable!()
-        };
-        for output in &mut chunked.chunk_output_files[0] {
-            output.path = output.path.replace("transactions", "receipts");
-        }
-        let err =
-            collect_planned_archives(&manifest, &BTreeMap::from([(ty, ComponentSelection::All)]))
-                .unwrap_err();
+        let plan = plan_with_transaction_output(Path::new("static_files/static_file_receipts_0_9"));
+        let err = plan.transaction_jars().unwrap_err();
         assert_eq!(
             err.to_string(),
             "Selected transaction archives contain no transaction static files"
         );
+    }
+
+    fn plan_with_transaction_output(path: &Path) -> PlannedDownloads {
+        let manifest = test_manifest_with_component_tip(9, 10);
+        let selections =
+            BTreeMap::from([(SnapshotComponentType::Transactions, ComponentSelection::All)]);
+        let mut plan = collect_planned_archives(&manifest, &selections).unwrap();
+        plan.archives[0].archive.output_files[0].path = path.to_str().unwrap().into();
+        plan
     }
 }

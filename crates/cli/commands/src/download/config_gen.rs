@@ -69,6 +69,13 @@ where
         (PruneSegment::StorageHistory, segments.storage_history),
         (PruneSegment::Bodies, segments.bodies_history),
     ] {
+        let restored_checkpoint = |block_number: Option<u64>, tx_number| {
+            // Unlimited retention still records the earliest available history.
+            let prune_mode = mode.unwrap_or_else(|| {
+                PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
+            });
+            PruneCheckpoint { block_number, tx_number, prune_mode }
+        };
         let checkpoint = match segment {
             // V1 bundles the changesets and indices in MDBX. Their original checkpoints
             // also identify interrupted pruning when the node resumes.
@@ -110,7 +117,7 @@ where
                     (None, Some(source)) => (source.block_number, source.tx_number),
                     (None, None) => continue,
                 };
-                restored_checkpoint(block_number, tx_number, mode)
+                restored_checkpoint(block_number, tx_number)
             }
             PruneSegment::Bodies => {
                 let source = tx.get::<tables::PruneCheckpoints>(segment)?;
@@ -131,7 +138,7 @@ where
                     tx_number =
                         tx_number.max(indices.and_then(|body| body.next_tx_num().checked_sub(1)));
                 }
-                restored_checkpoint(block_number, tx_number, mode)
+                restored_checkpoint(block_number, tx_number)
             }
             _ => {
                 let Some(prune_mode) = mode else { continue };
@@ -154,18 +161,6 @@ where
     }
 
     Ok(())
-}
-
-/// Unlimited retention still records the earliest available data.
-fn restored_checkpoint(
-    block_number: Option<u64>,
-    tx_number: Option<u64>,
-    mode: Option<PruneMode>,
-) -> PruneCheckpoint {
-    let prune_mode = mode.unwrap_or_else(|| {
-        PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
-    });
-    PruneCheckpoint { block_number, tx_number, prune_mode }
 }
 
 /// Reads the snapshot layout before updating the checkpoints that depend on it.

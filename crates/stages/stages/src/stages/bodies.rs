@@ -91,19 +91,16 @@ where
     // input execution was interrupted previously and we need to unwind the static file.
     let segment = StaticFileSegment::Transactions;
     let highest_file_block = static_file_provider.get_highest_static_file_block(segment);
-    let last_file_tx = if let Some(tx) = static_file_provider.get_highest_static_file_tx(segment) {
-        Some(tx)
-    } else if let Some(highest) = highest_file_block &&
+    let mut last_file_tx = static_file_provider.get_highest_static_file_tx(segment);
+    if last_file_tx.is_none() &&
+        let Some(highest) = highest_file_block &&
         let Some(pruned) =
             provider.tx_ref().get::<tables::PruneCheckpoints>(PruneSegment::Bodies)? &&
         pruned.block_number.is_some_and(|block| block <= highest)
     {
-        // An empty restored file has no transaction rows, but numbering continues after the
-        // last pruned transaction. A missing file cannot establish this boundary.
-        pruned.tx_number
-    } else {
-        None
-    };
+        // Empty restored files continue numbering after the last pruned transaction.
+        last_file_tx = pruned.tx_number;
+    }
     let next_static_file_tx_num = last_file_tx.map(|id| id + 1).unwrap_or_default();
 
     match next_static_file_tx_num.cmp(&next_tx_num) {
