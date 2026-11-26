@@ -488,6 +488,16 @@ pub(crate) mod tests {
             b256!("0x742b1fe64f3373584a06565e19373be52a44f3790489650a35ba3b6b2f96a992")
         );
 
+        // A field after the cells is rejected.
+        let mut trailing = Vec::new();
+        Header { list: true, payload_length: kept.fields_length() + 1 }.encode(&mut trailing);
+        trailing.extend_from_slice(&encoded[encoded.len() - kept.fields_length()..]);
+        trailing.push(alloy_rlp::EMPTY_STRING_CODE);
+        assert_eq!(
+            BlobTxCellSidecar::decode(&mut trailing.as_slice()),
+            Err(alloy_rlp::Error::ListLengthMismatch { expected: 0, got: 1 })
+        );
+
         let mut mismatched = kept;
         mismatched.cells.pop();
         assert_eq!(
