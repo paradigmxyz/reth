@@ -736,7 +736,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         if config_path.try_exists()? {
             let retained = Config::from_path(config_path)?;
             retained.static_files.validate()?;
-            config.prune.segments.bodies_history = retained.prune.segments.bodies_history;
             config.static_files = retained.static_files;
         }
         let db = init_db(target_dir.join("db"), self.env.db.database_args())?;
@@ -2200,6 +2199,7 @@ mod tests {
         restore_snapshot(&source, &target, 24, &["--with-txs-since=13"]).await?;
         assert_eq!(fs::read(header)?, expected);
         let factory = open_snapshot(&target)?;
+        let mode = PruneMode::Before(13);
         assert_eq!(
             factory.get_prune_checkpoint(PruneSegment::Bodies)?,
             Some(PruneCheckpoint { block_number: Some(9), tx_number: Some(9), prune_mode: mode })
@@ -2314,7 +2314,12 @@ mod tests {
         fs::write(&path, "[prune.segments]\nbodies_history = { distance = 30000 }\n[static_files.blocks_per_file]\ntransactions = 10\n")?;
         restore(&flags).await?;
         assert!(target.path().join("static_files/static_file_transactions_20_29").exists());
-        assert_eq!(bodies_checkpoint(&target)?, expected);
+        // Like the other prune checkpoints, Bodies records the current selection's mode.
+        let mode = PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE);
+        assert_eq!(
+            bodies_checkpoint(&target)?,
+            Some(PruneCheckpoint { prune_mode: mode, ..PruneCheckpoint::pruned_through(24) })
+        );
         assert!(!subdir.exists());
         Ok(())
     }
@@ -2409,7 +2414,7 @@ mod tests {
         let tx = db.tx()?;
         for (segment, prune_mode) in [
             (PruneSegment::SenderRecovery, PruneMode::Full),
-            (PruneSegment::Bodies, PruneMode::Before(SNAPSHOT_TIP + 1)),
+            (PruneSegment::Bodies, PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
         ] {
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(segment)?,

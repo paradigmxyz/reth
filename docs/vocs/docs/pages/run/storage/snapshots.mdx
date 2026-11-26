@@ -92,9 +92,9 @@ is incompatible with the selected download.
 A v1 restore preserves the original changeset and index checkpoints, including
 the mode needed to resume an interrupted prune. An explicit state-history
 selection sets future retention when the downloader creates `reth.toml`.
-The Bodies checkpoint uses the current download for its available range. Its
-retention policy comes from `--config`, or the data directory's `reth.toml` by
-default. The downloader generates the selected configuration file if it is missing.
+The downloader uses `--config`, or the data directory's `reth.toml` by default,
+and generates that file if it is missing. On a retry, it preserves the existing file
+and uses the current download selection for any prune checkpoints it writes.
 The retained static-file settings are validated before cleanup and determine the size
 of new transaction files. Pass the same `--config` when starting the node.
 
