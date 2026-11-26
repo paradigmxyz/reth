@@ -40,6 +40,8 @@ not (
     test(=download::extract::tests::extracted_hashes_replace_read_back_only_for_regular_files) or
     test(=download::planning::tests::partition_reusable_moves_only_verified_archives) or
     test(=download::planning::tests::rocksdb_archive_set_reuses_each_verified_sst) or
+    test(=download::tests::restored_bodies_survive_pruning_and_reopen) or
+    test(=download::tests::retry_repairs_repackaged_transaction_history) or
     test(=download::verify::tests::custom_static_files_verification_and_cleanup) or
     test(=download::verify::tests::verify_detects_each_kind_of_output_mismatch) or
     test(=init_state::without_evm::tests::test_setup_without_evm_succeeds)
@@ -233,7 +235,9 @@ not (
     test(=providers::database::provider::tests::unwind_restores_trie_nodes_masked_above_the_frontier) or
     test(=providers::database::tests::block_range_readers_reject_expired_history) or
     test(=providers::database::tests::insert_block_with_prune_modes) or
+    test(=providers::database::tests::legacy_and_verified_bodies_checkpoints_after_reopen) or
     test(=providers::database::tests::take_block_transaction_range_recover_senders) or
+    test(=providers::database::tests::unverified_bodies_checkpoint_follows_the_transaction_files) or
     test(=providers::rocksdb::invariants::tests::test_check_consistency_checkpoint_zero_with_rocksdb_data_prunes_all) or
     test(=providers::rocksdb::invariants::tests::test_check_consistency_mdbx_behind_checkpoint_needs_unwind) or
     test(=providers::rocksdb::invariants::tests::test_check_consistency_rocksdb_ahead_of_checkpoint_prunes_excess) or
@@ -268,6 +272,7 @@ not (
     test(=eth::core::tests::call_preserves_block_number_and_saturates_fee_overrides) or
     test(=eth::core::tests::create_access_list_excludes_authorization_authorities) or
     test(=eth::core::tests::create_access_list_gas_includes_generated_list) or
+    test(=eth::core::tests::create_access_list_permit_stays_with_blocking_task) or
     test(=eth::core::tests::estimate_gas_fee_free_retries_and_transfer) or
     test(=eth::core::tests::estimate_gas_respects_rpc_gas_cap) or
     test(=eth::core::tests::estimate_gas_takes_blocking_io_permit) or
@@ -447,6 +452,7 @@ not (
     test(=dev_node_eth_syncing) or
     test(=dev_node_send_tx_and_mine) or
     test(=download::custom_static_files_selection_reuse_and_repair) or
+    test(=download::future_transaction_cutoff_restores_a_bootable_node) or
     test(=download::manifest_selection_reuse_and_repair) or
     test(=migrate_v2_and_reopen_at_nonzero_genesis)
   ))
