@@ -459,7 +459,7 @@ where
             return self.payload_validator.ensure_well_formed_payload(payload).map_err(Into::into)
         };
 
-        let block = self.payload_validator.convert_payload_to_block(payload)?;
+        let block = Arc::unwrap_or_clone(self.payload_validator.convert_payload_to_block(payload)?);
         let recovered = match cache.recover_signers(block.body().transactions()) {
             Ok(senders) => Ok(RecoveredBlock::new_sealed(block, senders)),
             Err(_) => Err(SealedBlockRecoveryError::new(block)),
@@ -1052,7 +1052,7 @@ mod tests {
         fn convert_payload_to_block(
             &self,
             _payload: ExecutionData,
-        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError> {
             unimplemented!()
         }
     }
@@ -1066,7 +1066,7 @@ mod tests {
         fn convert_payload_to_block(
             &self,
             _payload: ExecutionData,
-        ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError> {
             panic!("the specialized recovery method must be used without a cache")
         }
 

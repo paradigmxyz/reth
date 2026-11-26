@@ -391,7 +391,9 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
+            BlockOrPayload::Payload(payload) => {
+                self.validator.convert_payload_to_block(payload).map(Arc::unwrap_or_clone)
+            }
             BlockOrPayload::Block(block) => Ok(block.split().0),
         }
     }
@@ -511,7 +513,9 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(
+                            InsertBlockError::new(Arc::unwrap_or_clone(block), e.into()).into()
+                        )
                     }
                 }
             };
@@ -553,7 +557,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                validated_block.try_into_inner().expect("sole handle")?,
+                Arc::unwrap_or_clone(validated_block.try_into_inner().expect("sole handle")?),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -776,8 +780,10 @@ where
                 }
             });
 
+        // Release the payload's handle so the block can be unwrapped instead of cloned.
+        drop(input);
         let block = validated_block.try_into_inner().expect("sole handle")?;
-        let block = block.with_senders(senders);
+        let block = Arc::unwrap_or_clone(block).with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
@@ -936,7 +942,7 @@ where
         &self,
         input: &BlockOrPayload<T>,
         parent: SealedHeader<N::BlockHeader>,
-    ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
+    ) -> LazyHandle<Result<Arc<SealedBlock<N::Block>>, InsertPayloadError<N::Block>>>
     where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block> + Clone,
@@ -953,7 +959,7 @@ where
             )
             .entered();
             let block = match input {
-                BlockOrPayload::Block(block) => block.split().0,
+                BlockOrPayload::Block(block) => Arc::new(block.split().0),
                 BlockOrPayload::Payload(payload) => {
                     validator.convert_payload_to_block(payload)?
                 }
@@ -961,7 +967,7 @@ where
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
                 error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header");
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
             }
 
             // now validate against the parent
@@ -969,7 +975,7 @@ where
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
                 warn!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header against parent");
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
             }
             drop(_enter);
 
@@ -977,7 +983,7 @@ where
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
             {
                 error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
             }
 
             Ok(block)
@@ -1844,7 +1850,7 @@ where
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<N::Block>, NewPayloadError> {
         let block = self.validator.convert_payload_to_block(payload)?;
-        Ok(block)
+        Ok(Arc::unwrap_or_clone(block))
     }
 
     fn validate_payload(

@@ -78,14 +78,14 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         &self,
         payload: ExecutionData,
     ) -> Result<
-        reth_primitives_traits::SealedBlock<Self::Block>,
+        Arc<reth_primitives_traits::SealedBlock<Self::Block>>,
         reth_payload_primitives::NewPayloadError,
     > {
         let ExecutionData { payload, sidecar } = payload;
         let block = payload.try_into_block_with_sidecar(&sidecar).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
-        Ok(block.seal_slow())
+        Ok(Arc::new(block.seal_slow()))
     }
 }
 

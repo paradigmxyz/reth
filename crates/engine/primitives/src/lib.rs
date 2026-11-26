@@ -11,6 +11,7 @@
 
 extern crate alloc;
 
+use alloc::sync::Arc;
 use alloy_consensus::BlockHeader;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
@@ -186,6 +187,8 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// This function validates the payload and converts it into a [`SealedBlock`] which contains
     /// the block hash but does not perform signature recovery on transactions.
     ///
+    /// Returns an [`Arc`] so a payload that already shares its block can hand it over uncloned.
+    ///
     /// This is more efficient than [`Self::ensure_well_formed_payload`] when signature recovery
     /// is not needed immediately or will be performed later.
     ///
@@ -194,7 +197,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     fn convert_payload_to_block(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+    ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError>;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -209,7 +212,7 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
         &self,
         payload: Types::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self.convert_payload_to_block(payload)?;
+        let sealed_block = Arc::unwrap_or_clone(self.convert_payload_to_block(payload)?);
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
 
