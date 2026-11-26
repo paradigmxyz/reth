@@ -11,8 +11,8 @@ use alloy_rpc_types_eth::{
 use alloy_rpc_types_trace::{
     common::TraceResult,
     geth::{
-        GethDebugBuiltInTracerType, GethDebugTracerType, GethDebugTracingCallOptions,
-        GethDebugTracingOptions,
+        GethDebugBuiltInTracerType, GethDebugTracerConfig, GethDebugTracerType,
+        GethDebugTracingCallOptions, GethDebugTracingOptions,
     },
 };
 use evm2::evm::StateChangeSource;
@@ -61,8 +61,6 @@ use std::{collections::VecDeque, sync::Arc, time::Duration};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
-#[cfg(feature = "js-tracer")]
-use alloy_rpc_types_trace::geth::GethDebugTracerConfig;
 #[cfg(feature = "js-tracer")]
 use evm2_inspectors::tracing::js::JsInspectorInterrupt;
 #[cfg(feature = "js-tracer")]
@@ -1901,7 +1899,21 @@ fn geth_trace_weight_mib(
             // The logs, the response serialized from them and the copy sent.
             limit.map_or(bytes, |limit| bytes.min(limit)).saturating_mul(3)
         }
-        Some(GethDebugTracerType::BuiltInTracer(tracer)) => match tracer {
+        Some(tracer) => tracer_recorded_bytes(tracer, &opts.tracer_config, gas),
+    };
+    bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
+}
+
+/// Returns the most memory, in bytes, that `tracer` with `config` records over `gas` gas.
+///
+/// A mux tracer records what each of its tracers does.
+fn tracer_recorded_bytes(
+    tracer: &GethDebugTracerType,
+    config: &GethDebugTracerConfig,
+    gas: u64,
+) -> u64 {
+    match tracer {
+        GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
             GethDebugBuiltInTracerType::FourByteTracer |
             GethDebugBuiltInTracerType::NoopTracer |
             GethDebugBuiltInTracerType::StateGasTracer => 0,
@@ -1910,12 +1922,22 @@ fn geth_trace_weight_mib(
             }
             GethDebugBuiltInTracerType::PreStateTracer |
             GethDebugBuiltInTracerType::Erc7562Tracer => gas.saturating_mul(20),
-            GethDebugBuiltInTracerType::MuxTracer => gas.saturating_mul(30),
+            // A config that is not a mux config fails the request before it traces.
+            GethDebugBuiltInTracerType::MuxTracer => {
+                config.clone().into_mux_config().map_or(0, |mux| {
+                    mux.0.iter().fold(0, |bytes, (tracer, config)| {
+                        bytes.saturating_add(tracer_recorded_bytes(
+                            tracer,
+                            &config.clone().unwrap_or_default(),
+                            gas,
+                        ))
+                    })
+                })
+            }
         },
         // A JavaScript tracer keeps whatever its code collects.
-        Some(GethDebugTracerType::JsTracer(_)) => u64::MAX,
-    };
-    bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
+        GethDebugTracerType::JsTracer(_) => u64::MAX,
+    }
 }
 
 /// Returns the most gas the transactions of a block that was not validated can use: their gas
@@ -2402,6 +2424,27 @@ mod tests {
 
         assert_eq!(weight(serde_json::json!({ "tracer": "callTracer" }), 10_000_000), 112);
         assert_eq!(weight(serde_json::json!({ "tracer": "noopTracer" }), 10_000_000), 16);
+        // A mux tracer weighs as much as its tracers together, a JavaScript one included.
+        assert_eq!(
+            weight(
+                serde_json::json!({
+                    "tracer": "muxTracer",
+                    "tracerConfig": { "callTracer": {}, "prestateTracer": {} }
+                }),
+                10_000_000
+            ),
+            303
+        );
+        assert_eq!(
+            weight(
+                serde_json::json!({
+                    "tracer": "muxTracer",
+                    "tracerConfig": { "muxTracer": { "{ result: function() {} }": {} } }
+                }),
+                21_000
+            ),
+            bytes_to_mib(u64::MAX)
+        );
         assert_eq!(
             weight(serde_json::json!({ "disableStorage": true, "limit": 10_000 }), 10_000_000),
             17
