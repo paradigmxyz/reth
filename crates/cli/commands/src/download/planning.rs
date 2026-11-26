@@ -1,4 +1,4 @@
-use super::{manifest::*, verify::OutputVerifier};
+use super::{is_managed_snapshot_path, manifest::*, verify::OutputVerifier};
 use eyre::Result;
 use rayon::prelude::*;
 use serde::Serialize;
@@ -209,7 +209,7 @@ fn sort_planned_archives(all_downloads: &mut [PlannedArchive]) {
     });
 }
 
-/// Expands component selections into the archives that need to be processed.
+/// Expands component selections into archives and validates their output paths.
 pub(crate) fn collect_planned_archives(
     manifest: &SnapshotManifest,
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
@@ -260,6 +260,15 @@ pub(crate) fn collect_planned_archives(
                 eyre::bail!(
                     "Invalid modular manifest: {} is missing plain output checksum metadata",
                     archive.file_name
+                );
+            }
+
+            for output in &archive.output_files {
+                let path = output.relative_path()?;
+                eyre::ensure!(
+                    is_managed_snapshot_path(path, false),
+                    "Not a snapshot output path: `{}`",
+                    path.display()
                 );
             }
 
@@ -643,6 +652,25 @@ mod tests {
             err.to_string().contains("chunk_files length"),
             "expected chunk_files length error, got: {err}"
         );
+    }
+
+    #[test]
+    fn collect_planned_archives_rejects_a_directory_listed_as_a_file() {
+        let mut manifest = test_manifest_with_component_tip(9, 10);
+        let component = SnapshotComponentType::Transactions;
+        let ComponentManifest::Chunked(archive) =
+            manifest.components.get_mut(component.key()).unwrap()
+        else {
+            panic!("expected a chunked archive");
+        };
+        archive.chunk_output_files[0][0].path = "static_files".to_string();
+
+        let err = collect_planned_archives(
+            &manifest,
+            &BTreeMap::from([(component, ComponentSelection::All)]),
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Not a snapshot output path: `static_files`");
     }
 
     #[test]
