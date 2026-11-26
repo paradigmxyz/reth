@@ -1680,4 +1680,48 @@ mod tests {
         assert_eq!(factory.block(5.into())?.unwrap().body.transactions.len(), 0);
         Ok(())
     }
+
+    #[test]
+    fn unverified_bodies_checkpoint_follows_the_transaction_files() -> eyre::Result<()> {
+        let mut factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("files"))
+                .with_blocks_per_file(2)
+                .build()?;
+        let provider = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        for number in 0..=6 {
+            let tx_count = Some(u8::from(matches!(number, 1 | 3 | 6)));
+            let block =
+                random_block(&mut rng, number, BlockParams { tx_count, ..Default::default() });
+            provider.insert_block(&block.try_recover()?)?;
+        }
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
+        // An older download recorded its tip 5 as pruned, and the chain has since advanced.
+        let legacy = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(3),
+        };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
+        provider.commit()?;
+
+        let files = factory.static_file_provider();
+        files.initialize_index()?;
+        let checkpoints = || factory.get_prune_checkpoints_for_availability();
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..legacy };
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
+
+        // Snap sync stores no body indices at its pivot, which stays unavailable.
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().delete::<tables::BlockBodyIndices>(6, None)?;
+        let pivot = PruneCheckpoint { tx_number: Some(2), ..PruneCheckpoint::pruned_through(6) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, pivot)?;
+        provider.commit()?;
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pivot)]);
+        Ok(())
+    }
 }

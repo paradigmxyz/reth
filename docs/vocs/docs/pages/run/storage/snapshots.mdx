@@ -72,9 +72,11 @@ The `earliest` block tag follows the available bodies. Engine API payload-body r
 return `null` for each pruned body and return the available bodies in request order.
 If a requested range starts within the snapshot but a lagging transaction component
 has no corresponding archives, the download fails before clearing the data directory.
-When reopening or repackaging an older download, reth checks the transaction rows
-and prune policy before correcting a legacy tip checkpoint. If the source evidence
-is inconclusive, reth keeps the recorded pruning progress. When the first transaction
+A node restored by an older download serves bodies and reports their availability from
+its transaction files, regardless of its Bodies checkpoint. When repackaging such a
+download, reth checks the transaction rows and prune policy before correcting a legacy
+tip checkpoint. If the source evidence is inconclusive, reth keeps the recorded pruning
+progress. When the first transaction
 archive has already been pruned, `snapshot-manifest` emits the remaining archives as
 an explicit file set. Selecting transactions downloads that entire set.
 

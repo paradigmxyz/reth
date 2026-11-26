@@ -68,8 +68,8 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    metadata::keys, BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader,
+    MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -1950,17 +1950,28 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
 }
 
 impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Older downloads wrote the tip as pruned even when they restored a continuous suffix.
-    /// Keep the original pruning progress for writes, but report the history actually retained.
+    /// Only a checkpoint the downloader verified against the restored files bounds reads. Older
+    /// downloads could record their tip as pruned with its bodies retained, so without that
+    /// marker a checkpoint inside the transaction files is reported where the files start.
+    /// The original pruning progress is kept for writes.
     fn bodies_checkpoint_for_reads(
         &self,
-        checkpoint: PruneCheckpoint,
+        mut checkpoint: PruneCheckpoint,
     ) -> ProviderResult<PruneCheckpoint> {
-        let files = &self.static_file_provider;
-        let Some(tip) = files.get_highest_static_file_block(StaticFileSegment::Transactions) else {
-            return Ok(checkpoint)
-        };
-        files.snapshot_bodies_checkpoint(&self.tx, checkpoint, files.earliest_history_height(), tip)
+        let first = self.static_file_provider.earliest_history_height();
+        // Snap sync has no body indices at its pivot, which stays unavailable.
+        if let Some(block) = checkpoint.block_number &&
+            block >= first &&
+            self.tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_none() &&
+            self.tx.get::<tables::BlockBodyIndices>(block)?.is_some()
+        {
+            checkpoint.block_number = first.checked_sub(1);
+            checkpoint.tx_number = self
+                .tx
+                .get::<tables::BlockBodyIndices>(first)?
+                .and_then(|indices| indices.first_tx_num().checked_sub(1));
+        }
+        Ok(checkpoint)
     }
 
     /// Returns the first block with an available body, given the stored Bodies checkpoint.
