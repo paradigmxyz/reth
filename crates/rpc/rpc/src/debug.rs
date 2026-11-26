@@ -1,4 +1,4 @@
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256, U256, U64};
@@ -131,7 +131,8 @@ where
     }
 
     /// Traces every transaction of a block through the block executor, see
-    /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor).
+    /// [`Call::block_executor`](reth_rpc_eth_api::helpers::Call::block_executor), where `gas` is the
+    /// most gas its transactions can use.
     ///
     /// A supplied permit stays with the worker if the waiting request times out or is dropped.
     async fn trace_block(
@@ -139,11 +140,12 @@ where
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
+        gas: u64,
         permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Vec<TraceResult<DebugTrace, String>>, Eth::Error> {
         let weight = geth_trace_weight_mib(
             &opts,
-            block.header().gas_used(),
+            gas,
             block.body().transactions().len() as u64,
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
@@ -343,15 +345,12 @@ where
             }
             .map_err(Eth::Error::from_eth_err)?;
 
+        let block = block.into_recovered_with_signers(senders);
+        let gas = unvalidated_block_gas(&block);
         // Dropping the replay cancels it before its next transaction.
         tokio::time::timeout(
             RAW_BLOCK_TRACE_TIMEOUT,
-            self.trace_block(
-                Arc::new(block.into_recovered_with_signers(senders)),
-                evm_env,
-                opts,
-                Some(permit),
-            ),
+            self.trace_block(Arc::new(block), evm_env, opts, gas, Some(permit)),
         )
         .await
         .map_err(|_| {
@@ -376,7 +375,8 @@ where
         }
         let evm_env = self.eth_api().evm_env_for_header(block.sealed_block().sealed_header())?;
 
-        self.trace_block(block, evm_env, opts, None).await
+        let gas = block.header().gas_used();
+        self.trace_block(block, evm_env, opts, gas, None).await
     }
 
     /// Trace the transaction according to the provided options.
@@ -1631,7 +1631,8 @@ where
             .to_rpc_result()?;
 
         let opts = opts.map(|o| o.tracing_options).unwrap_or_default();
-        self.trace_block(entry.block.clone(), evm_env, opts, None).await.map_err(Into::into)
+        let gas = unvalidated_block_gas(&entry.block);
+        self.trace_block(entry.block.clone(), evm_env, opts, gas, None).await.map_err(Into::into)
     }
 }
 
@@ -1908,6 +1909,18 @@ fn geth_trace_weight_mib(
         Some(GethDebugTracerType::JsTracer(_)) => u64::MAX,
     };
     bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
+}
+
+/// Returns the most gas the transactions of a block that was not validated can use: their gas
+/// limits, at most the block's gas limit. Its header's gas used is whatever its sender wrote.
+fn unvalidated_block_gas<B: BlockTrait>(block: &RecoveredBlock<B>) -> u64 {
+    block
+        .body()
+        .transactions()
+        .iter()
+        .map(|tx| tx.gas_limit())
+        .fold(0u64, u64::saturating_add)
+        .min(block.header().gas_limit())
 }
 
 #[cfg(test)]
@@ -2328,6 +2341,48 @@ mod tests {
 
         drop(held);
         debug_api.debug_trace_call(call, None, opts).await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_block_trace_weighs_transaction_gas() {
+        let provider = MockEthProvider::default();
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .memory_budget_mb(NonZeroU32::new(64))
+        .build();
+        let debug_api = DebugApi::new(
+            eth_api.clone(),
+            BlockingTaskGuard::new(1),
+            &Runtime::test(),
+            futures::stream::empty(),
+        );
+        // The header claims no gas used, but its transaction may use 1M gas.
+        let tx = TxLegacy {
+            gas_limit: 1_000_000,
+            to: TxKind::Call(Address::with_last_byte(0x42)),
+            ..Default::default()
+        };
+        let transactions = vec![sign_tx_with_key_pair(
+            generate_key(&mut generators::rng()),
+            Transaction::Legacy(tx),
+        )];
+        let header = Header { number: 1, gas_limit: 30_000_000, gas_used: 0, ..Default::default() };
+        let block = Block { header, body: BlockBody { transactions, ..Default::default() } };
+        let opts = serde_json::from_value(serde_json::json!({ "tracer": "callTracer" })).unwrap();
+
+        let _held = eth_api.acquire_memory_budget(64).await.unwrap();
+        let err = debug_api
+            .debug_trace_raw_block(alloy_rlp::encode(&block).into(), opts)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "request needs 26 MiB of the RPC memory budget, which is in use"
+        );
     }
 
     #[test]
