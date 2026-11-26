@@ -69,7 +69,7 @@ where
         (PruneSegment::StorageHistory, segments.storage_history),
         (PruneSegment::Bodies, segments.bodies_history),
     ] {
-        let (block_number, tx_number) = match segment {
+        let checkpoint = match segment {
             // V1 bundles the changesets and indices in MDBX. Their original checkpoints
             // also identify interrupted pruning when the node resumes.
             PruneSegment::AccountHistory |
@@ -103,13 +103,14 @@ where
                     }
                 };
                 let source = tx.get::<tables::PruneCheckpoints>(segment)?;
-                match (target, source) {
+                let (block_number, tx_number) = match (target, source) {
                     (Some(target), source) => {
                         (Some(target).max(source.and_then(|cp| cp.block_number)), None)
                     }
                     (None, Some(source)) => (source.block_number, source.tx_number),
                     (None, None) => continue,
-                }
+                };
+                restored_checkpoint(block_number, tx_number, mode)
             }
             PruneSegment::Bodies => {
                 let source = tx.get::<tables::PruneCheckpoints>(segment)?;
@@ -130,18 +131,17 @@ where
                     tx_number =
                         tx_number.max(indices.and_then(|body| body.next_tx_num().checked_sub(1)));
                 }
-                (block_number, tx_number)
+                restored_checkpoint(block_number, tx_number, mode)
             }
-            _ if mode.is_some() => {
-                (Some(manifest.block), tip_indices.map(|body| body.last_tx_num()))
+            _ => {
+                let Some(prune_mode) = mode else { continue };
+                PruneCheckpoint {
+                    block_number: Some(manifest.block),
+                    tx_number: tip_indices.map(|body| body.last_tx_num()),
+                    prune_mode,
+                }
             }
-            _ => continue,
         };
-        // Unlimited retention still records the earliest available data.
-        let prune_mode = mode.unwrap_or_else(|| {
-            PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
-        });
-        let checkpoint = PruneCheckpoint { block_number, tx_number, prune_mode };
         tx.put::<tables::PruneCheckpoints>(segment, checkpoint)?;
 
         info!(target: "reth::cli",
@@ -154,6 +154,18 @@ where
     }
 
     Ok(())
+}
+
+/// Unlimited retention still records the earliest available data.
+fn restored_checkpoint(
+    block_number: Option<u64>,
+    tx_number: Option<u64>,
+    mode: Option<PruneMode>,
+) -> PruneCheckpoint {
+    let prune_mode = mode.unwrap_or_else(|| {
+        PruneMode::Before(block_number.map_or(0, |block| block.saturating_add(1)))
+    });
+    PruneCheckpoint { block_number, tx_number, prune_mode }
 }
 
 /// Reads the snapshot layout before updating the checkpoints that depend on it.
@@ -416,18 +428,12 @@ mod tests {
     fn write_prune_checkpoints_sets_all_segments() -> eyre::Result<()> {
         let db = create_test_rw_db();
         let tx = db.tx_mut()?;
-        let manifest = SnapshotManifest { block: 21_000_000, ..empty_manifest() };
+        let tip = 21_000_000;
+        let manifest = SnapshotManifest { block: tip, ..empty_manifest() };
         let selections = BTreeMap::new();
         let config =
             config_for_selections(&selections, &manifest, None, None::<&reth_chainspec::ChainSpec>);
-        write_prune_checkpoints_tx(
-            &tx,
-            &config,
-            &selections,
-            &manifest,
-            true,
-            Some(manifest.block),
-        )?;
+        write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(tip))?;
         for segment in [
             PruneSegment::SenderRecovery,
             PruneSegment::TransactionLookup,
@@ -716,14 +722,7 @@ mod tests {
                 prune_mode: PruneMode::Full,
             };
             set_history_checkpoints(&tx, source, source);
-            write_prune_checkpoints_tx(
-                &tx,
-                &config,
-                &selections,
-                &manifest,
-                true,
-                Some(snapshot_block),
-            )?;
+            write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, None)?;
             let boundary = PruneCheckpoint::pruned_through(expected);
             assert_eq!(
                 history_checkpoints(&tx)?,
@@ -774,33 +773,24 @@ mod tests {
             BTreeMap::from([(SnapshotComponentType::Transactions, ComponentSelection::Since(13))]);
         let config =
             config_for_selections(&selections, &manifest, None, None::<&reth_chainspec::ChainSpec>);
-        for (first_tx_num, source, expected_block, expected_tx) in [
-            (0, None, 9, None),
-            (8, None, 9, Some(7)),
-            (
-                8,
-                Some(PruneCheckpoint {
-                    tx_number: Some(16),
-                    ..PruneCheckpoint::pruned_through(15)
-                }),
-                15,
-                Some(16),
-            ),
-        ] {
+        let source = PruneCheckpoint { tx_number: Some(16), ..PruneCheckpoint::pruned_through(15) };
+        for (first_tx_num, prior, block, tx_number) in
+            [(0, None, 9, None), (8, None, 9, Some(7)), (8, Some(source), 15, Some(16))]
+        {
             let tx = db.tx_mut()?;
             tx.put::<tables::BlockBodyIndices>(
                 9,
                 StoredBlockBodyIndices { first_tx_num, tx_count: 0 },
             )?;
-            if let Some(source) = source {
+            if let Some(source) = prior {
                 tx.put::<tables::PruneCheckpoints>(PruneSegment::Bodies, source)?;
             }
             write_prune_checkpoints_tx(&tx, &config, &selections, &manifest, true, Some(9))?;
             assert_eq!(
                 tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)?,
                 Some(PruneCheckpoint {
-                    block_number: Some(expected_block),
-                    tx_number: expected_tx,
+                    block_number: Some(block),
+                    tx_number,
                     prune_mode: PruneMode::Before(13),
                 })
             );

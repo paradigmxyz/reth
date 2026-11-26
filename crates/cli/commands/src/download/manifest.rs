@@ -1340,7 +1340,7 @@ pub(super) mod tests {
         }
     }
 
-    pub(in crate::download) fn snapshot_source() -> tempfile::TempDir {
+    fn snapshot_source() -> tempfile::TempDir {
         let source = tempdir().unwrap();
         reth_fs_util::create_dir_all(source.path().join("db")).unwrap();
         reth_fs_util::write(source.path().join("db/mdbx.dat"), b"state-data").unwrap();

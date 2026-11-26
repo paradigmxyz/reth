@@ -380,10 +380,8 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
             "import",
             "--chain",
             chain,
-            "--db.max-size",
-            "256MB",
-            "--db.growth-step",
-            "8MB",
+            "--db.max-size=256MB",
+            "--db.growth-step=8MB",
             "--datadir",
             datadir.to_str().unwrap(),
             path.to_str().unwrap(),
@@ -398,8 +396,7 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         source.path().to_str().unwrap(),
         "-o",
         archives.path().to_str().unwrap(),
-        "--chain-id",
-        "3503995874084926",
+        "--chain-id=3503995874084926",
     ]);
     let manifest = archives.path().join("manifest.json");
     let snapshot: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
@@ -417,8 +414,7 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
             chain,
             "--datadir",
             target.path().to_str().unwrap(),
-            "--with-txs-since",
-            "100",
+            "--with-txs-since=100",
             "--with-state-history",
             "--with-receipts",
             "--with-senders",
@@ -430,13 +426,10 @@ async fn future_transaction_cutoff_restores_a_bootable_node() {
         let start_node = || {
             Reth::at(RETH)
                 .instance(0)
-                .http_port(0)
-                .ws_port(0)
-                .auth_port(0)
                 .chain_or_path(chain)
                 .data_dir(target.path())
                 .disable_discovery()
-                .args(["--port", "0", "--max-outbound-peers", "0", "--max-inbound-peers", "0"])
+                .args(["--with-unused-ports", "--max-outbound-peers=0", "--max-inbound-peers=0"])
                 .spawn()
         };
         let node = start_node();
