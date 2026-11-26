@@ -1,7 +1,12 @@
 mod server;
 
 use self::server::SnapshotServer;
-use super::{reth_ok, RETH};
+use super::*;
+use alloy_provider::{transport::Authorization, ConnectionConfig};
+use alloy_rpc_types::engine::{ExecutionPayloadBodyV1, JwtSecret};
+use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockNumberOrTag};
+use reth_ethereum_primitives::Block;
+use reth_primitives_traits::{Block as _, BlockBody};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -33,16 +38,16 @@ impl Snapshot {
         let state = entry("state.tar.zst", "db/snapshot");
         let headers = entry("headers.tar.zst", "static_files/headers");
         let chunks = [
-            entry("txs-0.tar.zst", "static_files/txs-0"),
-            entry("txs-1.tar.zst", "static_files/txs-1"),
+            entry("receipts-0.tar.zst", "static_files/receipts-0"),
+            entry("receipts-1.tar.zst", "static_files/receipts-1"),
         ];
         let manifest = json!({
             "block": 19, "chain_id": 1, "storage_version": 2, "timestamp": 0,
             "components": {
                 "state": state, "headers": headers,
-                "transactions": {
+                "receipts": {
                     "blocks_per_file": 10, "total_blocks": 20,
-                    "chunk_files": ["txs-0.tar.zst", "txs-1.tar.zst"],
+                    "chunk_files": ["receipts-0.tar.zst", "receipts-1.tar.zst"],
                     "chunk_sizes": [chunks[0]["size"], chunks[1]["size"]],
                     "chunk_output_files": [chunks[0]["output_files"], chunks[1]["output_files"]]
                 }
@@ -118,7 +123,7 @@ async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     } else {
         dir.path().join("static_files")
     };
-    let mut args = vec!["--with-txs-since", "10"];
+    let mut args = vec!["--with-receipts-since", "10"];
     if custom_static_files {
         args.extend(["--datadir.static-files", static_files.to_str().unwrap()]);
     }
@@ -126,33 +131,33 @@ async fn check_manifest_selection_reuse_and_repair(custom_static_files: bool) {
     for (path, expected) in [
         (dir.path().join("db/snapshot"), "state.tar.zst"),
         (static_files.join("headers"), "headers.tar.zst"),
-        (static_files.join("txs-1"), "txs-1.tar.zst"),
+        (static_files.join("receipts-1"), "receipts-1.tar.zst"),
     ] {
         assert_eq!(fs::read(path).unwrap(), expected.as_bytes());
     }
     assert!(server.requests().iter().any(|(path, range)| {
         path.ends_with("state.tar.zst") && range.as_deref() == Some(&format!("bytes={offset}-"))
     }));
-    assert!(!static_files.join("txs-0").exists());
-    assert!(!server.requests().iter().any(|(path, _)| path.ends_with("txs-0.tar.zst")));
+    assert!(!static_files.join("receipts-0").exists());
+    assert!(!server.requests().iter().any(|(path, _)| path.ends_with("receipts-0.tar.zst")));
     let config: toml::Value =
         toml::from_str(&fs::read_to_string(dir.path().join("reth.toml")).unwrap()).unwrap();
-    assert_eq!(config["prune"]["segments"]["bodies_history"]["before"].as_integer(), Some(10));
+    assert_eq!(config["prune"]["segments"]["receipts"]["before"].as_integer(), Some(10));
 
     server.clear_requests();
     success(download(&server, dir.path(), &args));
     assert_eq!(server.requests(), vec![("/snapshot/manifest.json".into(), None)]);
 
     // Same-size corruption must be detected by checksum, not just the file length.
-    fs::write(static_files.join("txs-1"), b"bad-1.tar.zst").unwrap();
+    fs::write(static_files.join("receipts-1"), b"Receipts-1.tar.zst").unwrap();
     server.clear_requests();
     success(download(&server, dir.path(), &args));
-    assert_eq!(fs::read(static_files.join("txs-1")).unwrap(), b"txs-1.tar.zst");
-    assert!(server.requests().iter().any(|(path, _)| path.ends_with("txs-1.tar.zst")));
+    assert_eq!(fs::read(static_files.join("receipts-1")).unwrap(), b"receipts-1.tar.zst");
+    assert!(server.requests().iter().any(|(path, _)| path.ends_with("receipts-1.tar.zst")));
     assert!(server
         .requests()
         .iter()
-        .all(|(path, _)| path.ends_with("manifest.json") || path.ends_with("txs-1.tar.zst")));
+        .all(|(path, _)| path.ends_with("manifest.json") || path.ends_with("receipts-1.tar.zst")));
     if custom_static_files {
         assert!(!dir.path().join("static_files").exists());
     }
@@ -260,18 +265,6 @@ async fn wrong_chain_is_rejected_before_force_removes_data() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn explicit_archive_source_and_datadir_allow_other_chains() {
-    let mut snapshot = Snapshot::new();
-    snapshot.manifest["chain_id"] = json!(42431);
-    let server = snapshot.serve(true).await;
-    let dir = tempfile::tempdir().unwrap();
-    success(download(&server, dir.path(), &["--archive"]));
-    assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
-    assert_eq!(fs::read(dir.path().join("static_files/txs-0")).unwrap(), b"txs-0.tar.zst");
-    assert!(dir.path().join("reth.toml").exists());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bad_output_checksum_prevents_finalization() {
     let mut snapshot = Snapshot::new();
     snapshot.manifest["components"]["state"]["output_files"][0]["blake3"] =
@@ -279,7 +272,7 @@ async fn bad_output_checksum_prevents_finalization() {
     let server = snapshot.serve(true).await;
     let dir = tempfile::tempdir().unwrap();
     let output =
-        download(&server, dir.path(), &["--with-txs-since", "20", "--retry-backoff", "0ms"]);
+        download(&server, dir.path(), &["--with-receipts-since", "20", "--retry-backoff", "0ms"]);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("Failed integrity validation"));
     assert!(String::from_utf8_lossy(&output.stderr).contains("after 10 attempts"));
@@ -324,5 +317,126 @@ async fn completion_only_suggests_startup_for_matching_chain() {
             })
             .unwrap();
         assert_eq!(suffix, expected_suffix);
+        assert_eq!(fs::read(dir.path().join("db/snapshot")).unwrap(), b"state.tar.zst");
+        assert_eq!(
+            fs::read(dir.path().join("static_files/receipts-0")).unwrap(),
+            b"receipts-0.tar.zst"
+        );
+        assert!(dir.path().join("reth.toml").exists());
+    }
+}
+
+#[tokio::test]
+async fn future_transaction_cutoff_restores_a_bootable_node() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/rpc/rpc-e2e-tests/testdata/rpc-compat");
+    let chain = fixture.join("genesis.json");
+    let chain = chain.to_str().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let archives = tempfile::tempdir().unwrap();
+    let blocks = fs::read(fixture.join("chain.rlp")).unwrap();
+    let mut next_block = blocks.as_slice();
+    for _ in 0..44 {
+        Block::decode_sealed(&mut next_block).unwrap();
+    }
+    let prefix = archives.path().join("prefix.rlp");
+    let suffix = archives.path().join("next.rlp");
+    fs::write(&prefix, &blocks[..blocks.len() - next_block.len()]).unwrap();
+    fs::write(&suffix, next_block).unwrap();
+    let expected = Block::decode_sealed(&mut next_block).unwrap();
+    assert!(next_block.is_empty());
+    assert_eq!(expected.body().transactions.len(), 6);
+    let run = |name: &str, datadir: &Path, args: &[&str]| {
+        let mut command = Command::new(RETH);
+        command.args([name, "--chain", chain, "--datadir"]).arg(datadir);
+        command.args(["--db.max-size=256MB", "--db.growth-step=8MB"]);
+        success(command.args(args).output().unwrap());
+    };
+    run("import", source.path(), &[prefix.to_str().unwrap()]);
+    // Pre-Cancun slot preimages are auxiliary to this restore and occupy a sparse 4 GiB file.
+    fs::remove_dir_all(source.path().join("db/preimage")).unwrap();
+    reth_ok(&[
+        "snapshot-manifest",
+        "-d",
+        source.path().to_str().unwrap(),
+        "-o",
+        archives.path().to_str().unwrap(),
+        "--chain-id=3503995874084926",
+    ]);
+    let manifest = archives.path().join("manifest.json");
+    let snapshot: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    let tip = snapshot["block"].as_u64().unwrap();
+    assert_eq!(tip, 44);
+    assert!(snapshot["components"]["rocksdb_indices"].is_object());
+
+    for include_indices in [false, true] {
+        let target = tempfile::tempdir().unwrap();
+        let mut flags = vec![
+            "--manifest-path",
+            manifest.to_str().unwrap(),
+            "--with-txs-since=100",
+            "--with-state-history",
+            "--with-receipts",
+            "--with-senders",
+        ];
+        if include_indices {
+            flags.push("--with-rocksdb");
+        }
+        run("download", target.path(), &flags);
+        let config: toml::Value =
+            toml::from_str(&fs::read_to_string(target.path().join("reth.toml")).unwrap()).unwrap();
+        assert_eq!(config["prune"]["segments"]["bodies_history"]["before"].as_integer(), Some(100));
+        let start_node = || {
+            let node = Reth::at(RETH)
+                .instance(0)
+                .chain_or_path(chain)
+                .data_dir(target.path())
+                .disable_discovery()
+                .args(["--with-unused-ports", "--max-outbound-peers=0", "--max-inbound-peers=0"])
+                .spawn();
+            let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
+            (node, rpc)
+        };
+        let (node, rpc) = start_node();
+        assert_eq!(rpc.get_block_number().await.unwrap(), tip);
+        let capabilities: Value = rpc.client().request_noparams("eth_capabilities").await.unwrap();
+        assert_eq!(capabilities["blocks"]["oldestBlock"], format!("{:#x}", tip + 1));
+        let err = rpc.get_block_by_number(tip.into()).await.unwrap_err();
+        let error = err.as_error_resp().unwrap();
+        assert_eq!(error.code, i64::from(EthRpcErrorCode::PrunedHistory.code()));
+        assert_eq!(
+            error.message,
+            "pruned history unavailable: requested 44, earliest available 45"
+        );
+        drop(node);
+
+        run("import", target.path(), &[suffix.to_str().unwrap()]);
+        let (node, rpc) = start_node();
+        assert_eq!(rpc.get_block_number().await.unwrap(), tip + 1);
+        let block = rpc.get_block_by_number(BlockNumberOrTag::Earliest).await.unwrap().unwrap();
+        assert_eq!(block.header.hash, expected.hash());
+        assert!(block.transactions.hashes().eq(expected.body().transaction_hashes_iter().copied()));
+
+        let secret = JwtSecret::from_file(&target.path().join("jwt.hex")).unwrap();
+        let token = secret.encode(&Default::default()).unwrap();
+        let engine = ProviderBuilder::new()
+            .connect_with_config(
+                &format!("http://{}:{}", node.host(), node.auth_port().unwrap()),
+                ConnectionConfig::default().with_auth(Authorization::bearer(token)),
+            )
+            .await
+            .unwrap();
+        let hashes = [expected.parent_hash, expected.hash()];
+        let by_hash: Vec<Option<ExecutionPayloadBodyV1>> =
+            engine.client().request("engine_getPayloadBodiesByHashV1", (hashes,)).await.unwrap();
+        let by_range: Vec<Option<ExecutionPayloadBodyV1>> = engine
+            .client()
+            .request("engine_getPayloadBodiesByRangeV1", (format!("{tip:#x}"), "0x2"))
+            .await
+            .unwrap();
+        let body = expected.body();
+        let payload = ExecutionPayloadBodyV1::new(body.withdrawals.clone(), &body.transactions);
+        assert_eq!(by_hash, [None, Some(payload)]);
+        assert_eq!(by_range, by_hash);
     }
 }

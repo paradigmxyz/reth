@@ -1,11 +1,13 @@
 //! reth's static file database table import and access
 
-use reth_nippy_jar::{NippyJar, NippyJarError, CONFIG_FILE_EXTENSION};
+use reth_nippy_jar::{NippyJar, NippyJarError};
 use reth_static_file_types::{
     SegmentHeader, SegmentRangeInclusive, StaticFileMap, StaticFileSegment,
 };
 use std::path::Path;
 use tracing::warn;
+
+pub use reth_nippy_jar::{CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION};
 
 mod cursor;
 pub use cursor::StaticFileCursor;
@@ -59,13 +61,13 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
                 );
                 continue
             }
-            let jar = NippyJar::<SegmentHeader>::load(&data_path)?;
+            let header = read_static_file_header(&data_path)?;
 
-            if let Some(block_range) = jar.user_header().block_range() {
+            if let Some(block_range) = header.block_range() {
                 static_files.entry(segment).or_insert_with(Vec::new).push(StaticFileEntry {
                     file_range,
                     block_range,
-                    header: jar.user_header().clone(),
+                    header,
                 });
             }
         }
@@ -77,6 +79,29 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
     }
 
     Ok(static_files)
+}
+
+/// Reads the segment header from the configuration of a single static file.
+pub fn read_static_file_header(path: &Path) -> Result<SegmentHeader, NippyJarError> {
+    Ok(NippyJar::<SegmentHeader>::load(path)?.user_header().clone())
+}
+
+/// Returns the last missing block at or below `tip`, or `None` if coverage reaches genesis.
+/// Ranges must be ordered by decreasing end block. Overlapping ranges are allowed.
+pub fn last_missing_block(
+    tip: u64,
+    ranges: impl Iterator<Item = SegmentRangeInclusive>,
+) -> Option<u64> {
+    let mut missing = tip;
+    for range in ranges {
+        if range.end() < missing {
+            break
+        }
+        if range.contains(missing) {
+            missing = range.start().checked_sub(1)?;
+        }
+    }
+    Some(missing)
 }
 
 #[cfg(test)]
