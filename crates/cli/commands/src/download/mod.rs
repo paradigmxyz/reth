@@ -112,11 +112,12 @@ use prune::prune_unlisted_outputs;
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, MAINNET};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
+use reth_config::config::Config;
 use reth_db::{init_db, Database};
 use reth_db_api::transaction::DbTx;
 use reth_fs_util as fs;
 use reth_node_core::args::DefaultPruningValues;
-use reth_prune_types::{PruneMode, PruneModes};
+use reth_prune_types::{PruneMode, PruneModes, MINIMUM_UNWIND_SAFE_DISTANCE};
 use source::{
     discover_manifest_url, fetch_manifest_from_source, fetch_snapshot_api_entries,
     print_snapshot_listing, resolve_manifest_base_url,
@@ -124,7 +125,7 @@ use source::{
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -594,18 +595,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             target_dir,
             static_files_dir.as_deref(),
             self.download_concurrency.max(1),
-            cancel_token.clone(),
+            cancel_token,
             self.retry_backoff,
         )
         .await?;
 
-        self.finalize_modular_download(
-            &selections,
-            &prepared.manifest,
-            preset,
-            target_dir,
-            &target_dir.join("db"),
-        )?;
+        let config = self.download_config(&selections, &prepared.manifest, preset);
+        self.finalize_modular_download(&selections, &prepared.manifest, &config, target_dir)?;
 
         Ok(Some(prepared))
     }
@@ -668,38 +664,44 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         Ok(manifest)
     }
 
+    fn download_config(
+        &self,
+        selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
+        manifest: &SnapshotManifest,
+        preset: Option<SelectionPreset>,
+    ) -> Config {
+        let mut config =
+            config_for_selections(selections, manifest, preset, Some(self.env.chain.as_ref()));
+        // Use the requested policy even when its range starts beyond the snapshot.
+        if let Some(selection) = self.explicit_history_selection() {
+            let mode =
+                config_gen::selection_to_prune_mode(selection, Some(MINIMUM_UNWIND_SAFE_DISTANCE));
+            config.prune.segments.account_history = mode;
+            config.prune.segments.storage_history = mode;
+        }
+        config
+    }
+
     /// Writes config and checkpoint state after all modular archives complete.
     fn finalize_modular_download(
         &self,
         selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
         manifest: &SnapshotManifest,
-        preset: Option<SelectionPreset>,
+        config: &Config,
         target_dir: &Path,
-        db_path: &Path,
     ) -> Result<()> {
-        let config =
-            config_for_selections(selections, manifest, preset, Some(self.env.chain.as_ref()));
-        if write_config(&config, target_dir)? {
-            let desc = config_gen::describe_prune_config(&config);
+        let db = init_db(target_dir.join("db"), self.env.db.database_args())?;
+        let tx = db.tx_mut()?;
+        let is_v2 = config_gen::snapshot_uses_v2(&tx, selections)?;
+        config_gen::write_prune_checkpoints_tx(&tx, config, selections, manifest, is_v2)?;
+        if is_v2 && rocksdb_indices_missing(selections) {
+            config_gen::reset_index_stage_checkpoints_tx(&tx)?;
+        }
+        if write_config(config, target_dir)? {
+            let desc = config_gen::describe_prune_config(config);
             info!(target: "reth::cli", "{}", desc.join(", "));
         }
-
-        let db = init_db(db_path, self.env.db.database_args())?;
-        let should_write_prune = config.prune.segments != Default::default();
-        let should_reset_indices = should_reset_index_stage_checkpoints(selections);
-        if should_write_prune || should_reset_indices {
-            let tx = db.tx_mut()?;
-
-            if should_write_prune {
-                config_gen::write_prune_checkpoints_tx(&tx, &config, selections, manifest.block)?;
-            }
-
-            if should_reset_indices {
-                config_gen::reset_index_stage_checkpoints_tx(&tx)?;
-            }
-
-            tx.commit()?;
-        }
+        tx.commit()?;
 
         if self.env.chain.chain().id() == manifest.chain_id {
             let start_command = startup_node_command::<C>(self.env.chain.as_ref());
@@ -763,21 +765,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                 self.with_txs,
                 self.with_txs_since,
                 self.with_txs_distance,
-                manifest.block,
             );
             let receipt_selection = explicit_component_selection(
                 self.with_receipts,
                 self.with_receipts_since,
                 self.with_receipts_distance,
-                manifest.block,
             );
-            let state_history_selection = explicit_component_selection(
-                self.with_state_history,
-                self.with_state_history_since,
-                self.with_state_history_distance,
-                manifest.block,
-            );
-
+            let history_selection = self.explicit_history_selection();
             // Required components always All
             if available(SnapshotComponentType::State) {
                 selections.insert(SnapshotComponentType::State, ComponentSelection::All);
@@ -785,22 +779,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             if available(SnapshotComponentType::Headers) {
                 selections.insert(SnapshotComponentType::Headers, ComponentSelection::All);
             }
-            if let Some(selection) = tx_selection &&
-                available(SnapshotComponentType::Transactions)
-            {
-                selections.insert(SnapshotComponentType::Transactions, selection);
-            }
-            if let Some(selection) = receipt_selection &&
-                available(SnapshotComponentType::Receipts)
-            {
-                selections.insert(SnapshotComponentType::Receipts, selection);
-            }
-            if let Some(selection) = state_history_selection {
-                if available(SnapshotComponentType::AccountChangesets) {
-                    selections.insert(SnapshotComponentType::AccountChangesets, selection);
-                }
-                if available(SnapshotComponentType::StorageChangesets) {
-                    selections.insert(SnapshotComponentType::StorageChangesets, selection);
+            for (ty, selection) in [
+                (SnapshotComponentType::Transactions, tx_selection),
+                (SnapshotComponentType::Receipts, receipt_selection),
+                (SnapshotComponentType::AccountChangesets, history_selection),
+                (SnapshotComponentType::StorageChangesets, history_selection),
+            ] {
+                if let Some(selection) = selection &&
+                    available(ty) &&
+                    !matches!(selection, ComponentSelection::Since(block) if block > manifest.block)
+                {
+                    selections.insert(ty, selection);
                 }
             }
             if self.with_senders && available(SnapshotComponentType::TransactionSenders) {
@@ -836,6 +825,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
             selections.into_iter().filter(|(_, sel)| *sel != ComponentSelection::None).collect();
 
         Ok(ResolvedComponents { selections: selected, preset })
+    }
+
+    fn explicit_history_selection(&self) -> Option<ComponentSelection> {
+        explicit_component_selection(
+            self.with_state_history,
+            self.with_state_history_since,
+            self.with_state_history_distance,
+        )
     }
 
     /// Builds the default minimal component selection for the manifest.
@@ -972,12 +969,11 @@ fn explicit_component_selection(
     all: bool,
     since: Option<u64>,
     distance: Option<u64>,
-    snapshot_block: u64,
 ) -> Option<ComponentSelection> {
     if all {
         Some(ComponentSelection::All)
     } else if let Some(block) = since {
-        (block <= snapshot_block).then_some(ComponentSelection::Since(block))
+        Some(ComponentSelection::Since(block))
     } else {
         distance.map(ComponentSelection::Distance)
     }
@@ -999,24 +995,44 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
     }
 }
 
-/// Removes existing snapshot data that is managed by `reth download`.
+/// Removes existing snapshot data managed by `reth download` without following symlinks.
 fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
     for entry in MANAGED_DATADIR_PATHS {
         let path = managed_datadir_path(entry, target_dir, static_files_dir);
-        if !path.try_exists()? {
-            continue;
-        }
-
-        let metadata = fs::metadata(&path)?;
-        if metadata.is_dir() {
+        let file_type = match path.symlink_metadata() {
+            Ok(metadata) => metadata.file_type(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(fs::FsPathError::metadata(err, path).into()),
+        };
+        let is_dir = file_type.is_dir();
+        #[cfg(windows)]
+        let is_dir = is_dir || std::os::windows::fs::FileTypeExt::is_symlink_dir(&file_type);
+        if is_dir {
             fs::remove_dir_all(&path)?;
-        } else if metadata.is_file() {
+        } else if file_type.is_file() || file_type.is_symlink() {
             fs::remove_file(&path)?;
         }
     }
 
     Ok(())
+}
+
+/// Whether an archive entry belongs to the downloader's managed output paths.
+fn is_managed_snapshot_path(path: &Path, directory: bool) -> bool {
+    let mut components = path.components().peekable();
+    if components.peek() == Some(&Component::CurDir) {
+        components.next();
+    }
+    let Some(Component::Normal(root)) = components.next() else { return false };
+    if !MANAGED_DATADIR_PATHS.iter().any(|name| root == *name) {
+        return false
+    }
+    if root == "reth.toml" {
+        return !directory && components.next().is_none()
+    }
+    (directory || components.peek().is_some()) &&
+        components.all(|part| matches!(part, Component::Normal(_)))
 }
 
 /// Resolves one of [`MANAGED_DATADIR_PATHS`], honoring a custom static files directory.
@@ -1074,8 +1090,8 @@ fn inject_rocksdb_indices(
     }
 }
 
-/// Returns `true` when RocksDB-backed index stages should be reset after download.
-fn should_reset_index_stage_checkpoints(
+/// Returns whether the download omits the RocksDB index files.
+fn rocksdb_indices_missing(
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
 ) -> bool {
     !matches!(selections.get(&SnapshotComponentType::RocksdbIndices), Some(ComponentSelection::All))
@@ -1190,9 +1206,19 @@ mod tests {
     use super::*;
     use clap::{Args, Parser};
     use extract::CompressionFormat;
-    use manifest::{ComponentManifest, OutputFileChecksum, SingleArchive};
+    use manifest::{generate_manifest, ComponentManifest, OutputFileChecksum, SingleArchive};
     use reth_chainspec::{HOLESKY, MAINNET};
+    use reth_db::{
+        mdbx::DatabaseArguments, models::StorageSettings, static_file::iter_static_files,
+        DatabaseEnv,
+    };
+    use reth_db_api::{tables, transaction::DbTxMut};
     use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+    use reth_prune_types::{PruneCheckpoint, PruneSegment};
+    use reth_stages_types::{StageCheckpoint, StageId};
+    use reth_static_file_types::StaticFileSegment;
+    use reth_storage_api::metadata::keys;
+    use tempfile::{tempdir, TempDir};
 
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -1200,38 +1226,84 @@ mod tests {
         args: T,
     }
 
-    fn manifest_with_archive_only_components() -> SnapshotManifest {
-        let mut components = BTreeMap::new();
-        components.insert(
-            SnapshotComponentType::TransactionSenders.key().to_string(),
-            ComponentManifest::Single(SingleArchive {
-                file: "transaction_senders.tar.zst".to_string(),
-                size: 1,
-                decompressed_size: 0,
-                blake3: None,
-                output_files: vec![],
-            }),
-        );
-        components.insert(
-            SnapshotComponentType::RocksdbIndices.key().to_string(),
-            ComponentManifest::Single(SingleArchive {
-                file: "rocksdb_indices.tar.zst".to_string(),
-                size: 1,
-                decompressed_size: 0,
-                blake3: None,
-                output_files: vec![],
-            }),
-        );
+    pub(super) fn empty_manifest() -> SnapshotManifest {
         SnapshotManifest {
             block: 0,
             chain_id: 1,
             storage_version: 2,
             timestamp: 0,
-            base_url: Some("https://example.com".to_string()),
+            base_url: None,
             reth_version: None,
-            components,
+            components: BTreeMap::new(),
             extensions: Default::default(),
         }
+    }
+
+    fn single_archive(
+        component: SnapshotComponentType,
+        output_path: &str,
+    ) -> (String, ComponentManifest) {
+        let key = component.key();
+        let archive = SingleArchive {
+            file: format!("{key}.tar.zst"),
+            size: 1,
+            decompressed_size: 1,
+            blake3: None,
+            output_files: vec![OutputFileChecksum {
+                path: output_path.to_owned(),
+                size: 1,
+                blake3: blake3::hash(b"x").to_hex().to_string(),
+            }],
+        };
+        (key.to_owned(), ComponentManifest::Single(archive))
+    }
+
+    fn manifest_with_archive_only_components() -> SnapshotManifest {
+        SnapshotManifest {
+            base_url: Some("https://example.com".to_string()),
+            components: BTreeMap::from([
+                single_archive(
+                    SnapshotComponentType::TransactionSenders,
+                    "static_files/static_file_transaction_senders_0_0",
+                ),
+                single_archive(SnapshotComponentType::RocksdbIndices, "rocksdb/000001.sst"),
+            ]),
+            ..empty_manifest()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_existing_datadir_removes_managed_links_without_following_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let datadir = dir.path().join("datadir");
+        let existing = dir.path().join("storage");
+        let missing = dir.path().join("old-config.toml");
+        fs::create_dir_all(&datadir).unwrap();
+        fs::create_dir_all(&existing).unwrap();
+        fs::write(existing.join("data"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&existing, datadir.join("db")).unwrap();
+        std::os::unix::fs::symlink(&missing, datadir.join("reth.toml")).unwrap();
+
+        clear_existing_datadir(&datadir, None).unwrap();
+
+        for entry in ["db", "reth.toml"] {
+            let err = datadir.join(entry).symlink_metadata().unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        }
+        assert_eq!(fs::read(existing.join("data")).unwrap(), b"keep");
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn managed_snapshot_paths_match_output_types() {
+        assert!(is_managed_snapshot_path(Path::new("./db/data"), false));
+        assert!(is_managed_snapshot_path(Path::new("static_files"), true));
+        assert!(is_managed_snapshot_path(Path::new("reth.toml"), false));
+        assert!(!is_managed_snapshot_path(Path::new("db"), false));
+        assert!(!is_managed_snapshot_path(Path::new("reth.toml/settings"), false));
+        assert!(!is_managed_snapshot_path(Path::new("reth.toml"), true));
+        assert!(!is_managed_snapshot_path(Path::new("logs/restore.log"), false));
     }
 
     #[test]
@@ -1584,7 +1656,6 @@ mod tests {
             Some(&ComponentSelection::All)
         );
         assert_eq!(selections.get(&SnapshotComponentType::TransactionSenders), None);
-        assert!(!should_reset_index_stage_checkpoints(&selections));
     }
 
     #[test]
@@ -1596,17 +1667,6 @@ mod tests {
         inject_rocksdb_indices(&mut selections, &manifest);
 
         assert!(selections.is_empty());
-        assert!(should_reset_index_stage_checkpoints(&selections));
-    }
-
-    #[test]
-    fn should_reset_index_stage_checkpoints_without_rocksdb_indices() {
-        let mut selections = BTreeMap::new();
-        selections.insert(SnapshotComponentType::Transactions, ComponentSelection::All);
-        assert!(should_reset_index_stage_checkpoints(&selections));
-
-        selections.insert(SnapshotComponentType::RocksdbIndices, ComponentSelection::All);
-        assert!(!should_reset_index_stage_checkpoints(&selections));
     }
 
     #[test]
@@ -1639,20 +1699,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn restore_rejects_incompatible_layout_at_finalization() -> Result<()> {
+        let source = tempdir()?;
+        snapshot_db(&source)?.update(|tx| {
+            set_layout(tx, serde_json::json!({"account_changesets_in_static_files": true}));
+        })?;
+        let error = restore_history(&source, "--archive", None).await.unwrap_err();
+        assert_eq!(error.to_string(), "Unsupported legacy snapshot setting for this download: account_changesets_in_static_files=true");
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_download_explicit_source_and_datadir_allow_other_chains() {
         let dir = tempfile::tempdir().unwrap();
         let manifest_path = dir.path().join("manifest.json");
         let mut manifest = manifest_with_archive_only_components();
         manifest.chain_id = 42431;
-        for component in manifest.components.values_mut() {
-            if let ComponentManifest::Single(archive) = component {
-                archive.output_files.push(OutputFileChecksum {
-                    path: archive.file.clone(),
-                    size: 1,
-                    blake3: blake3::hash(b"x").to_hex().to_string(),
-                });
-            }
-        }
         fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         let manifest_url = format!("file://{}", manifest_path.display());
         let target = dir.path().join("download");
@@ -1723,5 +1785,242 @@ mod tests {
         );
         manifest.chain_id = 1;
         assert!(args.full_preset_selections(&manifest).is_ok());
+    }
+
+    const SNAPSHOT_TIP: u64 = 10;
+
+    const INDEX_STAGES: [StageId; 3] =
+        [StageId::TransactionLookup, StageId::IndexAccountHistory, StageId::IndexStorageHistory];
+
+    const SOURCE_BOUNDARY: PruneCheckpoint = PruneCheckpoint::pruned_through(3);
+    const SOURCE_HISTORY: PruneCheckpoint =
+        PruneCheckpoint { prune_mode: PruneMode::Distance(30_000), ..SOURCE_BOUNDARY };
+
+    fn snapshot_db(dir: &TempDir) -> Result<DatabaseEnv> {
+        init_db(dir.path().join("db"), DatabaseArguments::test())
+    }
+
+    pub(super) fn history_checkpoints(tx: &impl DbTx) -> Result<[Option<PruneCheckpoint>; 2]> {
+        Ok([
+            tx.get::<tables::PruneCheckpoints>(PruneSegment::AccountHistory)?,
+            tx.get::<tables::PruneCheckpoints>(PruneSegment::StorageHistory)?,
+        ])
+    }
+
+    pub(super) fn set_history_checkpoints(
+        tx: &impl DbTxMut,
+        account: PruneCheckpoint,
+        storage: PruneCheckpoint,
+    ) {
+        tx.put::<tables::PruneCheckpoints>(PruneSegment::AccountHistory, account).unwrap();
+        tx.put::<tables::PruneCheckpoints>(PruneSegment::StorageHistory, storage).unwrap();
+    }
+
+    async fn restore_history(
+        source: &TempDir,
+        flag: &str,
+        expected_mode: Option<PruneMode>,
+    ) -> Result<TempDir> {
+        let target = tempdir()?;
+        restore_snapshot(source, &target, flag).await?;
+        let modes = Config::from_path(target.path().join("reth.toml"))?.prune.segments;
+        assert_eq!(modes.account_history, expected_mode);
+        assert_eq!(modes.storage_history, expected_mode);
+        Ok(target)
+    }
+
+    async fn restore_snapshot(source: &TempDir, target: &TempDir, flag: &str) -> Result<()> {
+        let archives = tempdir()?;
+        let output = archives.path();
+        let manifest =
+            generate_manifest(source.path(), output, None, SNAPSHOT_TIP, 1, 10, None, false)?;
+        let path = output.join("manifest.json");
+        fs::write(&path, serde_json::to_vec(&manifest)?)?;
+        DownloadCommand::<EthereumChainSpecParser>::parse_from([
+            "reth",
+            "--manifest-path",
+            path.to_str().unwrap(),
+            "--datadir",
+            target.path().to_str().unwrap(),
+            flag,
+        ])
+        .execute::<()>()
+        .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_bundled_v1_history() -> Result<()> {
+        for (setting, flag, mode) in [
+            ("receipts_in_static_files", "--with-state-history", None),
+            (
+                "transaction_senders_in_static_files",
+                "--minimal",
+                Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+            ),
+        ] {
+            let source = tempdir()?;
+            let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
+            {
+                let db = snapshot_db(&source)?;
+                let tx = db.tx_mut()?;
+                // v1.10 configured static-file receipts and senders independently of its history.
+                set_layout(&tx, serde_json::json!({(setting): true}));
+                for stage in INDEX_STAGES {
+                    tx.put::<tables::StageCheckpoints>(stage.to_string(), indexed)?;
+                    tx.put::<tables::StageCheckpointProgresses>(stage.to_string(), vec![1, 2, 3])?;
+                }
+                for segment in [PruneSegment::StorageHistory, PruneSegment::TransactionLookup] {
+                    tx.put::<tables::PruneCheckpoints>(segment, SOURCE_HISTORY)?;
+                }
+                tx.commit()?;
+            }
+            let target = restore_history(&source, flag, mode).await?;
+            let db = snapshot_db(&target)?;
+            let tx = db.tx()?;
+            assert_eq!(history_checkpoints(&tx)?, [None, Some(SOURCE_HISTORY)]);
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?,
+                Some(SOURCE_HISTORY)
+            );
+            for stage in INDEX_STAGES {
+                assert_eq!(tx.get::<tables::StageCheckpoints>(stage.to_string())?, Some(indexed));
+                assert_eq!(
+                    tx.get::<tables::StageCheckpointProgresses>(stage.to_string())?,
+                    Some(vec![1, 2, 3])
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn future_history_keeps_v1_checkpoint_progress() -> Result<()> {
+        let source = tempdir()?;
+        let interrupted = PruneCheckpoint {
+            block_number: Some(4),
+            tx_number: None,
+            prune_mode: PruneMode::Before(SNAPSHOT_TIP),
+        };
+        let unstarted = PruneCheckpoint { block_number: None, ..SOURCE_HISTORY };
+        snapshot_db(&source)?.update(|tx| set_history_checkpoints(tx, interrupted, unstarted))?;
+        let mode = PruneMode::Before(20);
+        let target = restore_history(&source, "--with-state-history-since=20", Some(mode)).await?;
+        assert_eq!(
+            history_checkpoints(&snapshot_db(&target)?.tx()?)?,
+            [Some(interrupted), Some(unstarted)]
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_v2_history_uses_selected_range_and_retention() -> Result<()> {
+        let source = tempdir()?;
+        snapshot_db(&source)?.update(|tx| {
+            set_layout(tx, StorageSettings::v2());
+            set_history_checkpoints(tx, SOURCE_HISTORY, SOURCE_HISTORY);
+        })?;
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            manifest::tests::write_test_static_files(source.path(), segment, SNAPSHOT_TIP);
+        }
+        let future = PruneMode::Before(20);
+        let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
+        for (flag, mode, checkpoint, segment_count) in [
+            (
+                "--with-state-history-since=20",
+                Some(future),
+                PruneCheckpoint { prune_mode: future, ..tip },
+                0,
+            ),
+            ("--with-state-history", None, SOURCE_BOUNDARY, 2),
+        ] {
+            let target = restore_history(&source, flag, mode).await?;
+            assert_eq!(
+                iter_static_files(&target.path().join("static_files"))?.len(),
+                segment_count,
+                "{flag}"
+            );
+            let db = snapshot_db(&target)?;
+            let tx = db.tx()?;
+            assert_eq!(history_checkpoints(&tx)?, [Some(checkpoint); 2]);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_v2_without_history_or_indices() -> Result<()> {
+        let source = tempdir()?;
+        let indexed = StageCheckpoint::new(SNAPSHOT_TIP);
+        let tip = PruneCheckpoint::pruned_through(SNAPSHOT_TIP);
+        let source_prune = PruneCheckpoint { prune_mode: PruneMode::Full, ..tip };
+        {
+            let db = snapshot_db(&source)?;
+            let tx = db.tx_mut()?;
+            set_layout(&tx, StorageSettings::v2());
+            for stage in INDEX_STAGES.into_iter().chain([StageId::SenderRecovery]) {
+                tx.put::<tables::StageCheckpoints>(stage.to_string(), indexed)?;
+            }
+            for segment in [PruneSegment::TransactionLookup, PruneSegment::SenderRecovery] {
+                tx.put::<tables::PruneCheckpoints>(segment, source_prune)?;
+            }
+            tx.commit()?;
+        }
+        let target = restore_history(&source, "--with-state-history", None).await?;
+        let db = snapshot_db(&target)?;
+        let tx = db.tx()?;
+        assert_eq!(history_checkpoints(&tx)?, [Some(tip); 2]);
+        for stage in INDEX_STAGES {
+            assert_eq!(
+                tx.get::<tables::StageCheckpoints>(stage.to_string())?,
+                Some(StageCheckpoint::default()),
+                "{stage}"
+            );
+        }
+        assert_eq!(tx.get::<tables::PruneCheckpoints>(PruneSegment::TransactionLookup)?, None);
+        assert_eq!(
+            tx.get::<tables::StageCheckpoints>(StageId::SenderRecovery.to_string())?,
+            Some(indexed)
+        );
+        assert_eq!(
+            tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?,
+            Some(source_prune)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn minimal_restore_with_existing_archive_config() -> Result<()> {
+        let source = tempdir()?;
+        snapshot_db(&source)?.update(|tx| set_layout(tx, StorageSettings::v2()))?;
+        let target = tempdir()?;
+        let config_path = target.path().join("reth.toml");
+        let archive_config = "[prune.segments]\n";
+        fs::write(&config_path, archive_config)?;
+
+        restore_snapshot(&source, &target, "--minimal").await?;
+
+        assert_eq!(fs::read_to_string(config_path)?, archive_config);
+        let db = snapshot_db(&target)?;
+        let tx = db.tx()?;
+        for (segment, prune_mode) in [
+            (PruneSegment::SenderRecovery, PruneMode::Full),
+            (PruneSegment::Bodies, PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+        ] {
+            assert_eq!(
+                tx.get::<tables::PruneCheckpoints>(segment)?,
+                Some(PruneCheckpoint {
+                    prune_mode,
+                    ..PruneCheckpoint::pruned_through(SNAPSHOT_TIP)
+                }),
+                "{segment}"
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn set_layout(tx: &impl DbTxMut, settings: impl serde::Serialize) {
+        let bytes = serde_json::to_vec(&settings).unwrap();
+        tx.put::<tables::Metadata>(keys::STORAGE_SETTINGS.to_owned(), bytes).unwrap();
     }
 }

@@ -79,6 +79,21 @@ pub trait ChangeSetReader {
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>>;
 
+    /// Calls `f` for every account changeset in a range of blocks, in block order.
+    ///
+    /// This reads the same rows as [`Self::account_changesets_range`], but implementations can
+    /// stream them instead of collecting them. The default implementation collects the range.
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
+        for (block_number, changeset) in self.account_changesets_range(range)? {
+            f(block_number, changeset);
+        }
+        Ok(())
+    }
+
     /// Returns the first block of the lowest stored account changeset file, if it is above
     /// genesis.
     ///
