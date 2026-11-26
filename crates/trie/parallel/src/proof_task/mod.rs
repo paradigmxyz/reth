@@ -715,7 +715,7 @@ mod tests {
     }
 
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
-    #[test]
+    #[reth_concurrency::test]
     fn spawn_proof_workers_creates_handle() {
         let chain_spec = Arc::new(ChainSpec::default());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
@@ -751,7 +751,7 @@ mod tests {
     }
 
     /// Ensures a single pool serves quarter, half, and full-capacity worker counts.
-    #[test]
+    #[reth_concurrency::test]
     fn single_pool_serves_fractional_worker_counts() {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
@@ -836,7 +836,7 @@ mod tests {
 
     /// Ensures jobs still queued when the handle is dropped are discarded, so a cancelled block's
     /// backlog does not hold the pools that the next block's workers queue behind.
-    #[test]
+    #[reth_concurrency::test]
     fn dropped_handle_discards_queued_jobs() {
         let provider_factory =
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));

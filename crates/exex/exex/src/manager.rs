@@ -1,5 +1,6 @@
 use crate::{
-    wal::Wal, ExExEvent, ExExNotification, ExExNotifications, FinishedExExHeight, WalHandle,
+    notifications::rewind_to_fork_block, wal::Wal, ExExEvent, ExExNotification, ExExNotifications,
+    FinishedExExHeight, WalHandle,
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
@@ -152,11 +153,15 @@ impl<N: NodePrimitives> ExExHandle<N> {
                         return Poll::Ready(Ok(()))
                     }
                 }
-                // Do not handle [ExExNotification::ChainReorged] and
-                // [ExExNotification::ChainReverted] cases and always send the
-                // notification, because the ExEx should be aware of the reorgs and reverts lower
-                // than its finished height
-                ExExNotification::ChainReorged { .. } | ExExNotification::ChainReverted { .. } => {}
+                // Always send [ExExNotification::ChainReorged] and
+                // [ExExNotification::ChainReverted], because the ExEx should be aware of the
+                // reorgs and reverts lower than its finished height.
+                ExExNotification::ChainReorged { old, .. } |
+                ExExNotification::ChainReverted { old } => {
+                    let mut finished_height = finished_height;
+                    rewind_to_fork_block(&mut finished_height, old);
+                    self.finished_height = Some(finished_height);
+                }
             }
         }
 
@@ -681,7 +686,7 @@ mod tests {
     use super::*;
     use crate::wal::WalResult;
     use alloy_primitives::B256;
-    use futures::{StreamExt, TryStreamExt};
+    use futures::{FutureExt, StreamExt, TryStreamExt};
     use rand::Rng;
     use reth_db_common::init::init_genesis;
     use reth_evm_ethereum::EthEvmConfig;
@@ -1218,6 +1223,60 @@ mod tests {
 
         // Ensure the notification ID was still incremented
         assert_eq!(exex_handle.next_notification_id, 23);
+    }
+
+    #[tokio::test]
+    async fn test_sends_commit_on_other_branch_below_finished_height() {
+        let provider_factory = create_test_provider_factory();
+        init_genesis(&provider_factory).unwrap();
+        let provider = BlockchainProvider::new(provider_factory).unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+
+        let (mut exex_handle, _, mut notifications) = ExExHandle::new(
+            "test_exex".to_string(),
+            Default::default(),
+            provider,
+            EthEvmConfig::mainnet(),
+            wal.handle(),
+        );
+
+        let block = |number, hash, parent_hash| {
+            let mut block = RecoveredBlock::<reth_ethereum_primitives::Block>::default();
+            block.set_block_number(number);
+            block.set_hash(hash);
+            block.set_parent_hash(parent_hash);
+            block
+        };
+        let a2 = BlockNumHash::new(2, B256::repeat_byte(0xa2));
+        let a5 = BlockNumHash::new(5, B256::repeat_byte(0xa5));
+        let a3_to_a5 = vec![
+            block(3, B256::repeat_byte(0xa3), a2.hash),
+            block(4, B256::repeat_byte(0xa4), B256::repeat_byte(0xa3)),
+            block(5, a5.hash, B256::repeat_byte(0xa4)),
+        ];
+        let b3 = block(3, B256::repeat_byte(0xb3), a2.hash);
+        let b4 = block(4, B256::repeat_byte(0xb4), b3.hash());
+
+        // The ExEx finished A5, then A3..A5 are reorged to B3.
+        exex_handle.finished_height = Some(a5);
+        let reorg = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(a3_to_a5, Default::default(), Default::default())),
+            new: Arc::new(Chain::new(vec![b3], Default::default(), Default::default())),
+        };
+        let mut cx = Context::from_waker(futures::task::noop_waker_ref());
+        assert!(exex_handle.send(&mut cx, &(0, reorg.clone())).is_ready());
+        assert_eq!(notifications.next().await.unwrap().unwrap(), reorg);
+        assert_eq!(exex_handle.finished_height, Some(a2));
+
+        // B4 is not on the branch of A5, so it must be delivered.
+        let commit = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![b4], Default::default(), Default::default())),
+        };
+        assert!(exex_handle.send(&mut cx, &(1, commit.clone())).is_ready());
+        let received = notifications.next().now_or_never().expect("B4 must be delivered");
+        assert_eq!(received.unwrap().unwrap(), commit);
     }
 
     #[tokio::test]

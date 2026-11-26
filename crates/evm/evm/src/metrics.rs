@@ -89,7 +89,7 @@ mod tests {
         RecoveredBlock::new_sealed(sealed, Default::default())
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_metered_one_updates_metrics() {
         let metrics = ExecutorMetrics::default();
         let block = create_test_block_with_gas(1000);
@@ -105,7 +105,7 @@ mod tests {
         assert_eq!(result, 1000);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_metered_helper_tracks_timing() {
         let metrics = ExecutorMetrics::default();
 

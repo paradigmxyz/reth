@@ -11,11 +11,11 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::{Encodable, EMPTY_STRING_CODE};
-use alloy_trie::{nodes::BranchNodeRef, EMPTY_ROOT_HASH};
+use alloy_trie::EMPTY_ROOT_HASH;
 use reth_execution_errors::{SparseStateTrieErrorKind, StateProofError, TrieWitnessError};
 use reth_trie_common::{
     DecodedMultiProofV2, ExecutionWitnessMode, HashedPostState, MultiProofTargetsV2, ProofV2Target,
-    TrieNodeV2,
+    TrieNode,
 };
 use reth_trie_sparse::{LeafUpdate, SparseStateTrie, SparseTrie as _, TrieNodeEpoch};
 
@@ -286,21 +286,12 @@ where
         }
     }
 
-    /// Record a single [`TrieNodeV2`] in the witness.
-    fn record_witness_node(&mut self, node: &TrieNodeV2, encoded: &mut Vec<u8>) {
+    /// Record a single [`TrieNode`] in the witness.
+    fn record_witness_node(&mut self, node: &TrieNode, encoded: &mut Vec<u8>) {
         encoded.clear();
         node.encode(encoded);
         let hash = keccak256(encoded.as_slice());
         self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
-
-        if let TrieNodeV2::Branch(branch) = node &&
-            !branch.key.is_empty()
-        {
-            encoded.clear();
-            BranchNodeRef::new(&branch.stack, branch.state_mask).encode(encoded);
-            let hash = keccak256(encoded.as_slice());
-            self.witness.entry(hash).or_insert_with(|| Bytes::copy_from_slice(encoded));
-        }
     }
 
     /// Compute the storage root for an account by walking the storage trie using the cursor
@@ -325,14 +316,14 @@ where
         if let Some(prefix_set) = self.prefix_sets.storage_prefix_sets.get(&hashed_address) {
             calculator = calculator.with_prefix_set(prefix_set.clone().freeze());
         }
-        let root_node = calculator.storage_root_node(hashed_address)?;
-        let root_hash = calculator
-            .compute_root_hash(core::slice::from_ref(&root_node))?
-            .unwrap_or(EMPTY_ROOT_HASH);
+        let root_nodes = calculator.storage_root_nodes(hashed_address)?;
+        let root_hash = calculator.compute_root_hash(&root_nodes)?.unwrap_or(EMPTY_ROOT_HASH);
         drop(calculator);
         if record_root_node {
             let mut encoded = Vec::new();
-            self.record_witness_node(&root_node.node, &mut encoded);
+            for root_node in root_nodes {
+                self.record_witness_node(&root_node.node, &mut encoded);
+            }
         }
         Ok(root_hash)
     }

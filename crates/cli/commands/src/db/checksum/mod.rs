@@ -5,7 +5,10 @@ use crate::{
 use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
 use reth_chainspec::EthereumHardforks;
-use reth_db::{static_file::iter_static_files, DatabaseEnv};
+use reth_db::{
+    static_file::{iter_static_files, StaticFileEntry},
+    DatabaseEnv,
+};
 use reth_db_api::{
     cursor::DbCursorRO,
     database::Database,
@@ -162,7 +165,7 @@ fn checksum_static_file<N: NodePrimitives>(
     );
 
     let mut reached_limit = false;
-    for (block_range, header) in ranges {
+    for StaticFileEntry { block_range, header, .. } in ranges {
         if reached_limit || block_range.start() > end_block {
             break;
         }

@@ -185,16 +185,10 @@ impl UnwindInput {
         &self,
         threshold: u64,
     ) -> (RangeInclusive<BlockNumber>, BlockNumber, bool) {
-        // +1 is to skip the block we're unwinding to
-        let mut start = self.unwind_to + 1;
-        let end = self.checkpoint;
-
-        start = max(start, end.block_number.saturating_sub(threshold));
-
-        let unwind_to = start - 1;
-
-        let is_final_range = unwind_to == self.unwind_to;
-        (start..=end.block_number, unwind_to, is_final_range)
+        let end = self.checkpoint.block_number;
+        // Even a zero threshold must make progress. The retained block is outside the batch.
+        let unwind_to = max(self.unwind_to, end.saturating_sub(threshold.max(1)));
+        (unwind_to + 1..=end, unwind_to, unwind_to == self.unwind_to)
     }
 }
 
