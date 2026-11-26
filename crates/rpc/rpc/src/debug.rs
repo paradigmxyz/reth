@@ -40,7 +40,7 @@ use reth_rpc_eth_api::{
     AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    memory_budget::{bytes_to_mib, calls_gas, traced_calls_bytes},
+    memory_budget::{bytes_to_mib, calls_gas, execution_weight_mib, traced_calls_bytes},
     utils::CallManyBudget,
     EthApiError, StateCacheDb, TransactionSource,
 };
@@ -392,13 +392,15 @@ where
             };
         let (TransactionSource::Pool(tx) | TransactionSource::Block { transaction: tx, .. }) =
             &transaction;
+        // The transactions before it in the block run first and their state stays cached.
         let weight = geth_trace_weight_mib(
             &opts,
             alloy_consensus::Transaction::gas_limit(tx.inner()),
             1,
             self.eth_api().eth_api_settings().max_trace_bytes,
             self.eth_api().eth_api_settings().max_response_size,
-        );
+        )
+        .saturating_add(execution_weight_mib(0, block.header().gas_used(), 0));
         let memory =
             self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
 
