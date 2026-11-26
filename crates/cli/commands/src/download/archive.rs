@@ -338,7 +338,6 @@ impl ArchiveProcessor {
             self.ctx.target_dir(),
             self.ctx.static_files_dir(),
             self.ctx.session(),
-            self.archive().size,
         )?;
         Ok(None)
     }
