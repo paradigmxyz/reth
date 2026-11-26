@@ -111,6 +111,13 @@ gmp = [
     "reth-ethereum-cli/gmp",
     "reth-node-ethereum/gmp",
 ]
+# Runs the BN254 precompiles on MCL instead of arkworks. On x86-64 CPUs with BMI2 and ADX, MCL's
+# static destructor frees its JIT code at process exit, so a BN254 call still running on another
+# thread then can crash the process.
+bn254-mcl = [
+    "reth-ethereum-cli/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
+]
 
 otlp = [
     "reth-ethereum-cli/otlp",

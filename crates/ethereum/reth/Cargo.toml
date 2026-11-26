@@ -186,6 +186,12 @@ gmp = [
     "reth-evm-ethereum?/gmp",
     "reth-node-ethereum?/gmp",
 ]
+bn254-mcl = [
+    "reth-ethereum-cli?/bn254-mcl",
+    "reth-evm?/bn254-mcl",
+    "reth-evm-ethereum?/bn254-mcl",
+    "reth-node-ethereum?/bn254-mcl",
+]
 js-tracer = [
     "rpc",
     "reth-rpc/js-tracer",
