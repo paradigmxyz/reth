@@ -30,9 +30,10 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, DependencyProofProvider,
-    NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult, StateRangeProvider,
-    StateRangeProviderFactory, StateRangeView, StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, DatabaseProviderROFactory, DependencyProofFetcher,
+    DependencyProofProvider, DependencyProofRequest, NodePrimitivesProvider, RangeEnd,
+    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
+    StorageChangeSetReader, StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderFactory, OwnedProvider};
@@ -71,6 +72,8 @@ pub struct BlockchainProvider<N: NodeTypesWithDB> {
     pub(crate) canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
     /// Store for BALs associated with this provider view.
     pub(crate) bal_store: BalStoreHandle,
+    /// Peer proof retrieval shared across provider clones.
+    dependency_proof_fetcher: Arc<parking_lot::RwLock<Option<Arc<dyn DependencyProofFetcher>>>>,
 }
 
 impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
@@ -79,6 +82,7 @@ impl<N: NodeTypesWithDB> Clone for BlockchainProvider<N> {
             database: self.database.clone(),
             canonical_in_memory_state: self.canonical_in_memory_state.clone(),
             bal_store: self.bal_store.clone(),
+            dependency_proof_fetcher: self.dependency_proof_fetcher.clone(),
         }
     }
 }
@@ -133,6 +137,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
                 safe_header,
             ),
             bal_store,
+            dependency_proof_fetcher: Default::default(),
         })
     }
 
@@ -1087,6 +1092,36 @@ impl<N: ProviderNodeTypes> DependencyProofProvider for BlockchainProvider<N> {
 
     fn insert_dependency_proof(&self, hash: B256, proof: Bytes) -> ProviderResult<()> {
         self.database.insert_dependency_proof(hash, proof)
+    }
+
+    fn dependency_proof_requests(
+        &self,
+        range: RangeInclusive<u64>,
+    ) -> ProviderResult<Vec<DependencyProofRequest>> {
+        Ok(self
+            .database
+            .provider()?
+            .sealed_headers_range(range)?
+            .into_iter()
+            .filter_map(|header| {
+                header.dependency_proof_hash().map(|commitment| DependencyProofRequest {
+                    block_hash: header.hash(),
+                    commitment,
+                })
+            })
+            .collect())
+    }
+
+    fn dependency_proof_fetcher(&self) -> Option<Arc<dyn DependencyProofFetcher>> {
+        self.dependency_proof_fetcher.read().clone()
+    }
+
+    fn set_dependency_proof_fetcher(
+        &self,
+        fetcher: Arc<dyn DependencyProofFetcher>,
+    ) -> ProviderResult<()> {
+        *self.dependency_proof_fetcher.write() = Some(fetcher);
+        Ok(())
     }
 }
 

@@ -36,6 +36,15 @@ use reth_primitives_traits::{
 #[cfg(any(feature = "std", test))]
 use alloy_primitives::Bytes;
 
+#[cfg(feature = "std")]
+use alloc::boxed::Box;
+#[cfg(feature = "std")]
+use core::ops::RangeInclusive;
+#[cfg(feature = "std")]
+use reth_consensus::SupplementalDataFuture;
+#[cfg(feature = "std")]
+use reth_storage_api::{DependencyProofRequest, DependencyProofStore};
+
 mod validation;
 pub use validation::{
     compare_receipts_root_and_logs_bloom, validate_block_post_execution, verify_receipts,
@@ -213,6 +222,66 @@ where
     B: Block,
     ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks,
 {
+    #[cfg(feature = "std")]
+    fn prepare_block_range_supplemental_data(
+        &self,
+        range: RangeInclusive<u64>,
+    ) -> SupplementalDataFuture {
+        let proofs = self.proofs.clone();
+        Box::pin(async move {
+            // A pre-activation range needs no supplemental downloads.
+            let end = *range.end();
+            let store = proofs.clone();
+            let last = tokio::task::spawn_blocking(move || store.requests(end..=end))
+                .await
+                .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?
+                .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?;
+            if last.is_empty() {
+                return Ok(())
+            }
+            let mut start = *range.start();
+            while start <= end {
+                let batch_end = start.saturating_add(127).min(end);
+                let store = proofs.clone();
+                let requests =
+                    tokio::task::spawn_blocking(move || store.requests(start..=batch_end))
+                        .await
+                        .map_err(|error| {
+                            ConsensusError::DependencyProofProcessing(Arc::new(error))
+                        })?
+                        .map_err(|error| {
+                            ConsensusError::DependencyProofProcessing(Arc::new(error))
+                        })?;
+                for request in requests {
+                    prepare_dependency_proof(proofs.clone(), request).await?;
+                }
+                if batch_end == end {
+                    break
+                }
+                start = batch_end + 1;
+            }
+            Ok(())
+        })
+    }
+
+    #[cfg(feature = "std")]
+    fn prepare_block_supplemental_data(
+        &self,
+        header: SealedHeader<B::Header>,
+    ) -> SupplementalDataFuture {
+        let proofs = self.proofs.clone();
+        Box::pin(async move {
+            if let Some(commitment) = header.dependency_proof_hash() {
+                prepare_dependency_proof(
+                    proofs,
+                    DependencyProofRequest { block_hash: header.hash(), commitment },
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    }
+
     fn validate_block_supplemental_data(
         &self,
         block: &SealedBlock<B>,
@@ -381,6 +450,41 @@ where
     }
 }
 
+#[cfg(feature = "std")]
+async fn prepare_dependency_proof(
+    proofs: DependencyProofStore,
+    request: DependencyProofRequest,
+) -> Result<(), ConsensusError> {
+    if request.commitment == alloy_primitives::keccak256([]) {
+        return Ok(())
+    }
+    let store = proofs.clone();
+    let available = tokio::task::spawn_blocking(move || {
+        read_dependency_proof(&store, request.block_hash, request.commitment)
+    })
+    .await
+    .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?;
+    if available.is_ok() {
+        return Ok(())
+    }
+    let fetcher =
+        proofs.fetcher().ok_or(ConsensusError::DependencyProofUnavailable(request.block_hash))?;
+    let proof = fetcher
+        .fetch(request)
+        .await
+        .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?
+        .ok_or(ConsensusError::DependencyProofUnavailable(request.block_hash))?;
+    if proof.len() > alloy_eips::eip8288::MAX_DEPENDENCY_PROOF_BYTES ||
+        alloy_primitives::keccak256(&proof) != request.commitment
+    {
+        return Err(ConsensusError::DependencyProofUnavailable(request.block_hash));
+    }
+    tokio::task::spawn_blocking(move || proofs.insert(request.block_hash, proof))
+        .await
+        .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?
+        .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))
+}
+
 // A bad local row is unavailable data, not evidence that the committed block is invalid.
 #[cfg(any(feature = "std", test))]
 fn read_dependency_proof(
@@ -413,6 +517,100 @@ mod tests {
         constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
         proofs,
     };
+
+    #[cfg(feature = "std")]
+    mod preparation {
+        use super::*;
+        use reth_storage_api::{
+            DependencyProofFetcher, DependencyProofFuture, DependencyProofProvider,
+        };
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Mutex,
+        };
+
+        #[derive(Debug)]
+        struct Fetcher {
+            response: Option<Bytes>,
+            calls: AtomicUsize,
+        }
+
+        impl DependencyProofFetcher for Fetcher {
+            fn fetch(&self, _: DependencyProofRequest) -> DependencyProofFuture {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                let response = self.response.clone();
+                Box::pin(async move { Ok(response) })
+            }
+        }
+
+        #[derive(Debug)]
+        struct Store {
+            proof: Mutex<Option<Bytes>>,
+            fetcher: Arc<Fetcher>,
+        }
+
+        impl DependencyProofProvider for Store {
+            fn dependency_proof(
+                &self,
+                _: B256,
+            ) -> reth_storage_api::errors::provider::ProviderResult<Option<Bytes>> {
+                Ok(self.proof.lock().unwrap().clone())
+            }
+            fn insert_dependency_proof(
+                &self,
+                _: B256,
+                proof: Bytes,
+            ) -> reth_storage_api::errors::provider::ProviderResult<()> {
+                *self.proof.lock().unwrap() = Some(proof);
+                Ok(())
+            }
+            fn dependency_proof_fetcher(&self) -> Option<Arc<dyn DependencyProofFetcher>> {
+                Some(self.fetcher.clone())
+            }
+        }
+
+        #[tokio::test]
+        async fn missing_and_corrupt_proofs_are_fetched_once_and_persisted() {
+            let proof = Bytes::from_static(b"proof");
+            let request = DependencyProofRequest {
+                block_hash: B256::repeat_byte(1),
+                commitment: alloy_primitives::keccak256(&proof),
+            };
+            for local in [None, Some(Bytes::from_static(b"corrupt"))] {
+                let store = Arc::new(Store {
+                    proof: Mutex::new(local),
+                    fetcher: Arc::new(Fetcher {
+                        response: Some(proof.clone()),
+                        calls: AtomicUsize::new(0),
+                    }),
+                });
+                let proofs = DependencyProofStore::new(store.clone());
+                prepare_dependency_proof(proofs.clone(), request).await.unwrap();
+                prepare_dependency_proof(proofs, request).await.unwrap();
+                assert_eq!(*store.proof.lock().unwrap(), Some(proof.clone()));
+                assert_eq!(store.fetcher.calls.load(Ordering::Relaxed), 1);
+            }
+        }
+
+        #[tokio::test]
+        async fn unavailable_or_mismatching_peer_data_is_not_persisted() {
+            let request = DependencyProofRequest {
+                block_hash: B256::repeat_byte(1),
+                commitment: alloy_primitives::keccak256(b"proof"),
+            };
+            for response in [None, Some(Bytes::from_static(b"wrong"))] {
+                let store = Arc::new(Store {
+                    proof: Mutex::new(None),
+                    fetcher: Arc::new(Fetcher { response, calls: AtomicUsize::new(0) }),
+                });
+                assert!(
+                    matches!(prepare_dependency_proof(DependencyProofStore::new(store.clone()), request).await,
+                    Err(ConsensusError::DependencyProofUnavailable(hash)) if hash == request.block_hash)
+                );
+                assert_eq!(*store.proof.lock().unwrap(), None);
+            }
+        }
+    }
 
     #[derive(Debug)]
     struct StoredProof(Option<Bytes>);

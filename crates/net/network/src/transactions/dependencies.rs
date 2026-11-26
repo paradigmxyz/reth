@@ -3,24 +3,27 @@
 use crate::protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler};
 use alloy_consensus::{Transaction, TxEip8141};
 use alloy_eips::{
-    eip2718::Decodable2718,
+    eip2718::Encodable2718,
     eip8288::{
         prove, DependencyEvidence, DependencyWrapper, ProofError, SignatureDependency,
         MAX_AGGREGATE_DEPENDENCIES, MAX_DEPENDENCY_PROOF_BYTES, MAX_LEANSIG_DEPS_PER_WRAPPER,
         MAX_WRAPPER_BYTES,
     },
 };
-use alloy_primitives::{bytes::BytesMut, map::B256Set, Bytes, B256};
-use futures::{Stream, StreamExt};
+use alloy_primitives::{bytes::BytesMut, keccak256, map::B256Set, Bytes, B256};
+use futures::{future::BoxFuture, stream::FuturesUnordered, FutureExt, Stream, StreamExt};
+use parking_lot::Mutex;
 use reth_eth_wire::{
     capability::SharedCapabilities,
     multiplex::ProtocolConnection,
     protocol::{Protocol, ProtocolIngressLimits},
     Capability,
 };
+use reth_lru::LruMap;
 use reth_network_api::{Direction, PeerId};
-use reth_primitives_traits::SignedTransaction;
-use reth_transaction_pool::{PoolConsensusTx, PoolTransaction, TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{
+    PoolTransaction, TransactionOrigin, TransactionPool, ValidPoolTransaction,
+};
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fmt,
@@ -37,6 +40,9 @@ use tokio::{
 };
 use tracing::debug;
 
+mod proofs;
+pub use proofs::{DependencyProofConnection, DependencyProofProtocolHandler};
+
 const EVENT_CAPACITY: usize = 16;
 const PEER_CAPACITY: usize = 1024;
 const OUTBOUND_CAPACITY: usize = 2;
@@ -46,6 +52,8 @@ const AGGREGATION_INTERVAL: Duration =
 const WRAPPER_MESSAGE: u8 = 0;
 const RECOVERY_MESSAGE: u8 = 1;
 const MAX_MESSAGES_PER_POLL: usize = 32;
+const VERIFIED_WRAPPER_CAPACITY: u32 = 16;
+const ADMISSION_TIMEOUT: Duration = Duration::from_secs(30);
 static VERIFICATION_PERMITS: LazyLock<Arc<Semaphore>> =
     LazyLock::new(|| Arc::new(Semaphore::new(VALIDATION_CONCURRENCY)));
 
@@ -77,12 +85,17 @@ pub enum DependencyAdmissionError {
 pub struct DependencyAdmission<P> {
     pool: P,
     permits: Arc<Semaphore>,
+    verified: Arc<Mutex<LruMap<B256, Arc<DependencyEvidence>>>>,
 }
 
 impl<P: TransactionPool + 'static> DependencyAdmission<P> {
     /// Creates admission against the pool and the shared verification concurrency budget.
     pub fn new(pool: P) -> Self {
-        Self { pool, permits: VERIFICATION_PERMITS.clone() }
+        Self {
+            pool,
+            permits: VERIFICATION_PERMITS.clone(),
+            verified: Arc::new(Mutex::new(LruMap::new(VERIFIED_WRAPPER_CAPACITY))),
+        }
     }
 
     /// Verifies a bounded wrapper before submitting its transactions to the ordinary pool
@@ -94,11 +107,16 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
         let permit =
             self.permits.clone().try_acquire_owned().map_err(|_| DependencyAdmissionError::Busy)?;
         let pool = self.pool.clone();
+        let verified = self.verified.clone();
         let span = tracing::Span::current();
         let (transactions, evidence) = tokio::task::spawn_blocking(move || {
             let _permit = permit;
             let _entered = span.enter();
-            let wrapper = decode_wrapper(&raw)?;
+            let id = keccak256(&raw);
+            let mut wrapper = decode_wrapper(&raw)?;
+            if let Some(evidence) = verified.lock().get(&id).cloned() {
+                wrapper.evidence = evidence;
+            }
             let mut transactions = Vec::with_capacity(wrapper.transactions.len());
             let mut hashes = BTreeSet::new();
             for raw in wrapper.transactions {
@@ -108,16 +126,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                         .transaction
                         .clone()
                 } else {
-                    let mut bytes = raw.as_ref();
-                    let transaction = PoolConsensusTx::<P>::decode_2718(&mut bytes)
-                        .map_err(|_| DependencyAdmissionError::Transaction)?;
-                    if !bytes.is_empty() || transaction.frame_transaction().is_none() {
-                        return Err(DependencyAdmissionError::Transaction)
-                    }
-                    let recovered = transaction
-                        .try_into_recovered()
-                        .map_err(|_| DependencyAdmissionError::Transaction)?;
-                    P::Transaction::try_from_consensus(recovered)
+                    P::Transaction::recover_raw_transaction(&raw)
                         .map_err(|_| DependencyAdmissionError::Transaction)?
                 };
                 if transaction.consensus_ref().frame_transaction().is_none() ||
@@ -136,6 +145,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                 return Err(ProofError::Coverage.into())
             }
             wrapper.evidence.verify()?;
+            verified.lock().insert(id, wrapper.evidence.clone());
             Ok::<_, DependencyAdmissionError>((transactions, wrapper.evidence))
         })
         .await??;
@@ -329,6 +339,11 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
         let mut peers = BTreeMap::<PeerId, Peer>::new();
         let mut snapshot: Option<Snapshot> = None;
         let mut job: Option<JoinHandle<Result<Snapshot, ProofError>>> = None;
+        let mut admissions = FuturesUnordered::<
+            BoxFuture<'static, (PeerId, Result<Vec<B256>, DependencyAdmissionError>)>,
+        >::new();
+        let mut admitting = BTreeSet::new();
+        let mut cursor = None;
         let mut interval = tokio::time::interval(AGGREGATION_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -343,15 +358,26 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                     Some(DependencyEvent::Message(id, message)) => {
                         if message[0] == RECOVERY_MESSAGE {
                             if let Some(peer) = peers.get_mut(&id) { peer.needs_full = true; }
-                        } else if let Err(error) = self.submit(message.slice(1..)).await {
-                            if matches!(error, DependencyAdmissionError::MissingTransaction) &&
-                                let Some(peer) = peers.get_mut(&id) &&
-                                let Err(error) = peer.outgoing.try_send(BytesMut::from(&[RECOVERY_MESSAGE][..]))
-                            {
-                                debug!(target: "reth::eip8288", %error, "Recovery queue unavailable");
-                            }
-                            debug!(target: "reth::eip8288", %error, "Rejected dependency wrapper");
+                        } else if peers.contains_key(&id) && admissions.len() < VALIDATION_CONCURRENCY && admitting.insert(id) {
+                            let admission = self.clone();
+                            admissions.push(async move {
+                                let result = tokio::time::timeout(ADMISSION_TIMEOUT, admission.submit(message.slice(1..)))
+                                    .await.unwrap_or(Err(DependencyAdmissionError::Busy));
+                                (id, result)
+                            }.boxed());
                         }
+                    }
+                },
+                Some((id, result)) = admissions.next(), if !admissions.is_empty() => {
+                    admitting.remove(&id);
+                    if let Err(error) = result {
+                        if matches!(error, DependencyAdmissionError::MissingTransaction) &&
+                            let Some(peer) = peers.get_mut(&id) &&
+                            let Err(error) = peer.outgoing.try_send(BytesMut::from(&[RECOVERY_MESSAGE][..]))
+                        {
+                            debug!(target: "reth::eip8288", %error, "Recovery queue unavailable");
+                        }
+                        debug!(target: "reth::eip8288", %error, "Rejected dependency wrapper");
                     }
                 },
                 result = async { match &mut job { Some(job) => job.await, None => pending().await } } => {
@@ -364,6 +390,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                         } => {
                             for peer in peers.values_mut() { announce(peer, &next); }
                             self.pool.set_dependency_aggregate(Some(next.evidence.clone()));
+                            cursor = next.transactions.last().map(|(hash, _)| *hash);
                             snapshot = Some(next);
                         }
                         Ok(Err(error)) => debug!(target: "reth::eip8288", %error, "Aggregate snapshot failed"),
@@ -382,7 +409,7 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                         for peer in peers.values_mut() { announce(peer, snapshot); }
                     }
                     if job.is_some() { continue }
-                    pending.sort_unstable_by_key(|tx| *tx.transaction.hash());
+                    rotate_pending(&mut pending, cursor);
                     let mut transactions = Vec::new();
                     let mut inputs = Vec::new();
                     let mut input_ids = HashSet::new();
@@ -402,10 +429,11 @@ impl<P: TransactionPool + 'static> DependencyAdmission<P> {
                                 }
                             };
                             let Some(added) = additional_wrapper_dependencies(&dependencies, &deps) else { continue };
-                            let raw = tx.transaction.encoded_2718_consensus();
+                            let Some(pooled) = self.pool.get_pooled_transaction_element(*tx.transaction.hash()) else { continue };
+                            let raw = Bytes::from(pooled.encoded_2718());
                             // Reserve room for the proof, dependency list, and RLP framing.
                             let next_bytes = bytes + raw.len() + added * 100 + 16;
-                            if next_bytes > MAX_WRAPPER_BYTES - MAX_DEPENDENCY_PROOF_BYTES { break }
+                            if next_bytes > MAX_WRAPPER_BYTES - MAX_DEPENDENCY_PROOF_BYTES { continue }
                             bytes = next_bytes;
                             dependencies.extend(deps);
                             transactions.push((*tx.transaction.hash(), raw));
@@ -465,13 +493,35 @@ fn additional_wrapper_dependencies(
     (current.len() + added <= MAX_LEANSIG_DEPS_PER_WRAPPER).then_some(added)
 }
 
+// Continue after the last successfully published batch, including when the pool is unchanged.
+fn rotate_pending<T: PoolTransaction>(
+    pending: &mut [Arc<ValidPoolTransaction<T>>],
+    cursor: Option<B256>,
+) {
+    pending.sort_unstable_by_key(|tx| *tx.transaction.hash());
+    if let Some(cursor) = cursor {
+        let start = pending.partition_point(|tx| *tx.transaction.hash() <= cursor);
+        pending.rotate_left(start);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8288::LEANSPHINCS_SCHEME;
-    use alloy_primitives::U256;
+    use alloy_consensus::TxEip8141WithSidecar;
+    use alloy_eips::{
+        eip4844::Blob,
+        eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
+        eip8141::{Frame, FrameLimits, FrameMode, TransactionFees},
+        eip8288::{LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
+    };
+    use alloy_primitives::{Address, Bytes48, U256};
     use alloy_rlp::RlpEncodable;
-    use reth_transaction_pool::test_utils::testing_pool;
+    use reth_transaction_pool::{
+        blobstore::InMemoryBlobStore,
+        test_utils::{testing_pool, MockTransaction, MockTransactionFactory, OkValidator},
+        CoinbaseTipOrdering, EthPoolTransaction, EthPooledTransaction, Pool,
+    };
 
     fn dependencies(count: usize) -> Vec<SignatureDependency> {
         (0..count)
@@ -639,5 +689,93 @@ mod tests {
         announce(&mut peer, &snapshot);
         let recovered = incoming.try_recv().unwrap();
         assert_eq!(DependencyWrapper::decode(&recovered[1..]).unwrap().transactions, vec![raw]);
+    }
+
+    #[test]
+    fn unchanged_pending_pool_rotates_past_the_wrapper_dependency_limit() {
+        let mut factory = MockTransactionFactory::default();
+        let count = MAX_LEANSIG_DEPS_PER_WRAPPER + 1;
+        let mut pending = (0..count)
+            .map(|index| {
+                factory.validated_arc(
+                    MockTransaction::eip1559().with_hash(B256::from(U256::from(index))),
+                )
+            })
+            .collect::<Vec<_>>();
+        let all = pending.iter().map(|tx| *tx.hash()).collect::<B256Set>();
+        let mut announced = B256Set::default();
+        let mut cursor = None;
+        for _ in 0..2 {
+            rotate_pending(&mut pending, cursor);
+            let selected = &pending[..MAX_LEANSIG_DEPS_PER_WRAPPER];
+            announced.extend(selected.iter().map(|tx| *tx.hash()));
+            cursor = selected.last().map(|tx| *tx.hash());
+        }
+        assert_eq!(announced, all);
+    }
+
+    #[tokio::test]
+    async fn blob_wrappers_preserve_sidecars_and_replays_reuse_verified_evidence() {
+        let pool = Pool::new(
+            OkValidator::<EthPooledTransaction>::default().set_propagate_transactions(true),
+            CoinbaseTipOrdering::default(),
+            InMemoryBlobStore::default(),
+            Default::default(),
+        );
+        let admission = DependencyAdmission::new(pool.clone());
+        let seed = [7; lean_vm::lean_sphincs::SECRET_KEY_LEN];
+        let key = lean_vm::lean_sphincs::key_gen(&seed);
+        let dependency = SignatureDependency {
+            scheme: LEANSPHINCS_SCHEME,
+            data_hash: B256::repeat_byte(1),
+            verification_key_hash: B256::from(key.to_bytes()),
+        };
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::default()],
+            vec![Bytes48::ZERO],
+            vec![Bytes48::ZERO; CELLS_PER_EXT_BLOB],
+        );
+        let transaction = TxEip8141WithSidecar::new(
+            TxEip8141 {
+                sender: Address::repeat_byte(0x41),
+                nonce_keys: Some(vec![]),
+                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
+                fees: TransactionFees {
+                    max_fee: U256::from(1_000_000_000_000_000_000u64),
+                    max_priority_fee_per_gas: U256::from(10),
+                },
+                frames: vec![Frame {
+                    mode: FrameMode::DependencyVerify,
+                    limits: FrameLimits { execution: LEANSPHINCS_VERIFICATION_GAS, state: 0 },
+                    data: dependency.encode().into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+            sidecar.clone(),
+        );
+        let transaction = reth_ethereum_primitives::PooledTransactionVariant::from(transaction);
+        let signature = lean_vm::lean_sphincs::sign(&seed, &dependency.data_hash.0);
+        let wrapper = DependencyWrapper {
+            transactions: vec![transaction.encoded_2718().into()],
+            evidence: Arc::new(
+                DependencyEvidence::direct(
+                    vec![dependency],
+                    vec![signature.to_bytes().to_vec().into()],
+                )
+                .unwrap(),
+            ),
+        };
+        let raw = wrapper.encode().unwrap();
+        let hashes = admission.submit(raw.clone()).await.unwrap();
+        let cached = admission.verified.lock().get(&keccak256(&raw)).cloned().unwrap();
+        assert_eq!(admission.submit(raw.clone()).await.unwrap(), hashes);
+        assert!(Arc::ptr_eq(&cached, admission.verified.lock().get(&keccak256(&raw)).unwrap()));
+        let mut admitted = pool.get(&hashes[0]).unwrap().transaction.clone();
+        assert_eq!(
+            admitted.take_blob().maybe_sidecar(),
+            Some(&alloy_eips::eip7594::BlobTransactionSidecarVariant::Eip7594(sidecar))
+        );
+        assert_eq!(pool.pool_size().total, 1);
     }
 }

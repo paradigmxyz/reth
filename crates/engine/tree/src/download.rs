@@ -3,7 +3,7 @@
 use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{map::B256Set, B256};
-use futures::FutureExt;
+use futures::{future::BoxFuture, FutureExt};
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{
@@ -76,6 +76,10 @@ where
     metrics: BlockDownloaderMetrics,
     /// Pending events to be emitted.
     pending_events: VecDeque<DownloadOutcome<B>>,
+    /// Consensus source for supplemental proof preparation.
+    consensus: Arc<dyn Consensus<B>>,
+    /// The active batch waits for proofs before it reaches execution.
+    preparation: parking_lot::Mutex<Option<BoxFuture<'static, Vec<SealedBlockWithAccessList<B>>>>>,
 }
 
 impl<Client, B> BasicBlockDownloader<Client, B>
@@ -86,17 +90,20 @@ where
     /// Create a new instance
     pub fn new(client: Client, consensus: Arc<dyn Consensus<B>>) -> Self {
         Self {
-            full_block_client: FullBlockClient::new(client, consensus),
+            full_block_client: FullBlockClient::new(client, consensus.clone()),
             inflight_full_block_requests: Vec::new(),
             inflight_block_range_requests: Vec::new(),
             set_buffered_blocks: BinaryHeap::new(),
             metrics: BlockDownloaderMetrics::default(),
             pending_events: Default::default(),
+            consensus,
+            preparation: Default::default(),
         }
     }
 
     /// Clears the stored inflight requests.
     fn clear(&mut self) {
+        *self.preparation.get_mut() = None;
         self.inflight_full_block_requests.clear();
         self.inflight_block_range_requests.clear();
         self.set_buffered_blocks.clear();
@@ -237,6 +244,15 @@ where
 
     /// Advances the download process.
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<DownloadOutcome<B>> {
+        if let Some(preparation) = self.preparation.get_mut() {
+            return match preparation.poll_unpin(cx) {
+                Poll::Ready(blocks) => {
+                    *self.preparation.get_mut() = None;
+                    Poll::Ready(DownloadOutcome::Blocks(blocks))
+                }
+                Poll::Pending => Poll::Pending,
+            };
+        }
         if let Some(pending_event) = self.pop_pending_event() {
             return Poll::Ready(pending_event);
         }
@@ -289,7 +305,26 @@ where
             }
             downloaded_blocks.push(block);
         }
-        Poll::Ready(DownloadOutcome::Blocks(downloaded_blocks))
+        let consensus = self.consensus.clone();
+        *self.preparation.get_mut() = Some(async move {
+            for block in &downloaded_blocks {
+                if let Err(error) = consensus.validate_header(block.block().sealed_header()) {
+                    tracing::debug!(target: "engine::download", %error, "Skipping proof retrieval for an invalid header");
+                    continue;
+                }
+                loop {
+                    match consensus.prepare_block_supplemental_data(block.block().sealed_header().clone()).await {
+                        Ok(()) => break,
+                        Err(error) => {
+                            tracing::debug!(target: "engine::download", %error, "Waiting for supplemental block data");
+                            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            }
+            downloaded_blocks
+        }.boxed());
+        self.poll(cx)
     }
 }
 

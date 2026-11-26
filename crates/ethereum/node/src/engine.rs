@@ -54,6 +54,10 @@ where
 {
     type Block = Block;
 
+    fn validates_block_supplemental_data(&self) -> bool {
+        true
+    }
+
     fn convert_payload_to_block(
         &self,
         payload: ExecutionData,

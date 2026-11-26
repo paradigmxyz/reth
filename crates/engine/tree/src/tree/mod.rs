@@ -2687,11 +2687,14 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self
-            .consensus
-            .validate_block_pre_execution(block)
-            .and_then(|()| self.consensus.validate_block_supplemental_data(block))
-        {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block).and_then(|()| {
+            // Only converted payloads enter this buffering path.
+            if self.payload_validator.validates_block_supplemental_data() {
+                Ok(())
+            } else {
+                self.consensus.validate_block_supplemental_data(block)
+            }
+        }) {
             error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate block");
             return Err(e)
         }

@@ -24,7 +24,9 @@ use reth_evm_ethereum::{
 use reth_network::{
     primitives::BasicNetworkPrimitives,
     protocol::IntoRlpxSubProtocol,
-    transactions::dependencies::{DependencyAdmission, DependencyProtocolHandler},
+    transactions::dependencies::{
+        DependencyAdmission, DependencyProofProtocolHandler, DependencyProtocolHandler,
+    },
     NetworkHandle, NetworkProtocols, PeersInfo,
 };
 use reth_node_api::{
@@ -809,6 +811,22 @@ where
             .is_some()
             .then(|| DependencyAdmission::new(pool.clone()));
         let handle = ctx.start_network(network, pool);
+        if admission.is_some() {
+            let (handler, fetcher, task) =
+                DependencyProofProtocolHandler::new(ctx.provider().clone());
+            reth_provider::DependencyProofProvider::set_dependency_proof_fetcher(
+                ctx.provider(),
+                fetcher,
+            )?;
+            handle.add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
+            let span = tracing::Span::current();
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "eip8288-proof-retrieval",
+                move |shutdown| async move {
+                    tokio::select! { _ = shutdown => {}, _ = task.instrument(span) => {} }
+                },
+            );
+        }
         if let Some(admission) = admission &&
             !handle.tx_gossip_disabled()
         {

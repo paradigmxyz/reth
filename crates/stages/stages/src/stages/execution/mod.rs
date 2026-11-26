@@ -2,6 +2,7 @@ use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::BlockHeader;
 use alloy_eip7928::bal::Bal;
 use alloy_primitives::BlockNumber;
+use futures_util::{future::BoxFuture, FutureExt};
 use num_traits::Zero;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_config::config::ExecutionConfig;
@@ -70,7 +71,6 @@ pub mod slot_preimages;
 /// - [`tables::PlainAccountState`] [`tables::StoragesHistory`] to remove change set and apply old
 ///   values to [`tables::PlainStorageState`]
 // false positive, we cannot derive it if !DB: Debug.
-#[derive(Debug)]
 pub struct ExecutionStage<E>
 where
     E: ConfigureEvm,
@@ -98,6 +98,8 @@ where
     exex_manager_handle: ExExManagerHandle<E::Primitives>,
     /// Executor metrics.
     metrics: ExecutorMetrics,
+    /// Proof downloads completed before the pipeline opens its write transaction.
+    preparation: Option<BoxFuture<'static, Result<(), reth_consensus::ConsensusError>>>,
 }
 
 impl<E> ExecutionStage<E>
@@ -121,6 +123,7 @@ where
             post_unwind_commit_input: None,
             exex_manager_handle,
             metrics: ExecutorMetrics::default(),
+            preparation: None,
         }
     }
 
@@ -259,6 +262,18 @@ where
     }
 }
 
+impl<E: ConfigureEvm> core::fmt::Debug for ExecutionStage<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("ExecutionStage")
+            .field("evm_config", &self.evm_config)
+            .field("consensus", &self.consensus)
+            .field("thresholds", &self.thresholds)
+            .field("external_clean_threshold", &self.external_clean_threshold)
+            .field("preparing_supplemental_data", &self.preparation.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
     E: ConfigureEvm,
@@ -282,9 +297,28 @@ where
     fn poll_execute_ready(
         &mut self,
         cx: &mut Context<'_>,
-        _: ExecInput,
+        input: ExecInput,
     ) -> Poll<Result<(), StageError>> {
         ready!(self.exex_manager_handle.poll_ready(cx));
+
+        if input.target_reached() {
+            return Poll::Ready(Ok(()))
+        }
+        let consensus = self.consensus.clone();
+        let preparation = self.preparation.get_or_insert_with(|| {
+            async move {
+                let result =
+                    consensus.prepare_block_range_supplemental_data(input.next_block_range()).await;
+                if result.is_err() {
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+                result
+            }
+            .boxed()
+        });
+        let result = ready!(preparation.poll_unpin(cx));
+        self.preparation = None;
+        result.map_err(|error| StageError::Recoverable(Box::new(error)))?;
 
         Poll::Ready(Ok(()))
     }
@@ -354,7 +388,7 @@ where
             self.consensus.validate_block_supplemental_data(block.sealed_block()).map_err(
                 |err| {
                     if err.is_dependency_proof_unavailable() {
-                        StageError::Fatal(Box::new(err))
+                        StageError::Recoverable(Box::new(err))
                     } else {
                         StageError::Block {
                             block: Box::new(block.block_with_parent()),

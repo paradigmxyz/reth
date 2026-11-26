@@ -190,6 +190,14 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
+    /// Whether successful conversion verifies all supplemental consensus data.
+    ///
+    /// Importers may skip repeating those checks for converted payloads when this is `true`.
+    /// Downloaded blocks still require independent supplemental consensus validation.
+    fn validates_block_supplemental_data(&self) -> bool {
+        false
+    }
+
     /// Converts the given payload into a sealed block without recovering signatures.
     ///
     /// This function validates the payload and converts it into a [`SealedBlock`] which contains

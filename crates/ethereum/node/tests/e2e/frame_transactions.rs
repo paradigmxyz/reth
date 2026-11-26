@@ -22,6 +22,7 @@ use reth_e2e_test_utils::{
     E2ETestSetupExt,
 };
 use reth_node_ethereum::EthereumNode;
+use reth_provider::DependencyProofProvider;
 use reth_rpc_eth_api::helpers::LoadPendingBlock;
 use reth_transaction_pool::TransactionPool;
 use serde_json::json;
@@ -472,7 +473,11 @@ fn lean_sphincs_wrapper(signer: &PrivateKeySigner) -> eyre::Result<DependencyWra
 #[tokio::test(flavor = "multi_thread")]
 async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
-    let (mut nodes, wallet) = EthereumNode::test_setup(2, chain_spec()).build().await?;
+    let (mut nodes, wallet) = EthereumNode::test_setup(3, chain_spec())
+        .with_tree_config_modifier(|config| config.with_backfill_run_threshold(3))
+        .build()
+        .await?;
+    let staged_follower = nodes.pop().unwrap();
     let follower = nodes.pop().unwrap();
     let mut producer = nodes.pop().unwrap();
     let wrapper = lean_sphincs_wrapper(&wallet.signer(0))?;
@@ -502,11 +507,20 @@ async fn lean_sphincs_wrapper_is_gossiped_and_mined() -> eyre::Result<()> {
         payload.dependency_proof().unwrap().as_ref(),
         aggregate.wire_witnesses().1[0].as_ref()
     );
-    follower.import_payload(payload.clone()).await?;
+    let block_hash = payload.block().hash();
+    let proof = payload.dependency_proof().cloned();
     producer.import_payload(payload).await?;
+    // The follower receives only a forkchoice target and fetches the proof from peers.
+    follower.sync_to(block_hash).await?;
+    assert_eq!(follower.inner.provider.dependency_proof(block_hash)?, proof);
     producer.wait_for_pool_removal(hashes).await?;
     let empty = producer.advance_block().await?;
     assert!(empty.dependency_proof().unwrap().is_empty());
+    let tip = producer.advance_blocks(3).await?;
+    let tip = tip.last().unwrap().block().hash();
+    // A larger gap exercises proof preparation before the staged execution transaction.
+    staged_follower.sync_to(tip).await?;
+    assert_eq!(staged_follower.inner.provider.dependency_proof(block_hash)?, proof);
     Ok(())
 }
 

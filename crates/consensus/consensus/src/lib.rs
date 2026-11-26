@@ -40,7 +40,10 @@ use alloc::{
 use alloy_consensus::Header;
 use alloy_eip7928::BlockAccessListGasError;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
-use core::{error::Error, fmt::Display};
+use core::{error::Error, fmt::Display, future::Future, pin::Pin};
+
+/// Preparation of supplemental consensus data without holding a database write transaction.
+pub type SupplementalDataFuture = Pin<Box<dyn Future<Output = Result<(), ConsensusError>> + Send>>;
 
 /// Pre-computed receipt root and logs bloom.
 ///
@@ -95,6 +98,23 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
+    /// Fetches and persists required supplemental data before opening an execution transaction.
+    /// Local unavailability is retryable and must not invalidate the canonical block.
+    fn prepare_block_range_supplemental_data(
+        &self,
+        _range: core::ops::RangeInclusive<u64>,
+    ) -> SupplementalDataFuture {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Fetches supplemental data for a downloaded header before executing its block.
+    fn prepare_block_supplemental_data(
+        &self,
+        _header: SealedHeader<B::Header>,
+    ) -> SupplementalDataFuture {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
