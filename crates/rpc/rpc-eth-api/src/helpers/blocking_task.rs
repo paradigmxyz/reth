@@ -44,9 +44,9 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
     fn blocking_io_task_guard(&self) -> &Arc<Semaphore>;
 
     /// Returns the memory budget heavy requests share, `None` if memory is not budgeted.
-    fn memory_budget(&self) -> Option<&RpcMemoryBudget> {
-        None
-    }
+    ///
+    /// Required so that types wrapping an API forward the budget instead of disabling it.
+    fn memory_budget(&self) -> Option<&RpcMemoryBudget>;
 
     /// Takes `weight_mib` MiB of the [`memory_budget`](Self::memory_budget), see
     /// [`RpcMemoryBudget::acquire`].

@@ -75,7 +75,7 @@ mod tests {
         node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
         EthApiTypes,
     };
-    use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
+    use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock, RpcMemoryBudget};
     use reth_rpc_server_types::constants::DEFAULT_MAX_PROOF_SLOTS;
     use reth_storage_api::{StateProviderBox, StateProviderFactory};
     use reth_tasks::{
@@ -359,6 +359,10 @@ mod tests {
 
         fn blocking_io_task_guard(&self) -> &Arc<Semaphore> {
             self.inner.blocking_io_task_guard()
+        }
+
+        fn memory_budget(&self) -> Option<&RpcMemoryBudget> {
+            self.inner.memory_budget()
         }
     }
 
