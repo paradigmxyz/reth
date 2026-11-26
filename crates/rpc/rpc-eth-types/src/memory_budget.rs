@@ -25,6 +25,12 @@ const TRACE_CALL_BYTES: u64 = 16 * MIB;
 /// needs [`TRACE_CALL_BYTES`].
 const TRACE_NEXT_CALL_BYTES: u64 = 4 * MIB;
 
+/// Memory, in bytes, every simulated block holds besides what its calls' gas pays for.
+const SIMULATED_BLOCK_BYTES: u64 = MIB;
+
+/// Memory, in bytes, every executed call holds besides what its gas pays for.
+const CALL_BYTES: u64 = 64 * 1024;
+
 /// The memory, in MiB, that the heavy RPC requests of a node may hold at once.
 ///
 /// Clones share the same budget.
@@ -85,13 +91,14 @@ pub const fn traced_calls_bytes(calls: u64) -> u64 {
 /// Returns the most memory, in MiB, that executing `calls` calls with `gas` gas in total across
 /// `blocks` simulated blocks may hold.
 ///
-/// Each simulated block keeps its state changes and each call its frame, and the state a call
-/// touches and the data it returns grow with its gas.
+/// The state a call touches and the data it returns grow with its gas, which the calls share, so
+/// the number of calls and blocks adds only what each keeps without gas: a block's header and
+/// receipts, a call's result.
 pub const fn execution_weight_mib(calls: u64, gas: u64, blocks: u64) -> u64 {
     bytes_to_mib(
         blocks
-            .saturating_mul(16 * MIB)
-            .saturating_add(calls.saturating_mul(4 * MIB))
+            .saturating_mul(SIMULATED_BLOCK_BYTES)
+            .saturating_add(calls.saturating_mul(CALL_BYTES))
             .saturating_add(gas / 8),
     )
 }
@@ -186,9 +193,12 @@ mod tests {
 
     #[test]
     fn weights() {
-        assert_eq!(execution_weight_mib(1, 0, 0), 4);
-        assert_eq!(execution_weight_mib(1, 80 * MIB, 0), 14);
-        assert_eq!(execution_weight_mib(4, 0, 2), 48);
+        assert_eq!(execution_weight_mib(1, 0, 0), 1);
+        assert_eq!(execution_weight_mib(1, 80 * MIB, 0), 11);
+        assert_eq!(execution_weight_mib(4, 0, 2), 3);
+        // Many calls or blocks without gas stay well below a typical budget.
+        assert_eq!(execution_weight_mib(1024, 0, 0), 64);
+        assert_eq!(execution_weight_mib(1, 0, 256), 257);
         assert_eq!(proof_weight_mib(1, 1024), 13);
         assert_eq!(traced_calls_bytes(0), 0);
         assert_eq!(traced_calls_bytes(1), 16 * MIB);
