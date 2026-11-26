@@ -1466,8 +1466,9 @@ impl Discv4Service {
             }
             PingReason::AtCapacity => match self.on_entry(node.id, |entry| entry.record) {
                 // Inserted while the ping was pending, so this pong is its endpoint proof.
+                // The stored record carries the TCP port the node advertised itself.
                 Some(stored) if stored.udp_addr() == node.udp_addr() => {
-                    self.update_on_pong(node, pong.enr_sq)
+                    self.update_on_pong(stored, pong.enr_sq)
                 }
                 // Inserted at another endpoint, whose own proof ping this ping displaced.
                 Some(stored) => self.try_ping(stored, PingReason::InitialInsert),
@@ -4210,6 +4211,39 @@ mod tests {
         let request = &service.pending_pings[&pinged.id];
         assert_eq!(request.node, referral);
         assert!(matches!(request.reason, PingReason::InitialInsert));
+    }
+
+    #[tokio::test]
+    async fn test_at_capacity_pong_announces_stored_record() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let endpoint = SocketAddr::from(([10, 0, 0, 9], 30303));
+        let referral =
+            NodeRecord { tcp_port: 0, ..NodeRecord::new(endpoint, full_bucket_peer(&mut service)) };
+        let msg =
+            Neighbours { nodes: vec![referral], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        let echo_hash = service.pending_pings[&referral.id].echo_hash;
+
+        // The node pings from the referral's endpoint and is inserted with its own TCP port.
+        free_farthest_bucket_slot(&mut service);
+        let node = NodeRecord::new(endpoint, referral.id);
+        let ping = Ping {
+            from: node.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, endpoint, node.id, B256::random());
+
+        let mut updates = service.update_stream().into_inner();
+        service.on_pong(make_pong(&service, echo_hash), endpoint, node.id);
+        let added =
+            std::iter::from_fn(|| updates.try_recv().ok()).find_map(|update| match update {
+                DiscoveryUpdate::Added(record) => Some(record),
+                _ => None,
+            });
+        assert_eq!(added, Some(node));
     }
 
     #[tokio::test]
