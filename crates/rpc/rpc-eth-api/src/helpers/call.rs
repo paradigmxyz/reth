@@ -103,14 +103,14 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
 
             let blocks = simulate::simulated_block_count(&block_state_calls, parent.number())
                 .min(max_simulate_blocks);
-            // The memory budget is taken before the blocking IO permit, as every other request
-            // that takes both does, so that neither waits for the other while holding its own.
-            let memory =
-                self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, blocks)).await?;
             let permit = self
                 .acquire_owned_blocking_io()
                 .await
                 .map_err(|_| EthApiError::InternalEthError)?;
+            // Taken after the permit, so that a queued request holds none of the budget. The
+            // budget's wait is bounded, so a permit is never held for long waiting for it.
+            let memory =
+                self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, blocks)).await?;
 
             self.spawn_with_state_at_block(state_at, move |this, db| {
                 let _permit = permit;
@@ -327,13 +327,13 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 bundles.iter().map(|bundle| bundle.transactions.len().max(1)).sum::<usize>();
             let gas =
                 calls_gas(self.call_gas_limit(), bundles.iter().flat_map(|b| &b.transactions));
-            let memory =
-                self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, 0)).await?;
-
             let permit = self
                 .acquire_owned_blocking_io()
                 .await
                 .map_err(|_| EthApiError::InternalEthError)?;
+            // Taken after the permit, so that a queued request holds none of the budget.
+            let memory =
+                self.acquire_memory_budget(execution_weight_mib(calls as u64, gas, 0)).await?;
 
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();

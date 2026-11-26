@@ -176,12 +176,13 @@ pub trait EthState: LoadState + SpawnBlocking {
 
         let weight = proof_weight_mib(1, keys.len() as u64);
         Ok(async move {
-            let memory = self.acquire_memory_budget(weight).await?;
             let permit = self
                 .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
+            // Taken after the permit, so that a queued request holds none of the budget.
+            let memory = self.acquire_memory_budget(weight).await?;
 
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
@@ -229,12 +230,13 @@ pub trait EthState: LoadState + SpawnBlocking {
 
         let weight = proof_weight_mib(targets.len() as u64, total_slots as u64);
         Ok(async move {
-            let memory = self.acquire_memory_budget(weight).await?;
             let permit = self
                 .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
+            // Taken after the permit, so that a queued request holds none of the budget.
+            let memory = self.acquire_memory_budget(weight).await?;
 
             let block_id = block_id.unwrap_or_default();
             self.ensure_within_proof_window(block_id)?;
