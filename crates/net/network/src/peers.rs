@@ -126,6 +126,8 @@ pub struct PeersManager {
     candidate_dialed_last: bool,
     /// Candidates whose dial may still be pending, see [`Self::dial_candidate`].
     candidate_dials: HashSet<PeerId, FbBuildHasher<64>>,
+    /// Backoff deadlines of failed candidates, whose rows are removed with their session.
+    candidate_cooldowns: LruMap<PeerId, std::time::Instant>,
 }
 
 impl PeersManager {
@@ -268,6 +270,7 @@ impl PeersManager {
             candidates: LruMap::new(MAX_PEER_CANDIDATES),
             candidate_dialed_last: false,
             candidate_dials: Default::default(),
+            candidate_cooldowns: LruMap::new(MAX_PEER_CANDIDATES),
         }
     }
 
@@ -590,11 +593,13 @@ impl PeersManager {
     fn backoff_peer_until(&mut self, peer_id: PeerId, until: std::time::Instant) {
         trace!(target: "net::peers", ?peer_id, "backing off");
 
-        // A failed dial candidate has no row left, but its deadline still applies if it is
-        // queued again.
-        self.backed_off_peers.insert(peer_id, until);
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
+            self.backed_off_peers.insert(peer_id, until);
+        } else {
+            // A failed dial candidate has no row left, but its deadline still applies if it is
+            // discovered again.
+            self.candidate_cooldowns.insert(peer_id, until);
         }
     }
 
@@ -983,11 +988,14 @@ impl PeersManager {
     /// If the peer already exists, then the address, kind and `fork_id` will be updated. Once
     /// [`MAX_TRACKED_PEERS`] peers are tracked, a new untrusted peer is queued as a dial candidate
     /// instead, so it never pushes out an existing one. Only one candidate is queued per IP, and a
-    /// full queue keeps its oldest candidates.
+    /// full queue keeps its oldest candidates. A failed candidate is not queued again until its
+    /// backoff ends.
     pub(crate) fn add_peer(&mut self, peer_id: PeerId, addr: PeerAddr, fork_id: Option<ForkId>) {
+        let now = std::time::Instant::now();
         if self.is_full_for(&peer_id) {
             let ip = addr.tcp().ip();
-            if self.ip_filter.is_allowed(&ip) &&
+            if !self.candidate_cooldowns.peek(&peer_id).is_some_and(|until| *until > now) &&
+                self.ip_filter.is_allowed(&ip) &&
                 !self.ban_list.is_banned(&peer_id, &ip) &&
                 // A full queue keeps its oldest candidates, so a flood of new identities cannot
                 // push out the ones queued before it.
@@ -1004,7 +1012,14 @@ impl PeersManager {
             }
             return
         }
-        self.add_peer_kind(peer_id, None, addr, fork_id)
+        self.add_peer_kind(peer_id, None, addr, fork_id);
+        // A failed candidate tracked once the set has room still waits out its backoff.
+        if self.peers.contains_key(&peer_id) &&
+            let Some(until) = self.candidate_cooldowns.remove(&peer_id) &&
+            until > now
+        {
+            self.backoff_peer_until(peer_id, until);
+        }
     }
 
     /// Returns `true` if keeping the discovered peer would exceed [`MAX_TRACKED_PEERS`].
@@ -1104,8 +1119,6 @@ impl PeersManager {
                 });
                 let mut peer = Peer::with_kind(addr, kind);
                 peer.fork_id = fork_id.map(Box::new);
-                // a removed peer, such as a failed dial candidate, may still be backed off
-                peer.backed_off = self.backed_off_peers.contains_key(&peer_id);
                 entry.insert(peer);
                 self.queued_actions.push_back(PeerAction::PeerAdded(peer_id));
             }
@@ -1462,12 +1475,15 @@ impl PeersManager {
     /// Candidates added or banned since they were queued are dropped, and backed off ones stay
     /// queued until their deadline.
     fn next_candidate(&mut self) -> Option<(PeerId, PeerCandidate)> {
-        self.candidates.extract_if(|id, _| !self.backed_off_peers.contains_key(id)).find(
-            |(id, candidate)| {
+        let now = std::time::Instant::now();
+        self.candidates
+            .extract_if(|id, _| {
+                !self.candidate_cooldowns.peek(id).is_some_and(|until| *until > now)
+            })
+            .find(|(id, candidate)| {
                 !self.peers.contains_key(id) &&
                     !self.ban_list.is_banned(id, &candidate.addr.tcp().ip())
-            },
-        )
+            })
     }
 
     fn on_resolved_peer(&mut self, peer_id: PeerId, new_record: NodeRecord) {
@@ -5218,29 +5234,34 @@ mod tests {
             peers.on_outgoing_pending_session_dropped(&addr.tcp(), &candidate, &err);
             assert!(!peers.peers.contains_key(&candidate));
 
-            // rediscovered while backed off, it waits in the queue until its deadline
+            // rediscovered while backed off, it is queued again only after its deadline.
             peers.add_peer(candidate, addr, None);
-            peers.fill_outbound_slots();
-            assert!(!peers.peers.contains_key(&candidate));
-            peers.backed_off_peers.remove(&candidate);
+            assert!(!peers.candidates.contains(&candidate));
+            *peers.candidate_cooldowns.peek_mut(&candidate).unwrap() = std::time::Instant::now();
+            peers.add_peer(candidate, addr, None);
             peers.fill_outbound_slots();
             assert!(peers.peers[&candidate].state.is_pending_out());
         }
 
         // once the set has room again, a rediscovered peer is tracked but still waits
-        let candidate = PeerId::random();
-        peers.add_peer(candidate, addr, None);
-        peers.fill_outbound_slots();
-        peers.on_outgoing_pending_session_dropped(
-            &addr.tcp(),
-            &candidate,
-            &PendingSessionHandshakeError::Timeout,
-        );
-        for &peer_id in &tracked[..3] {
+        let [waiting, expired] = [PeerId::random(), PeerId::random()];
+        for (index, candidate) in (0..).zip([waiting, expired]) {
+            peers.add_peer(candidate, unique_ip_addr(index), None);
+            peers.fill_outbound_slots();
+            peers.on_outgoing_pending_session_dropped(
+                &unique_ip_addr(index).tcp(),
+                &candidate,
+                &PendingSessionHandshakeError::Timeout,
+            );
+        }
+        *peers.candidate_cooldowns.peek_mut(&expired).unwrap() = std::time::Instant::now();
+        for &peer_id in &tracked[..4] {
             peers.remove_peer(peer_id);
         }
-        peers.add_peer(candidate, addr, None);
-        assert!(peers.peers[&candidate].is_backed_off());
+        peers.add_peer(waiting, addr, None);
+        peers.add_peer(expired, addr, None);
+        assert!(peers.peers[&waiting].is_backed_off());
+        assert!(!peers.peers[&expired].is_backed_off());
     }
 
     #[tokio::test]
