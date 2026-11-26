@@ -185,14 +185,6 @@ where
         &mut self.cursor
     }
 
-    /// Resets both positions after a database error. Unlike a plain reset, a later `next` returns
-    /// `None` until the next seek instead of tripping the seek-before-next assertion, since
-    /// iterators keep polling the cursor after it yields an error.
-    fn invalidate(&mut self) {
-        self.reset();
-        self.position = CursorPosition::NoCurrent { lower_bound: Bound::Unbounded };
-    }
-
     /// Positions the DB cursor state using the underlying cursor when needed.
     /// Errors invalidate both cursor positions so a later seek can safely retry.
     fn cursor_seek(&mut self, key: B256) -> Result<(), DatabaseError> {
@@ -206,7 +198,7 @@ where
         };
 
         if should_seek {
-            let entry = self.get_cursor_mut().seek(key).inspect_err(|_| self.invalidate())?;
+            let entry = self.get_cursor_mut().seek(key).inspect_err(|_| self.reset())?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -220,7 +212,7 @@ where
 
         // Exhausted DB state is stable; only advance when the DB cursor is positioned at an entry.
         if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
-            let entry = self.get_cursor_mut().next().inspect_err(|_| self.invalidate())?;
+            let entry = self.get_cursor_mut().next().inspect_err(|_| self.reset())?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -737,12 +729,8 @@ mod tests {
                 _ => cursor.seek(key(2)),
             };
             assert!(matches!(error, Err(DatabaseError::Decode)));
-            assert_eq!(
-                cursor.position,
-                CursorPosition::NoCurrent { lower_bound: Bound::Unbounded }
-            );
+            assert_eq!(cursor.position, CursorPosition::Unseeked);
             assert!(matches!(cursor.db_cursor_state, DbCursorState::NeedsPosition));
-            assert_eq!(cursor.next().unwrap(), None);
             assert_eq!(cursor.seek(key(2)).unwrap(), Some((key(3), U256::ONE)));
             assert_eq!(cursor.seek(key(1)).unwrap(), Some((key(1), U256::ONE)));
             assert_eq!(cursor.next().unwrap(), Some((key(3), U256::ONE)));
