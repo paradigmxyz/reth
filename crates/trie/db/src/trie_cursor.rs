@@ -22,8 +22,8 @@ use std::marker::PhantomData;
 /// Allows the same cursor implementation to work with legacy (65-byte), packed (33-byte) and
 /// memcmp (5 to 40-byte) nibble encodings. [`DatabaseTrieCursorFactory`] fixes the encoding
 /// through its adapter type parameter. Callers must choose an adapter matching the database's
-/// storage settings; [`crate::with_adapter!`] provides runtime dispatch between the legacy and
-/// packed adapters. No storage setting selects [`MemcmpKeyAdapter`] yet.
+/// storage settings; [`crate::with_adapter!`] provides runtime dispatch on
+/// [`TrieKeyEncoding`](crate::TrieKeyEncoding).
 pub trait TrieKeyAdapter: Clone + Send + Sync + 'static {
     /// The key type for account trie lookups (e.g., `StoredNibbles`, `PackedStoredNibbles` or
     /// `MemcmpStoredNibbles`).
@@ -161,9 +161,6 @@ impl StorageTrieEntryLike for MemcmpStorageTrieEntry {
 }
 
 /// Memcmp group nibble encoding: 8 nibbles per 5-byte group, 5 to 40-byte keys and subkeys.
-///
-/// Research adapter for a variable-length trie key encoding. It is not selected by any storage
-/// setting, so it must only be used on trie tables written through it.
 #[derive(Debug, Clone)]
 pub struct MemcmpKeyAdapter;
 

@@ -28,10 +28,11 @@ pub enum DatabaseVersionError {
     MalformedFile,
     /// Breaking database change detected.
     ///
-    /// Your database version is incompatible with the latest database version.
+    /// Your database version is incompatible with the supported database versions.
     #[error(
         "breaking database change detected: your database version (v{version}) \
-         is incompatible with the latest database version (v{MEMCMP_TRIE_KEYS_DB_VERSION})"
+         is incompatible with the supported database versions \
+         (v{DB_VERSION} and v{MEMCMP_TRIE_KEYS_DB_VERSION})"
     )]
     VersionMismatch {
         /// The detected version in the database.

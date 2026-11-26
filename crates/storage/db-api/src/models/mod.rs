@@ -209,9 +209,8 @@ impl Decode for MemcmpStoredNibblesSubKey {
 /// Decodes a key that must be exactly one canonical memcmp group encoding, see
 /// [`try_decode_memcmp_nibbles`].
 ///
-/// This cannot detect keys written in another nibble encoding: some legacy [`StoredNibbles`] keys
-/// are also canonical memcmp encodings. The memcmp table views must only be used on tables written
-/// with this encoding, and the encoding must be selected at the storage settings or table level.
+/// Legacy [`StoredNibbles`] keys and [`PackedStoredNibbles`] keys never decode, so reading those
+/// tables through a memcmp view fails with [`DatabaseError::Decode`].
 fn decode_memcmp_nibbles(value: &[u8]) -> Result<Nibbles, DatabaseError> {
     match try_decode_memcmp_nibbles(value) {
         Some((nibbles, [])) => Ok(nibbles),

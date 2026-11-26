@@ -14,7 +14,7 @@ use reth_db_api::{
     cursor::{DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     models::{
         integer_list::IntegerListError, storage_sharded_key::StorageShardedKey, AccountBeforeTx,
-        BlockNumberAddress, IntegerList, ShardedKey,
+        BlockNumberAddress, IntegerList, ShardedKey, TrieKeyEncoding,
     },
     table::DupSort,
     tables,
@@ -220,6 +220,14 @@ where
                             requested = ?genesis_storage_settings,
                             "Storage settings mismatch detected. Using the stored settings from the existing database."
                         );
+                    }
+
+                    // `create_db` writes the default version if the version file is missing.
+                    // Rewriting the settings restores the version that older clients refuse.
+                    if stored.trie_key_encoding() == TrieKeyEncoding::Memcmp {
+                        let provider_rw = factory.database_provider_rw()?;
+                        provider_rw.write_storage_settings(stored)?;
+                        provider_rw.commit()?;
                     }
 
                     debug!("Genesis already written, skipping.");
@@ -1415,7 +1423,7 @@ mod tests {
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
     use reth_db::{
-        version::{get_db_version, DB_VERSION, MEMCMP_TRIE_KEYS_DB_VERSION},
+        version::{get_db_version, write_db_version_file, DB_VERSION, MEMCMP_TRIE_KEYS_DB_VERSION},
         DatabaseEnv,
     };
     use reth_db_api::{
@@ -2354,5 +2362,21 @@ mod tests {
                 .map(|(address, entry)| (address, entry.nibbles.0, entry.node))
                 .collect::<Vec<_>>(),
         );
+    }
+
+    /// Genesis init on an existing memcmp database restores the database version that older
+    /// clients refuse, which `create_db` resets to the default if the version file is missing.
+    #[test]
+    fn init_genesis_restores_memcmp_trie_keys_version() {
+        let factory = create_test_provider_factory_with_chain_spec(HOLESKY.clone());
+        let settings = StorageSettings::v2().with_memcmp_trie_keys(true);
+        init_genesis_with_settings(&factory, settings).unwrap();
+
+        let path = factory.provider().unwrap().storage_path();
+        write_db_version_file(&path, DB_VERSION).unwrap();
+        let hash = init_genesis_with_settings(&factory, StorageSettings::v2()).unwrap();
+        assert_eq!(hash, HOLESKY_GENESIS_HASH);
+        assert_eq!(get_db_version(&path).unwrap(), MEMCMP_TRIE_KEYS_DB_VERSION);
+        assert_eq!(factory.provider().unwrap().storage_settings().unwrap(), Some(settings));
     }
 }

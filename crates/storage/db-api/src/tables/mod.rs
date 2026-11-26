@@ -586,10 +586,9 @@ impl DupSort for PackedStoragesTrie {
 
 /// Memcmp-encoding view of the [`AccountsTrie`] table.
 ///
-/// Research view: uses variable-length [`MemcmpStoredNibbles`] keys (5 bytes for paths up to 8
-/// nibbles, at most 40 bytes). Shares the same underlying MDBX table. No storage setting selects
-/// this encoding, so it must only be used on tables written through it. Decoding cannot tell all
-/// keys of other encodings apart from memcmp keys.
+/// Uses variable-length [`MemcmpStoredNibbles`] keys (5 bytes for paths up to 8 nibbles, at most
+/// 40 bytes). Shares the same underlying MDBX table — this is a type-level view for databases
+/// with `StorageSettings::memcmp_trie_keys`.
 #[derive(Debug)]
 pub struct MemcmpAccountsTrie;
 
@@ -603,10 +602,9 @@ impl Table for MemcmpAccountsTrie {
 
 /// Memcmp-encoding view of the [`StoragesTrie`] table.
 ///
-/// Research view: uses variable-length [`MemcmpStoredNibblesSubKey`] subkeys (5 bytes for paths
-/// up to 8 nibbles, at most 40 bytes). Shares the same underlying MDBX table. No storage setting
-/// selects this encoding, so it must only be used on tables written through it. Decoding cannot
-/// tell all subkeys of other encodings apart from memcmp subkeys.
+/// Uses variable-length [`MemcmpStoredNibblesSubKey`] subkeys (5 bytes for paths up to 8 nibbles,
+/// at most 40 bytes). Shares the same underlying MDBX table — this is a type-level view for
+/// databases with `StorageSettings::memcmp_trie_keys`.
 #[derive(Debug)]
 pub struct MemcmpStoragesTrie;
 
