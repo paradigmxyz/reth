@@ -17,7 +17,8 @@ use alloy_rpc_types_trace::{
 };
 use evm2::evm::StateChangeSource;
 use evm2_inspectors::tracing::{
-    DebugInspector, DebugInspectorError, DebugTrace, StructLogMode, TraceLimits, TransactionContext,
+    DebugInspector, DebugInspectorError, DebugTrace, StructLogMode, TraceLimits,
+    TransactionContext, DEFAULT_MAX_RECORDED_BYTES, KECCAK256_PREIMAGE_TRACER,
 };
 use futures::Stream;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage};
@@ -1901,18 +1902,20 @@ fn geth_trace_weight_mib(
             // The logs, the response serialized from them and the copy sent.
             limit.map_or(bytes, |limit| bytes.min(limit)).saturating_mul(3)
         }
-        Some(tracer) => tracer_recorded_bytes(tracer, &opts.tracer_config, gas),
+        Some(tracer) => tracer_recorded_bytes(tracer, &opts.tracer_config, gas, calls),
     };
     bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
 }
 
-/// Returns the most memory, in bytes, that `tracer` with `config` records over `gas` gas.
+/// Returns the most memory, in bytes, that `tracer` with `config` records over `calls` calls with
+/// `gas` gas in total.
 ///
 /// A mux tracer records what each of its tracers does.
 fn tracer_recorded_bytes(
     tracer: &GethDebugTracerType,
     config: &GethDebugTracerConfig,
     gas: u64,
+    calls: u64,
 ) -> u64 {
     match tracer {
         GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
@@ -1932,11 +1935,17 @@ fn tracer_recorded_bytes(
                             tracer,
                             &config.clone().unwrap_or_default(),
                             gas,
+                            calls,
                         ))
                     })
                 })
             }
         },
+        // The keccak256 preimage tracer is looked up by name before JavaScript. Each call records
+        // up to its own byte limit, and the response holds the preimages as hex.
+        GethDebugTracerType::JsTracer(name) if name == KECCAK256_PREIMAGE_TRACER => {
+            (DEFAULT_MAX_RECORDED_BYTES as u64).saturating_mul(calls).saturating_mul(3)
+        }
         // A JavaScript tracer keeps whatever its code collects.
         GethDebugTracerType::JsTracer(_) => u64::MAX,
     }
@@ -2426,6 +2435,11 @@ mod tests {
 
         assert_eq!(weight(serde_json::json!({ "tracer": "callTracer" }), 10_000_000), 112);
         assert_eq!(weight(serde_json::json!({ "tracer": "noopTracer" }), 10_000_000), 16);
+        // The keccak256 preimage tracer records up to its own byte limit.
+        assert_eq!(
+            weight(serde_json::json!({ "tracer": "keccak256PreimageTracer" }), 30_000_000),
+            208
+        );
         // A mux tracer weighs as much as its tracers together, a JavaScript one included.
         assert_eq!(
             weight(
