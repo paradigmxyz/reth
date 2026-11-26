@@ -518,9 +518,13 @@ where
             .map_err(|_| EngineApiError::UnknownPayload)
     }
 
-    /// Helper function for validating the payload timestamp and retrieving & converting the payload
-    /// into desired envelope.
-    async fn get_payload_inner<R>(
+    /// Retrieves and converts a built payload after validating its timestamp for `version`.
+    ///
+    /// Use `EngineT::BuiltPayload` as `R` to retain the resolved snapshot. Returns
+    /// [`UnsupportedFork`](reth_payload_primitives::EngineObjectValidationError::UnsupportedFork)
+    /// if the payload timestamp is invalid for `version`, and [`EngineApiError::UnknownPayload`]
+    /// for an unknown job or a resolution/conversion failure.
+    pub async fn get_payload_inner<R>(
         &self,
         payload_id: PayloadId,
         version: EngineApiMessageVersion,
