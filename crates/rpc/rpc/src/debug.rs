@@ -40,7 +40,7 @@ use reth_rpc_eth_api::{
     AsEthApiError, CallManyRequest, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    memory_budget::{bytes_to_mib, calls_gas, TRACE_CALL_BYTES},
+    memory_budget::{bytes_to_mib, calls_gas, traced_calls_bytes},
     utils::CallManyBudget,
     EthApiError, StateCacheDb, TransactionSource,
 };
@@ -1853,9 +1853,9 @@ const COLD_SLOAD_GAS: u64 = 2100;
 ///
 /// The struct logger writes its logs as JSON, a step per gas at most, with the memory and all
 /// earlier storage slots of the contract in each; the trace byte and response limits bound what a
-/// response holds, and the JSON is copied once more when the response is sent. The call, prestate
-/// and ERC-7562 tracers grow with the frames and state the execution touches, at most a few bytes
-/// per gas.
+/// response holds, and the logs are serialized and copied once more when the response is sent. The
+/// call, prestate and ERC-7562 tracers grow with the frames and state the execution touches, at
+/// most a few bytes per gas.
 fn geth_trace_weight_mib(
     opts: &GethDebugTracingOptions,
     gas: u64,
@@ -1890,7 +1890,8 @@ fn geth_trace_weight_mib(
             }
             // The calls of a response share both limits.
             let limit = max_trace_bytes.into_iter().chain(max_response_size).min();
-            limit.map_or(bytes, |limit| bytes.min(limit as u64)).saturating_mul(2)
+            // The logs, the response serialized from them and the copy sent.
+            limit.map_or(bytes, |limit| bytes.min(limit as u64)).saturating_mul(3)
         }
         Some(GethDebugTracerType::BuiltInTracer(tracer)) => match tracer {
             GethDebugBuiltInTracerType::FourByteTracer |
@@ -1906,7 +1907,7 @@ fn geth_trace_weight_mib(
         // A JavaScript tracer keeps whatever its code collects.
         Some(GethDebugTracerType::JsTracer(_)) => u64::MAX,
     };
-    bytes_to_mib(TRACE_CALL_BYTES.saturating_mul(calls).saturating_add(recorded))
+    bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
 }
 
 #[cfg(test)]
@@ -2343,13 +2344,13 @@ mod tests {
             weight(serde_json::json!({ "disableStorage": true, "limit": 10_000 }), 10_000_000),
             17
         );
-        // The response limit bounds the struct logs, their storage and memory included, and the
-        // response is copied once more when sent.
-        assert_eq!(weight(serde_json::json!({ "disableStorage": true }), 50_000_000), 336);
-        assert_eq!(weight(serde_json::json!({ "disableStack": true }), 20_000_000), 336);
+        // The response limit bounds the struct logs, their storage and memory included, which are
+        // serialized and copied once more when sent.
+        assert_eq!(weight(serde_json::json!({ "disableStorage": true }), 50_000_000), 496);
+        assert_eq!(weight(serde_json::json!({ "disableStack": true }), 20_000_000), 496);
         assert_eq!(
             weight(serde_json::json!({ "disableStorage": true, "enableMemory": true }), 300_000),
-            336
+            496
         );
         // Without limits, the estimate stands.
         assert_eq!(
@@ -2360,7 +2361,7 @@ mod tests {
                 None,
                 None
             ),
-            17006
+            25501
         );
         assert_eq!(
             weight(serde_json::json!({ "tracer": "{ result: function() {} }" }), 21_000),

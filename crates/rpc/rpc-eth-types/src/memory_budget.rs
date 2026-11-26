@@ -16,9 +16,14 @@ pub const MEMORY_BUDGET_WAIT: Duration = Duration::from_millis(200);
 
 const MIB: u64 = 1024 * 1024;
 
-/// Memory, in bytes, every traced call may hold besides what its tracer records: its execution
-/// state and the response built from the trace.
-pub const TRACE_CALL_BYTES: u64 = 16 * MIB;
+/// Memory, in bytes, the first traced call of a request may hold besides what its tracer records:
+/// its execution state and the response built from the trace.
+const TRACE_CALL_BYTES: u64 = 16 * MIB;
+
+/// Memory, in bytes, every further traced call of a request may hold besides what its tracer
+/// records. The calls of a request run one after another and build one response, so only the first
+/// needs [`TRACE_CALL_BYTES`].
+const TRACE_NEXT_CALL_BYTES: u64 = 4 * MIB;
 
 /// The memory, in MiB, that the heavy RPC requests of a node may hold at once.
 ///
@@ -66,6 +71,15 @@ impl RpcMemoryBudget {
 /// Returns `bytes` in MiB, rounded up.
 pub const fn bytes_to_mib(bytes: u64) -> u64 {
     bytes.div_ceil(MIB)
+}
+
+/// Returns the memory, in bytes, that `calls` traced calls of one request may hold besides what
+/// their tracers record.
+pub const fn traced_calls_bytes(calls: u64) -> u64 {
+    if calls == 0 {
+        return 0
+    }
+    TRACE_CALL_BYTES.saturating_add((calls - 1).saturating_mul(TRACE_NEXT_CALL_BYTES))
 }
 
 /// Returns the most memory, in MiB, that executing `calls` calls with `gas` gas in total across
@@ -176,6 +190,9 @@ mod tests {
         assert_eq!(execution_weight_mib(1, 80 * MIB, 0), 14);
         assert_eq!(execution_weight_mib(4, 0, 2), 48);
         assert_eq!(proof_weight_mib(1, 1024), 13);
+        assert_eq!(traced_calls_bytes(0), 0);
+        assert_eq!(traced_calls_bytes(1), 16 * MIB);
+        assert_eq!(traced_calls_bytes(64), 268 * MIB);
         assert_eq!(execution_weight_mib(u64::MAX, u64::MAX, u64::MAX), bytes_to_mib(u64::MAX));
     }
 }

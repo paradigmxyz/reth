@@ -33,7 +33,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     cache::db::apply_block_overrides,
     error::EthApiError,
-    memory_budget::{bytes_to_mib, calls_gas, TRACE_CALL_BYTES},
+    memory_budget::{bytes_to_mib, calls_gas, traced_calls_bytes},
     utils::CallManyBudget,
     EthConfig,
 };
@@ -984,7 +984,7 @@ fn parity_trace_weight_mib<'a>(
             step_bytes.min((max as u64).saturating_mul(2).saturating_mul(calls))
         }));
     }
-    bytes_to_mib(TRACE_CALL_BYTES.saturating_mul(calls).saturating_add(recorded))
+    bytes_to_mib(traced_calls_bytes(calls).saturating_add(recorded))
 }
 
 #[cfg(test)]
@@ -1824,6 +1824,6 @@ mod tests {
         );
         // The trace byte budget bounds the steps each call records.
         let calls = [types(&[TraceType::Trace]), types(&[TraceType::StateDiff])];
-        assert_eq!(parity_trace_weight_mib(&calls, 10_000_000, Some(1 << 20)), 75);
+        assert_eq!(parity_trace_weight_mib(&calls, 10_000_000, Some(1 << 20)), 63);
     }
 }
