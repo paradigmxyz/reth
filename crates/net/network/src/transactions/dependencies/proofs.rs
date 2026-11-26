@@ -194,7 +194,7 @@ struct Pending {
     deadline: Instant,
 }
 
-fn valid_message(message: &[u8]) -> bool {
+const fn valid_message(message: &[u8]) -> bool {
     message.len() <= MAX_MESSAGE &&
         match message.first() {
             Some(0) => message.len() == 33,
