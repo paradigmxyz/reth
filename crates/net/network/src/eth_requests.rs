@@ -1362,16 +1362,17 @@ mod tests {
     #[tokio::test]
     async fn indexed_cells_rebuilds_table_after_omissions() {
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
-        let hashes = (0..4).map(B256::repeat_byte).collect::<Vec<_>>();
+        let hashes = (0..5).map(B256::repeat_byte).collect::<Vec<_>>();
         let a = B128::from(1u128.to_le_bytes());
         let b = B128::from(2u128.to_le_bytes());
         let c = B128::from(4u128.to_le_bytes());
-        let request = GetCells::from_masks(hashes.clone(), vec![a, b, a, c]).unwrap();
+        let request = GetCells::from_masks(hashes.clone(), vec![a, b, a, c, b]).unwrap();
         let blob_store = CountingBlobStore {
             cell_responses: vec![
                 (hashes[1], BlobCellMask::from_bits(2), vec![Cell::repeat_byte(1)]),
                 (hashes[2], BlobCellMask::from_bits(1), vec![Cell::repeat_byte(2)]),
                 (hashes[3], BlobCellMask::from_bits(4), vec![Cell::repeat_byte(3)]),
+                (hashes[4], BlobCellMask::from_bits(2), vec![Cell::repeat_byte(4)]),
             ],
             ..Default::default()
         };
@@ -1383,7 +1384,10 @@ mod tests {
         assert_eq!(cells.hashes, hashes[1..]);
         assert_eq!(
             cells.cell_mask,
-            CellMasks::Indexed { masks: vec![b, a, c], mask_ids: Bytes::from_static(&[0, 1, 2]) }
+            CellMasks::Indexed {
+                masks: vec![b, a, c],
+                mask_ids: Bytes::from_static(&[0, 1, 2, 0]),
+            }
         );
         assert_eq!(cells.validate_response(&request), Ok(()));
     }
