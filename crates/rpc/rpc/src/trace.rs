@@ -26,12 +26,12 @@ use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
+    CallManyRequest, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
-use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -123,7 +123,7 @@ where
     ) -> Result<TraceResults, Eth::Error> {
         let tx = self
             .eth_api()
-            .recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
+            .recover_raw_pooled_transaction(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
@@ -741,9 +741,12 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
+        calls: CallManyRequest<Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
+        // Decoding is bounded by the call limit, so malformed input is rejected without waiting
+        // for a tracing permit.
+        let calls = calls.into_inner()?;
         let _permit = self.acquire_trace_permit().await;
         Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }

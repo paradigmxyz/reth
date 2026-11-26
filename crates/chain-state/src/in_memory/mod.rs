@@ -8,6 +8,7 @@ mod blocks;
 mod canonical;
 pub use canonical::{
     CanonicalInMemoryState, CanonicalInMemoryStateWriter, InMemoryState, InMemoryStateBlockCounts,
+    InMemoryStateWriter,
 };
 
 mod executed_block;

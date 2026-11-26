@@ -177,17 +177,14 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
     fn transact_with_inspector<I: evm2::Inspector<T> + 'a>(
         &mut self,
         transaction: &Recovered<Self::Transaction>,
-        inspector: I,
+        mut inspector: I,
     ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError> {
-        // TODO(dani): use either `&mut Inspector` or `clear_inspector_as`.
-        evm2::Evm::set_inspector(self, inspector);
-        let result = evm2::Evm::transact(self, transaction)
+        // Borrow the inspector for this call instead of installing it and casting it back out:
+        // evm2 stores a `Box<dyn Inspector<T>>` as is, so the box it returns is not always an `I`.
+        let result = evm2::Evm::transact_with_inspector(self, transaction, &mut inspector)
             .map(|executed| executed.detach())
             .map_err(map_handler_error);
-        let inspector = self.clear_inspector().expect("inspector was set before execution");
-        // SAFETY: the boxed inspector was created from `I` immediately above and was not replaced.
-        let inspector = unsafe { Box::from_raw(Box::into_raw(inspector).cast::<I>()) };
-        result.map(|result| (*inspector, result))
+        result.map(|result| (inspector, result))
     }
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
