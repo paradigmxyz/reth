@@ -676,6 +676,11 @@ impl<N: NodePrimitives> InMemoryStateSnapshot<N> {
         self.canonical.get(&hash).or_else(|| self.non_canonical.get(&hash)).cloned()
     }
 
+    /// Returns the state of the canonical block with the given hash.
+    pub fn canonical_state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
+        self.canonical.get(&hash).cloned()
+    }
+
     /// Returns the state of the highest canonical block, if a canonical block was tracked.
     pub const fn canonical_head(&self) -> Option<&Arc<BlockState<N>>> {
         self.canonical_head.as_ref()

@@ -116,21 +116,31 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Returns the state after block `block_hash`, which must be in this view's in-memory blocks or
     /// on disk.
     ///
-    /// The trie reverts it computes go into the changeset cache the engine shares, so use it for
-    /// blocks the node itself chose, such as the head. See [`Self::historical_state_by_hash`].
+    /// With `cache_trie_reverts`, the trie reverts it computes go into the changeset cache the
+    /// engine shares: set it for blocks the node itself chose, such as the head, and leave it unset
+    /// for blocks a caller such as RPC chose.
     ///
     /// Returns an error if the block is unknown to this view, or if this view's state tables have
     /// advanced past its finished block.
-    pub fn state_by_hash(self, block_hash: B256) -> ProviderResult<StateProviderBox> {
-        self.state_after(block_hash, true)
-    }
+    pub fn state_by_hash(
+        self,
+        block_hash: B256,
+        cache_trie_reverts: bool,
+    ) -> ProviderResult<StateProviderBox> {
+        if self.in_memory().state_by_hash(block_hash).is_none() &&
+            self.storage_provider.block_number(block_hash)?.is_none()
+        {
+            return Err(ProviderError::BlockHashNotFound(block_hash))
+        }
+        if self.execution_ahead_of_finish()? {
+            return Err(ProviderError::StateUnavailableDuringSync)
+        }
 
-    /// Returns the state after block `block_hash` like [`Self::state_by_hash`], without writing the
-    /// trie reverts it computes to the changeset cache the engine shares.
-    ///
-    /// Use it for blocks a caller such as RPC chose.
-    pub fn historical_state_by_hash(self, block_hash: B256) -> ProviderResult<StateProviderBox> {
-        self.state_after(block_hash, false)
+        let mut overlay_builder = self.overlay_manager.overlay_builder(block_hash);
+        if !cache_trie_reverts {
+            overlay_builder = overlay_builder.without_trie_revert_caching();
+        }
+        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
     }
 
     /// Returns the state after `parent_hash` with `block`, a block built on it that is not tracked,
@@ -156,29 +166,6 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             .storage_provider
             .get_stage_checkpoint(StageId::Execution)?
             .is_some_and(|execution| execution.block_number > finish))
-    }
-
-    /// Returns the state after `block_hash`, writing trie reverts to the shared changeset cache if
-    /// `cache_trie_reverts` is set.
-    fn state_after(
-        self,
-        block_hash: B256,
-        cache_trie_reverts: bool,
-    ) -> ProviderResult<StateProviderBox> {
-        if self.in_memory().state_by_hash(block_hash).is_none() &&
-            self.storage_provider.block_number(block_hash)?.is_none()
-        {
-            return Err(ProviderError::BlockHashNotFound(block_hash))
-        }
-        if self.execution_ahead_of_finish()? {
-            return Err(ProviderError::StateUnavailableDuringSync)
-        }
-
-        let mut overlay_builder = self.overlay_manager.overlay_builder(block_hash);
-        if !cache_trie_reverts {
-            overlay_builder = overlay_builder.without_trie_revert_caching();
-        }
-        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
     }
 
     /// Returns an overlay state provider over this view's database provider, resolving in-memory

@@ -761,7 +761,7 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
             let provider = self.consistent_provider()?;
             if let Some(head) = provider.head_block().map(|head| head.hash()) {
                 trace!(target: "providers::blockchain", "Using head state for latest state provider");
-                return provider.state_by_hash(head)
+                return provider.state_by_hash(head, true)
             }
         }
         trace!(target: "providers::blockchain", "Using database state for latest state provider");
@@ -816,28 +816,30 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        provider.historical_state_by_hash(hash)
+        provider.state_by_hash(hash, false)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
         let provider = self.consistent_provider()?;
         provider.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        provider.historical_state_by_hash(block_hash)
+        provider.state_by_hash(block_hash, false)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?hash, "Getting state by block hash");
+        // Like `history_by_block_hash`, a persisted block's reverts stay out of the shared cache;
+        // other executed blocks the in-memory state tracks have no state here.
         let provider = self.consistent_provider()?;
-        let result = if provider.in_memory().state_by_hash(hash).is_some() {
-            provider.state_by_hash(hash)
-        } else {
-            provider.historical_state_by_hash(hash)
-        };
-        result.map_err(|err| match err {
-            ProviderError::BlockHashNotFound(_) => ProviderError::StateForHashNotFound(hash),
-            err => err,
-        })
+        if provider.in_memory().canonical_state_by_hash(hash).is_some() {
+            return provider.state_by_hash(hash, true)
+        }
+        if provider.database_provider().block_number(hash)?.is_some() {
+            return provider.state_by_hash(hash, false)
+        }
+        drop(provider);
+
+        self.pending_state_by_hash(hash)?.ok_or(ProviderError::StateForHashNotFound(hash))
     }
 
     /// Returns the state provider for pending state.
@@ -880,7 +882,7 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         if provider.in_memory().state_by_hash(block_hash).is_none() {
             return Ok(None)
         }
-        provider.state_by_hash(block_hash).map(Some)
+        provider.state_by_hash(block_hash, true).map(Some)
     }
 }
 
@@ -3366,7 +3368,7 @@ mod tests {
         provider_rw.save_stage_checkpoint(StageId::Execution, StageCheckpoint::new(1))?;
         provider_rw.commit()?;
 
-        assert!(before_execution.historical_state_by_hash(genesis_hash).is_ok());
+        assert!(before_execution.state_by_hash(genesis_hash, false).is_ok());
         for result in [
             provider.history_by_block_number(0),
             provider.state_by_block_hash(genesis_hash),
