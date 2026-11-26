@@ -128,7 +128,7 @@ use source::{
 use std::{
     borrow::Cow,
     collections::BTreeMap,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -1065,24 +1065,44 @@ fn selection_from_prune_mode(mode: Option<PruneMode>, snapshot_block: u64) -> Co
     }
 }
 
-/// Removes existing snapshot data that is managed by `reth download`.
+/// Removes existing snapshot data managed by `reth download` without following symlinks.
 fn clear_existing_datadir(target_dir: &Path, static_files_dir: Option<&Path>) -> Result<()> {
     info!(target: "reth::cli", dir = ?target_dir, "Clearing existing snapshot data");
     for entry in MANAGED_DATADIR_PATHS {
         let path = managed_datadir_path(entry, target_dir, static_files_dir);
-        if !path.try_exists()? {
-            continue;
-        }
-
-        let metadata = fs::metadata(&path)?;
-        if metadata.is_dir() {
+        let file_type = match path.symlink_metadata() {
+            Ok(metadata) => metadata.file_type(),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(fs::FsPathError::metadata(err, path).into()),
+        };
+        let is_dir = file_type.is_dir();
+        #[cfg(windows)]
+        let is_dir = is_dir || std::os::windows::fs::FileTypeExt::is_symlink_dir(&file_type);
+        if is_dir {
             fs::remove_dir_all(&path)?;
-        } else if metadata.is_file() {
+        } else if file_type.is_file() || file_type.is_symlink() {
             fs::remove_file(&path)?;
         }
     }
 
     Ok(())
+}
+
+/// Whether an archive entry belongs to the downloader's managed output paths.
+fn is_managed_snapshot_path(path: &Path, directory: bool) -> bool {
+    let mut components = path.components().peekable();
+    if components.peek() == Some(&Component::CurDir) {
+        components.next();
+    }
+    let Some(Component::Normal(root)) = components.next() else { return false };
+    if !MANAGED_DATADIR_PATHS.iter().any(|name| root == *name) {
+        return false
+    }
+    if root == "reth.toml" {
+        return !directory && components.next().is_none()
+    }
+    (directory || components.peek().is_some()) &&
+        components.all(|part| matches!(part, Component::Normal(_)))
 }
 
 /// Resolves one of [`MANAGED_DATADIR_PATHS`], honoring a custom static files directory.
@@ -1299,14 +1319,21 @@ mod tests {
         }
     }
 
-    fn single_archive(component: SnapshotComponentType) -> (String, ComponentManifest) {
+    fn single_archive(
+        component: SnapshotComponentType,
+        output_path: &str,
+    ) -> (String, ComponentManifest) {
         let key = component.key();
         let archive = SingleArchive {
             file: format!("{key}.tar.zst"),
             size: 1,
-            decompressed_size: 0,
+            decompressed_size: 1,
             blake3: None,
-            output_files: vec![],
+            output_files: vec![OutputFileChecksum {
+                path: output_path.to_owned(),
+                size: 1,
+                blake3: blake3::hash(b"x").to_hex().to_string(),
+            }],
         };
         (key.to_owned(), ComponentManifest::Single(archive))
     }
@@ -1315,11 +1342,48 @@ mod tests {
         SnapshotManifest {
             base_url: Some("https://example.com".to_string()),
             components: BTreeMap::from([
-                single_archive(SnapshotComponentType::TransactionSenders),
-                single_archive(SnapshotComponentType::RocksdbIndices),
+                single_archive(
+                    SnapshotComponentType::TransactionSenders,
+                    "static_files/static_file_transaction_senders_0_0",
+                ),
+                single_archive(SnapshotComponentType::RocksdbIndices, "rocksdb/000001.sst"),
             ]),
             ..empty_manifest()
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clear_existing_datadir_removes_managed_links_without_following_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let datadir = dir.path().join("datadir");
+        let existing = dir.path().join("storage");
+        let missing = dir.path().join("old-config.toml");
+        fs::create_dir_all(&datadir).unwrap();
+        fs::create_dir_all(&existing).unwrap();
+        fs::write(existing.join("data"), b"keep").unwrap();
+        std::os::unix::fs::symlink(&existing, datadir.join("db")).unwrap();
+        std::os::unix::fs::symlink(&missing, datadir.join("reth.toml")).unwrap();
+
+        clear_existing_datadir(&datadir, None).unwrap();
+
+        for entry in ["db", "reth.toml"] {
+            let err = datadir.join(entry).symlink_metadata().unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        }
+        assert_eq!(fs::read(existing.join("data")).unwrap(), b"keep");
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn managed_snapshot_paths_match_output_types() {
+        assert!(is_managed_snapshot_path(Path::new("./db/data"), false));
+        assert!(is_managed_snapshot_path(Path::new("static_files"), true));
+        assert!(is_managed_snapshot_path(Path::new("reth.toml"), false));
+        assert!(!is_managed_snapshot_path(Path::new("db"), false));
+        assert!(!is_managed_snapshot_path(Path::new("reth.toml/settings"), false));
+        assert!(!is_managed_snapshot_path(Path::new("reth.toml"), true));
+        assert!(!is_managed_snapshot_path(Path::new("logs/restore.log"), false));
     }
 
     #[test]
@@ -1743,15 +1807,6 @@ mod tests {
         let manifest_path = dir.path().join("manifest.json");
         let mut manifest = manifest_with_archive_only_components();
         manifest.chain_id = 42431;
-        for component in manifest.components.values_mut() {
-            if let ComponentManifest::Single(archive) = component {
-                archive.output_files.push(OutputFileChecksum {
-                    path: archive.file.clone(),
-                    size: 1,
-                    blake3: blake3::hash(b"x").to_hex().to_string(),
-                });
-            }
-        }
         fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
         let manifest_url = format!("file://{}", manifest_path.display());
         let target = dir.path().join("download");

@@ -58,6 +58,21 @@ pub trait StorageChangeSetReader: Send {
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
 
+    /// Calls `f` for every storage changeset in a range of blocks, in block order.
+    ///
+    /// This reads the same rows as [`Self::storage_changesets_range`], but implementations can
+    /// stream them instead of collecting them. The default implementation collects the range.
+    fn for_each_storage_changeset(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+        mut f: impl FnMut(reth_db_api::models::BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
+        for (block_address, entry) in self.storage_changesets_range(range)? {
+            f(block_address, entry);
+        }
+        Ok(())
+    }
+
     /// Get storage changesets for a block as static-file rows.
     ///
     /// Default implementation uses `storage_changeset` and maps to `StorageBeforeTx`.

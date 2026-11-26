@@ -1,4 +1,7 @@
-use super::{managed_datadir_path, manifest::*, verify::OutputVerifier, MANAGED_DATADIR_PATHS};
+use super::{
+    is_managed_snapshot_path, managed_datadir_path, manifest::*, verify::OutputVerifier,
+    MANAGED_DATADIR_PATHS,
+};
 use eyre::Result;
 use rayon::prelude::*;
 use reth_config::config::Config;
@@ -105,7 +108,7 @@ impl DownloadPlanArchive {
             planned.ty.key(),
             planned.archive.file_name.clone(),
             planned.archive.url.clone(),
-            planned.archive.size,
+            planned.archive.size.unwrap_or_default(),
             planned.archive.output_size(),
             planned.archive.blake3.clone(),
         )
@@ -341,7 +344,7 @@ fn sort_planned_archives(all_downloads: &mut [PlannedArchive]) {
     });
 }
 
-/// Expands component selections into the archives that need to be processed.
+/// Expands component selections into archives and validates their output paths.
 pub(crate) fn collect_planned_archives(
     manifest: &SnapshotManifest,
     selections: &BTreeMap<SnapshotComponentType, ComponentSelection>,
@@ -392,6 +395,15 @@ pub(crate) fn collect_planned_archives(
                 eyre::bail!(
                     "Invalid modular manifest: {} is missing plain output checksum metadata",
                     archive.file_name
+                );
+            }
+
+            for output in &archive.output_files {
+                let path = output.relative_path()?;
+                eyre::ensure!(
+                    is_managed_snapshot_path(path, false),
+                    "Not a snapshot output path: `{}`",
+                    path.display()
                 );
             }
 
@@ -456,7 +468,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "https://example.com/ok.tar.zst".to_string(),
                     file_name: "ok.tar.zst".to_string(),
-                    size: 10,
+                    size: Some(10),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "ok.bin".to_string(),
@@ -471,7 +483,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "https://example.com/missing.tar.zst".to_string(),
                     file_name: "missing.tar.zst".to_string(),
-                    size: 10,
+                    size: Some(10),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "missing.bin".to_string(),
@@ -486,7 +498,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "https://example.com/bad-size.tar.zst".to_string(),
                     file_name: "bad-size.tar.zst".to_string(),
-                    size: 10,
+                    size: Some(10),
                     blake3: None,
                     output_files: vec![],
                 },
@@ -566,7 +578,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "u3".to_string(),
                     file_name: "t.tar.zst".to_string(),
-                    size: 1,
+                    size: Some(1),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "a".to_string(),
@@ -581,7 +593,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "u2".to_string(),
                     file_name: "rocksdb_indices.tar.zst".to_string(),
-                    size: 1,
+                    size: Some(1),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "b".to_string(),
@@ -596,7 +608,7 @@ mod tests {
                 archive: SnapshotArchive {
                     url: "u1".to_string(),
                     file_name: "state.tar.zst".to_string(),
-                    size: 1,
+                    size: Some(1),
                     blake3: None,
                     output_files: vec![OutputFileChecksum {
                         path: "c".to_string(),
@@ -776,6 +788,25 @@ mod tests {
             err.to_string().contains("chunk_files length"),
             "expected chunk_files length error, got: {err}"
         );
+    }
+
+    #[test]
+    fn collect_planned_archives_rejects_a_directory_listed_as_a_file() {
+        let mut manifest = test_manifest_with_component_tip(9, 10);
+        let component = SnapshotComponentType::Transactions;
+        let ComponentManifest::Chunked(archive) =
+            manifest.components.get_mut(component.key()).unwrap()
+        else {
+            panic!("expected a chunked archive");
+        };
+        archive.chunk_output_files[0][0].path = "static_files".to_string();
+
+        let err = collect_planned_archives(
+            &manifest,
+            &BTreeMap::from([(component, ComponentSelection::All)]),
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Not a snapshot output path: `static_files`");
     }
 
     #[test]
