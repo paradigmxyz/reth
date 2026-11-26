@@ -116,7 +116,7 @@ impl HelloMessageWithProtocols {
     /// kept. Use this to pin the `eth` versions instead of advertising
     /// [`EthVersion::ALL_VERSIONS`].
     pub fn set_eth_versions(&mut self, versions: impl IntoIterator<Item = EthVersion>) {
-        self.protocols.retain(|p| !p.cap.is_eth());
+        self.protocols.retain(|p| p.cap.name != "eth");
         self.protocols.splice(0..0, versions.into_iter().map(Protocol::eth));
     }
 
@@ -259,8 +259,8 @@ impl HelloMessageBuilder {
 #[cfg(test)]
 mod tests {
     use crate::{
-        p2pstream::P2PMessage, Capability, EthVersion, HelloMessage, HelloMessageWithProtocols,
-        ProtocolVersion,
+        p2pstream::P2PMessage, protocol::Protocol, Capability, EthVersion, HelloMessage,
+        HelloMessageWithProtocols, ProtocolVersion,
     };
     use alloy_rlp::{Decodable, Encodable, Header, EMPTY_STRING_CODE};
     use reth_network_peers::pk2id;
@@ -373,10 +373,10 @@ mod tests {
     #[test]
     fn set_eth_versions_keeps_other_capabilities() {
         let id = pk2id(&SecretKey::new(&mut rand::rng()).public_key());
-        let hello = HelloMessageWithProtocols::builder(id)
-            .build()
-            .with_snap(true)
-            .with_eth_versions([EthVersion::Eth70, EthVersion::Eth69]);
+        let mut hello = HelloMessageWithProtocols::builder(id).build().with_snap(true);
+        // An `eth` version reth doesn't know is replaced too.
+        hello.protocols.push(Protocol::new(Capability::new_static("eth", 99), 17));
+        hello.set_eth_versions([EthVersion::Eth70, EthVersion::Eth69]);
 
         let caps: Vec<_> = hello.protocols.iter().map(|p| p.cap.clone()).collect();
         assert_eq!(caps, [Capability::eth_70(), Capability::eth_69(), Capability::snap_2()]);
