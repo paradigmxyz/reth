@@ -33,7 +33,10 @@ operating system:
 
 -   **Ubuntu**: `apt-get install libclang-dev pkg-config build-essential cmake`, plus `clang` on non-x86_64 hosts
 -   **macOS**: `brew install llvm pkg-config cmake`
--   **Windows**: `choco install llvm cmake`, or `winget install LLVM.LLVM` and `winget install Kitware.CMake`
+-   **Windows**: `choco install llvm cmake`, or `winget install LLVM.LLVM` and `winget install Kitware.CMake`.
+    The MCL BN254 backend also needs a Visual Studio installation with the MSVC and `clang-cl`
+    components, because its CMake build takes `ml64.exe` and `clang-cl.exe` from there. Windows
+    builds with MCL are untested.
 
 These are needed to build bindings for Reth's database and the MCL BN254 backend. To build without
 MCL, pass `--no-default-features` and select the other features you need.
