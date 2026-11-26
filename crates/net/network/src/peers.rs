@@ -141,8 +141,9 @@ impl PeersManager {
         // We use half of the interval to decrease the max duration to `150%` in worst case
         let unban_interval = ban_duration.min(backoff_durations.low) / 2;
 
+        // Persisted rows are not counted, since filtered ones would keep their space reserved.
         let mut peers: HashMap<PeerId, Peer, FbBuildHasher<64>> = HashMap::with_capacity_and_hasher(
-            trusted_nodes.len() + basic_nodes.len() + persisted_peers.len(),
+            trusted_nodes.len() + basic_nodes.len(),
             Default::default(),
         );
         let mut trusted_peer_ids: HashSet<PeerId, FbBuildHasher<64>> =
@@ -4803,5 +4804,25 @@ mod tests {
         peers.add_and_connect_kind(inbound, PeerKind::Static, addr, None);
         peers.on_active_session_gracefully_closed(inbound);
         assert!(!peers.peers.contains_key(&inbound));
+    }
+
+    #[tokio::test]
+    async fn test_skipped_persisted_peers_reserve_no_capacity() {
+        let rows = 10_000;
+        let mut config = PeersConfig::test();
+        config.enforce_enr_fork_id = true;
+        // records without a fork id are skipped when the fork id is enforced
+        config.persisted_peers = (0..rows)
+            .map(|_| {
+                PersistedPeerInfo::from_node_record(NodeRecord::new(
+                    "1.2.3.4:30303".parse().unwrap(),
+                    PeerId::random(),
+                ))
+            })
+            .collect();
+
+        let peers = PeersManager::new(config);
+        assert!(peers.peers.is_empty());
+        assert!(peers.peers.capacity() < rows);
     }
 }
