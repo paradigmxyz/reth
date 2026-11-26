@@ -50,7 +50,7 @@ use reth_static_file_types::{
     StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
-    BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
+    metadata::keys, BlockBodyIndicesProvider, ChangeSetReader, DBProvider, PruneCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
@@ -1253,7 +1253,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut indexes = self.indexes.write();
         indexes.clear();
 
-        for (segment, files) in &*iter_static_files(&self.path).map_err(ProviderError::other)? {
+        let files_by_segment = iter_static_files(&self.path).map_err(ProviderError::other)?;
+        for (segment, files) in &*files_by_segment {
             // Update first and last block for each segment
             //
             // It's safe to call `expect` here, because every segment has at least one file
@@ -1299,13 +1300,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.cache_generation.fetch_add(1, Ordering::AcqRel);
         self.map.clear();
 
-        // initialize the expired history height to the lowest static file block
-        if let Some(lowest_range) =
-            indexes.get(StaticFileSegment::Transactions).and_then(|index| index.min_block_range)
+        // A partial restore can leave older jars separated from the tip by a gap.
+        if let Some(files) = files_by_segment.get(StaticFileSegment::Transactions) &&
+            let Some(last) = files.last()
         {
-            // the earliest height is the lowest available block number
-            self.earliest_history_height
-                .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
+            let mut first = last.block_range.start();
+            for file in files.iter().rev().skip(1) {
+                if file.block_range.end().saturating_add(1) < first {
+                    break
+                }
+                first = first.min(file.block_range.start());
+            }
+            self.set_earliest_history_height(first);
         }
 
         Ok(())
@@ -1412,7 +1418,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // Make sure the last transaction matches the last block from its indices, since a heal
             // from a pruning interruption might have decreased the number of transactions without
             // being able to update the last block of the static file segment.
-            let highest_tx = self.get_highest_static_file_tx(segment);
+            let highest_tx = if segment == StaticFileSegment::Transactions {
+                self.highest_transaction_for_consistency(provider.tx_ref(), highest_block)?
+            } else {
+                self.get_highest_static_file_tx(segment)
+            };
             span.record("highest_tx", highest_tx);
             debug!(target: "reth::providers::static_file", "Checking tx index segment");
 
@@ -2098,6 +2108,25 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .get(segment)
             .and_then(|index| index.available_block_ranges_by_max_tx.as_ref())
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
+    }
+
+    /// Returns the last transaction accounted for by the files or the verified snapshot prefix.
+    /// Used during startup and staged sync. An empty suffix may follow older, disconnected jars.
+    pub fn highest_transaction_for_consistency(
+        &self,
+        tx: &impl DbTx,
+        highest_block: Option<BlockNumber>,
+    ) -> ProviderResult<Option<TxNumber>> {
+        let stored = self.get_highest_static_file_tx(StaticFileSegment::Transactions);
+        if let Some(highest) = highest_block &&
+            let Some(pruned) = tx.get::<tables::PruneCheckpoints>(PruneSegment::Bodies)? &&
+            pruned.block_number.is_some_and(|block| block <= highest) &&
+            pruned.tx_number > stored &&
+            tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_some()
+        {
+            return Ok(pruned.tx_number)
+        }
+        Ok(stored)
     }
 
     /// Gets the highest static file block for all segments.

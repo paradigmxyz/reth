@@ -568,15 +568,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
         let target_dir = prepared.data_dir.as_path();
         let cancel_token = CancellationToken::new();
         let _cancel_guard = cancel_token.drop_guard();
-        let downloads = {
+        let (downloads, config_path) = {
             let target_dir = std::path::absolute(target_dir)?;
             let static_files_dir =
                 static_files_dir.as_deref().map(std::path::absolute).transpose()?;
-            let config_path = config_path.clone();
             reth_tasks::spawn_blocking(move || {
                 let static_files_dir = static_files_dir.as_deref();
-                planned.validate_retained_config(
-                    &config_path,
+                let config_path = planned.validated_config_path(
+                    config_path,
                     &target_dir,
                     static_files_dir,
                     self.force || self.prune_unlisted,
@@ -587,7 +586,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
                     prune_unlisted_outputs(&planned.archives, &target_dir, static_files_dir)?;
                 }
                 fs::create_dir_all(&target_dir)?;
-                planned.partition_reusable(&target_dir, static_files_dir)
+                Ok::<_, eyre::Report>((
+                    planned.partition_reusable(&target_dir, static_files_dir)?,
+                    config_path,
+                ))
             })
             .await??
         };
@@ -659,6 +661,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCo
 
         let planned = collect_planned_archives(&manifest, &selections)?;
         let transaction_jars = planned.transaction_jars()?;
+        if transaction_jars.is_empty() &&
+            selections.get(&SnapshotComponentType::Transactions).is_some_and(|selection| {
+                !matches!(selection, ComponentSelection::None | ComponentSelection::Distance(0))
+            })
+        {
+            eyre::bail!(
+                "Selected transaction files do not cover snapshot block {}",
+                manifest.block
+            );
+        }
         Ok(ResolvedDownload { manifest, selections, preset, planned, transaction_jars })
     }
 
@@ -2110,11 +2122,28 @@ mod tests {
             Some(checkpoint(24, Some(PruneMode::Distance(30000))))
         );
 
+        // Resolve the config before force removes an intermediate directory in its path.
+        fs::create_dir_all(target.path().join("db/subdir"))?;
+        let alias = target.path().join("db/subdir/../../configs/custom.toml");
+        restore_snapshot(
+            &source,
+            &target,
+            24,
+            &["--force", "--minimal", "--config", alias.to_str().unwrap()],
+        )
+        .await?;
+        assert_eq!(
+            bodies_checkpoint(&target)?,
+            Some(checkpoint(24, Some(PruneMode::Distance(30000))))
+        );
+        assert!(!target.path().join("db/subdir").exists());
+
         // Both cleanup modes must fail before touching the previous restore.
         fs::write(&path, "[invalid")?;
         let expected = Config::from_path(&path).unwrap_err().to_string();
         let marker = target.path().join("static_files/local");
         fs::write(&marker, "local")?;
+        let path = target.path().join("db/../configs/custom.toml");
         for cleanup in ["--force", "--prune-unlisted"] {
             let flags = [cleanup, "--minimal", "--config", path.to_str().unwrap()];
             assert_eq!(
@@ -2123,6 +2152,20 @@ mod tests {
             );
             assert_eq!(fs::read_to_string(&marker)?, "local");
         }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn restore_rejects_a_requested_range_past_the_transaction_files() -> Result<()> {
+        let source = snapshot_source(Some(0..=19))?;
+        let target = tempdir()?;
+        let marker = target.path().join("reth.toml");
+        fs::write(&marker, "# retained")?;
+        let err = restore_snapshot(&source, &target, 24, &["--with-txs-since=21", "--force"])
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), "Selected transaction files do not cover snapshot block 24");
+        assert_eq!(fs::read_to_string(marker)?, "# retained");
         Ok(())
     }
 

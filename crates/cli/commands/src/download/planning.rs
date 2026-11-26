@@ -10,7 +10,7 @@ use serde::Serialize;
 use std::{
     collections::{BTreeMap, HashSet},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
 };
 use tracing::info;
 
@@ -182,29 +182,55 @@ impl PlannedDownloads {
         Ok(jars.into_iter().map(str::to_owned).collect())
     }
 
-    /// Checks the existing node config before cleanup unless the download replaces it.
-    pub(super) fn validate_retained_config(
+    /// Resolves parent traversal before cleanup can remove an intermediate directory and
+    /// checks the node configuration if the download retains it.
+    pub(super) fn validated_config_path(
         &self,
-        config: &Path,
+        config: PathBuf,
         target: &Path,
         static_files: Option<&Path>,
         cleanup: bool,
-    ) -> Result<()> {
-        let cleared = cleanup &&
-            MANAGED_DATADIR_PATHS.iter().any(|entry| {
-                config.starts_with(managed_datadir_path(entry, target, static_files))
-            });
-        if cleared || !config.try_exists()? {
-            return Ok(())
+    ) -> Result<PathBuf> {
+        let parent = config.ancestors().find(|path| path.ends_with(".."));
+        // Resolve only through the final `..`. The remaining path may not exist yet.
+        let resolved = if let Some(parent) = parent {
+            parent.canonicalize()?.join(config.strip_prefix(parent)?)
+        } else {
+            config.clone()
+        };
+        if !resolved.try_exists()? {
+            return Ok(resolved)
+        }
+        if cleanup {
+            for entry in MANAGED_DATADIR_PATHS {
+                let root = managed_datadir_path(entry, target, static_files);
+                if resolved.starts_with(&root) ||
+                    (parent.is_some() &&
+                        root.try_exists()? &&
+                        !root.is_symlink() &&
+                        resolved.starts_with(root.canonicalize()?))
+                {
+                    return Ok(resolved)
+                }
+            }
         }
         let verifier = OutputVerifier::new(target, static_files);
         for output in self.archives.iter().flat_map(|planned| &planned.archive.output_files) {
-            if verifier.output_path(output)? == config {
-                return Ok(())
+            let output = verifier.output_path(output)?;
+            if output == resolved {
+                return Ok(resolved)
+            }
+            if parent.is_some() &&
+                output.file_name() == resolved.file_name() &&
+                let (Some(output_dir), Some(config_dir)) = (output.parent(), resolved.parent()) &&
+                output_dir.try_exists()? &&
+                output_dir.canonicalize()? == config_dir.canonicalize()?
+            {
+                return Ok(resolved)
             }
         }
-        Config::from_path(config)?;
-        Ok(())
+        Config::from_path(&resolved)?;
+        Ok(resolved)
     }
 
     /// Verifies every archive's existing outputs in parallel and splits off the archives that

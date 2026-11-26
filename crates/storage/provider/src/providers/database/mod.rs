@@ -1091,7 +1091,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{metadata::keys, MetadataWriter};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1611,5 +1611,65 @@ mod tests {
             writer.commit().unwrap();
         }
         factory
+    }
+
+    #[test]
+    fn legacy_and_verified_bodies_checkpoints_after_reopen() -> eyre::Result<()> {
+        let mut factory = create_test_provider_factory();
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("files"))
+                .with_blocks_per_file(2)
+                .build()?;
+        let provider = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        for number in 0..=5 {
+            let block = random_block(
+                &mut rng,
+                number,
+                BlockParams {
+                    tx_count: Some(u8::from(matches!(number, 1 | 3))),
+                    ..Default::default()
+                },
+            );
+            provider.insert_block(&block.try_recover()?)?;
+        }
+        // The fixture imports blocks without executing transactions or writing receipts.
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
+        let legacy = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(5) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
+        provider.commit()?;
+
+        let segment = StaticFileSegment::Transactions;
+        let files = factory.static_file_provider();
+        files.initialize_index()?;
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
+        assert_eq!(
+            factory.get_prune_checkpoints_for_availability()?,
+            [(
+                PruneSegment::Bodies,
+                PruneCheckpoint { block_number: None, tx_number: None, ..legacy }
+            )]
+        );
+        assert_eq!(factory.get_prune_checkpoint(PruneSegment::Bodies)?, Some(legacy));
+
+        // A verified source boundary inside a physically retained jar still expires its bodies.
+        let provider = factory.provider_rw()?;
+        provider.write_metadata(keys::VERIFIED_SNAPSHOT_BODIES, Vec::new())?;
+        let pruned = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(3) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
+        provider.commit()?;
+        assert_eq!(factory.earliest_block_number()?, 4);
+        assert_eq!(
+            factory.get_prune_checkpoints_for_availability()?,
+            [(PruneSegment::Bodies, pruned)]
+        );
+
+        // The older jar contains transaction zero; the entire suffix after the gap is empty.
+        files.delete_jar(segment, 2)?;
+        assert_eq!(files.get_highest_static_file_tx(segment), Some(0));
+        assert_eq!(files.check_consistency(&factory.provider()?)?, None);
+        assert_eq!(factory.block(5.into())?.unwrap().body.transactions.len(), 0);
+        Ok(())
     }
 }

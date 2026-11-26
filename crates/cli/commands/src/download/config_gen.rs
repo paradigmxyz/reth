@@ -138,6 +138,7 @@ where
                     tx_number =
                         tx_number.max(indices.and_then(|body| body.next_tx_num().checked_sub(1)));
                 }
+                tx.put::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned(), Vec::new())?;
                 restored_checkpoint(block_number, tx_number)
             }
             _ => {

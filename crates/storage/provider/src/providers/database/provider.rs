@@ -68,8 +68,8 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    metadata::keys, BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader,
+    MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -1919,6 +1919,43 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Older downloads wrote the tip as pruned even when they restored a continuous suffix.
+    /// Keep the original pruning progress for writes, but report the history actually retained.
+    fn bodies_checkpoint_for_reads(
+        &self,
+        mut checkpoint: PruneCheckpoint,
+    ) -> ProviderResult<PruneCheckpoint> {
+        let files = &self.static_file_provider;
+        let first = files.earliest_history_height();
+        if let Some(block) = checkpoint.block_number &&
+            first <= block &&
+            files.get_highest_static_file_block(StaticFileSegment::Transactions) >= Some(block) &&
+            self.get_metadata(keys::VERIFIED_SNAPSHOT_BODIES)?.is_none() &&
+            let Some(tip) = self.tx.get::<tables::BlockBodyIndices>(block)? &&
+            checkpoint.tx_number == Some(tip.last_tx_num()) &&
+            let Some(indices) = self.tx.get::<tables::BlockBodyIndices>(first)?
+        {
+            // An empty anchor also has a block range. Do not advertise missing rows as bodies.
+            let required = indices.first_tx_num()..tip.next_tx_num();
+            if !required.is_empty() {
+                for tx in [required.start, required.end - 1] {
+                    if !files
+                        .get_maybe_segment_provider(StaticFileSegment::Transactions, tx)?
+                        .and_then(|file| file.user_header().tx_range())
+                        .is_some_and(|range| range.contains(tx))
+                    {
+                        return Ok(checkpoint)
+                    }
+                }
+            }
+            checkpoint.block_number = first.checked_sub(1);
+            checkpoint.tx_number = indices.first_tx_num().checked_sub(1);
+        }
+        Ok(checkpoint)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
@@ -1943,8 +1980,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
         let first_file_block = self.static_file_provider.earliest_history_height();
         // A download keeps body indices at the pruned tip and anchors its transaction file
         // there for the next append. Snap sync has no body indices at its pivot.
-        if let Some(pruned) =
-            self.get_prune_checkpoint(PruneSegment::Bodies)?.and_then(|cp| cp.block_number) &&
+        if let Some(checkpoint) = self.get_prune_checkpoint(PruneSegment::Bodies)? &&
+            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
             pruned >= first_file_block &&
             self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
         {
@@ -4014,6 +4051,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
     ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         let mut checkpoints = self.get_prune_checkpoints()?;
+        if let Some((_, bodies)) =
+            checkpoints.iter_mut().find(|(segment, _)| *segment == PruneSegment::Bodies)
+        {
+            *bodies = self.bodies_checkpoint_for_reads(*bodies)?;
+        }
         if !EitherWriter::receipts_destination(self).is_static_file() ||
             !checkpoints.iter().any(|(segment, checkpoint)| {
                 matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
