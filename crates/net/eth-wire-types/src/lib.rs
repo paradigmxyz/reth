@@ -29,6 +29,9 @@ pub use blocks::*;
 pub mod broadcast;
 pub use broadcast::*;
 
+pub mod cells;
+pub use cells::CellMasks;
+
 pub mod transactions;
 pub use transactions::*;
 

@@ -67,6 +67,7 @@ portable = [
 p256-aws-lc-rs = [
     "evm2/p256-aws-lc-rs",
 ]
+bn254-mcl = ["evm2/bn254-mcl"]
 std = [
     "reth-concurrency/std",
     "dep:moka",
