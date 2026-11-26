@@ -596,10 +596,10 @@ impl PeersManager {
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.backed_off = true;
             self.backed_off_peers.insert(peer_id, until);
-        } else {
+        } else if let Some(deadline) = self.candidate_cooldowns.get_or_insert(peer_id, || until) {
             // A failed dial candidate has no row left, but its deadline still applies if it is
-            // discovered again.
-            self.candidate_cooldowns.insert(peer_id, until);
+            // discovered again. A later failure never shortens it.
+            *deadline = (*deadline).max(until);
         }
     }
 
@@ -5388,5 +5388,34 @@ mod tests {
             peers.on_active_session_gracefully_closed(peer_id);
             assert!(!peers.peers.contains_key(&peer_id));
         }
+    }
+
+    #[tokio::test]
+    async fn test_later_failure_keeps_longer_candidate_backoff() {
+        let mut peers = PeersManager::new(PeersConfig::default());
+        let candidate = PeerId::random();
+        let addr = PeerAddr::from_tcp("1.2.3.4:30303".parse().unwrap());
+        peers.candidates.insert(candidate, PeerCandidate { addr, fork_id: None });
+        peers.fill_outbound_slots();
+        peers.on_outgoing_connection_failure(
+            &addr.tcp(),
+            &candidate,
+            &io::Error::new(io::ErrorKind::ConnectionRefused, "peer unreachable"),
+        );
+        let refused_until = *peers.candidate_cooldowns.peek(&candidate).unwrap();
+
+        // an inbound session of the same identity ends with a shorter backoff.
+        assert!(peers.on_incoming_pending_session(IpAddr::V4(Ipv4Addr::new(5, 6, 7, 8))).is_ok());
+        let inbound_addr = "5.6.7.8:40404".parse().unwrap();
+        peers.on_incoming_session_established(candidate, inbound_addr);
+        peers.on_active_session_dropped(
+            &inbound_addr,
+            &candidate,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::TooManyPeers,
+            )),
+        );
+        assert!(!peers.peers.contains_key(&candidate));
+        assert_eq!(peers.candidate_cooldowns.peek(&candidate), Some(&refused_until));
     }
 }
