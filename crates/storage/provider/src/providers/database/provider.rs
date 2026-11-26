@@ -1365,7 +1365,16 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 
     /// The snapshot Bodies checkpoint can expire a block whose state and receipts still exist.
     fn ensure_body_available(&self, requested: BlockNumber) -> ProviderResult<()> {
-        let earliest_available = self.earliest_block_number()?;
+        let checkpoint = self.get_prune_checkpoint(PruneSegment::Bodies)?;
+        // Reconciling an older download's checkpoint only lowers it, so later blocks skip that.
+        if requested >= self.static_file_provider.earliest_history_height() &&
+            checkpoint
+                .and_then(|checkpoint| checkpoint.block_number)
+                .is_none_or(|pruned| pruned < requested)
+        {
+            return Ok(())
+        }
+        let earliest_available = self.earliest_body_block(checkpoint)?;
         if requested < earliest_available {
             return Err(ProviderError::BlockExpired { requested, earliest_available })
         }
@@ -1953,6 +1962,26 @@ impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
         };
         files.snapshot_bodies_checkpoint(&self.tx, checkpoint, files.earliest_history_height(), tip)
     }
+
+    /// Returns the first block with an available body, given the stored Bodies checkpoint.
+    fn earliest_body_block(
+        &self,
+        checkpoint: Option<PruneCheckpoint>,
+    ) -> ProviderResult<BlockNumber> {
+        let first_file_block = self.static_file_provider.earliest_history_height();
+        // A download keeps body indices at the pruned tip and anchors its transaction file
+        // there for the next append. Snap sync has no body indices at its pivot.
+        let earliest = if let Some(checkpoint) = checkpoint &&
+            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
+            pruned >= first_file_block &&
+            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
+        {
+            pruned.saturating_add(1)
+        } else {
+            first_file_block
+        };
+        Ok(earliest)
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
@@ -1976,19 +2005,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
-        let first_file_block = self.static_file_provider.earliest_history_height();
-        // A download keeps body indices at the pruned tip and anchors its transaction file
-        // there for the next append. Snap sync has no body indices at its pivot.
-        let earliest = if let Some(checkpoint) = self.get_prune_checkpoint(PruneSegment::Bodies)? &&
-            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
-            pruned >= first_file_block &&
-            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
-        {
-            pruned.saturating_add(1)
-        } else {
-            first_file_block
-        };
-        Ok(earliest)
+        self.earliest_body_block(self.get_prune_checkpoint(PruneSegment::Bodies)?)
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
