@@ -1,5 +1,5 @@
 use super::{
-    blocks::{InMemoryBlocks, InMemoryBlocksStats},
+    blocks::{InMemoryBlocks, InMemoryBlocksStats, InMemoryStateSnapshot},
     BlockState, ExecutedBlock, NewCanonicalChain,
 };
 use crate::{
@@ -85,6 +85,30 @@ impl<N: NodePrimitives> InMemoryState<N> {
     /// Returns `true` if a block with the given hash is tracked, canonical or not.
     pub fn contains(&self, hash: &B256) -> bool {
         self.inner.blocks.read().contains(hash)
+    }
+
+    /// Runs `f` and returns its result with a snapshot of the blocks that were tracked during the
+    /// whole time `f` ran.
+    ///
+    /// The snapshot is taken before `f` runs, and `f` runs again with a new snapshot if the blocks
+    /// changed meanwhile, so the writer never waits for `f`. Only the last of
+    /// [`SNAPSHOT_DURING_ATTEMPTS`] attempts holds off the writer while `f` runs, so `f` must not
+    /// access this state, whose lock is not reentrant. The result of an attempt that is retried is
+    /// dropped.
+    pub fn snapshot_during<R>(&self, mut f: impl FnMut() -> R) -> Snapshotted<R, N> {
+        for _ in 1..SNAPSHOT_DURING_ATTEMPTS {
+            let (snapshot, version) = {
+                let blocks = self.inner.blocks.read();
+                (blocks.snapshot(), self.inner.version.load(Ordering::Acquire))
+            };
+            let value = f();
+            if self.inner.version.load(Ordering::Acquire) == version {
+                return Snapshotted { value, snapshot }
+            }
+        }
+        let blocks = self.inner.blocks.read();
+        let value = f();
+        Snapshotted { value, snapshot: blocks.snapshot() }
     }
 
     /// Returns the numbers of tracked canonical blocks and of tracked blocks that are not
@@ -229,6 +253,7 @@ impl<N: NodePrimitives> InMemoryStateWriter<N> {
             let mut blocks = inner.blocks.write();
             let removed_count = blocks.removed_count();
             let result = f(&mut blocks);
+            inner.version.fetch_add(1, Ordering::Release);
             #[cfg(debug_assertions)]
             blocks.assert_invariants();
             if blocks.removed_count() != removed_count {
@@ -254,8 +279,51 @@ struct InMemoryStateInner<N: NodePrimitives> {
     blocks: RwLock<InMemoryBlocks<N>>,
     /// Counts the updates that removed blocks.
     removal_generation: AtomicU64,
+    /// Counts all updates of the blocks, see [`InMemoryState::snapshot_during`].
+    version: AtomicU64,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
+}
+
+/// How many times [`InMemoryState::snapshot_during`] runs its closure at most.
+pub const SNAPSHOT_DURING_ATTEMPTS: usize = 3;
+
+/// A value and the in-memory blocks that were tracked during the whole time it was produced,
+/// returned by [`InMemoryState::snapshot_during`].
+///
+/// It can only be produced by [`InMemoryState::snapshot_during`], so the snapshot it holds always
+/// belongs to its value.
+#[derive(Debug)]
+pub struct Snapshotted<T, N: NodePrimitives> {
+    value: T,
+    snapshot: InMemoryStateSnapshot<N>,
+}
+
+impl<T, N: NodePrimitives> Snapshotted<T, N> {
+    /// Returns the in-memory blocks that were tracked while the value was produced.
+    pub const fn snapshot(&self) -> &InMemoryStateSnapshot<N> {
+        &self.snapshot
+    }
+
+    /// Returns the value and the in-memory blocks that were tracked while it was produced.
+    pub fn into_parts(self) -> (T, InMemoryStateSnapshot<N>) {
+        (self.value, self.snapshot)
+    }
+}
+
+impl<T, E, N: NodePrimitives> Snapshotted<Result<T, E>, N> {
+    /// Returns the snapshotted value of a successful result, or its error.
+    pub fn transpose(self) -> Result<Snapshotted<T, N>, E> {
+        Ok(Snapshotted { value: self.value?, snapshot: self.snapshot })
+    }
+}
+
+impl<T, N: NodePrimitives> std::ops::Deref for Snapshotted<T, N> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.value
+    }
 }
 
 /// The numbers of blocks an [`InMemoryState`] tracks.
@@ -1048,6 +1116,52 @@ mod tests {
 
         canonical_in_memory_state_writer.clear_state(state.get_canonical_head());
         assert_eq!(state.pending_state(), None);
+    }
+
+    #[reth_concurrency::test]
+    fn snapshot_keeps_removed_blocks_and_their_chains() {
+        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
+        let mut block_builder = TestBlockBuilder::eth();
+        let blocks = block_builder.get_executed_blocks(1..4).collect::<Vec<_>>();
+        let hash = |number: usize| blocks[number - 1].recovered_block().hash();
+        let fork = block_builder.get_executed_block_with_number(3, hash(2));
+        let fork_hash = fork.recovered_block().hash();
+        in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
+        in_memory_state_writer.insert_executed(fork);
+        let snapshot = in_memory_state.snapshot_during(|| ()).into_parts().1;
+
+        let persisted = blocks[1].recovered_block().num_hash();
+        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
+        assert!(!in_memory_state.contains(&hash(1)));
+
+        // The snapshot still holds every block of both sections, and each one's whole chain.
+        let head = snapshot.canonical_head().unwrap();
+        assert_eq!(head.hash(), hash(3));
+        assert_eq!(head.chain().count(), 3);
+        assert_eq!(snapshot.state_by_hash(hash(1)).unwrap().hash(), hash(1));
+        assert_eq!(snapshot.state_by_hash(fork_hash).unwrap().chain().count(), 3);
+        assert!(snapshot.state_by_hash(B256::random()).is_none());
+    }
+
+    #[reth_concurrency::test]
+    fn snapshot_during_runs_again_when_the_blocks_change() {
+        let (in_memory_state, mut in_memory_state_writer) = InMemoryState::new();
+        let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::random());
+        let block_hash = block.recovered_block().hash();
+
+        // The writer inserts the block while the first attempt runs, so that attempt's snapshot
+        // misses it and is dropped.
+        let mut attempts = 0;
+        let snapshotted = in_memory_state.snapshot_during(|| {
+            attempts += 1;
+            if attempts == 1 {
+                in_memory_state_writer.insert_executed(block.clone());
+            }
+            attempts
+        });
+
+        assert_eq!(*snapshotted, 2);
+        assert!(snapshotted.snapshot().state_by_hash(block_hash).is_some());
     }
 
     #[test]

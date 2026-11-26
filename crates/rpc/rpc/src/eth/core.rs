@@ -805,6 +805,7 @@ mod tests {
             assert_eq!(actual.gas_cap, expected.gas_cap);
             assert_eq!(actual.max_simulate_blocks, expected.max_simulate_blocks);
             assert_eq!(actual.max_trace_bytes, expected.max_trace_bytes);
+            assert_eq!(actual.max_response_size, expected.max_response_size);
             assert_eq!(
                 actual.compute_state_root_for_eth_simulate,
                 expected.compute_state_root_for_eth_simulate
@@ -835,6 +836,7 @@ mod tests {
             gas_cap: 123_456,
             max_simulate_blocks: 7,
             max_trace_bytes: Some(4096),
+            max_response_size: Some(8192),
             compute_state_root_for_eth_simulate: true,
             eth_proof_window: 42,
             pending_block_kind: PendingBlockKind::Empty,
@@ -859,6 +861,7 @@ mod tests {
         .gas_cap(expected.gas_cap.into())
         .max_simulate_blocks(expected.max_simulate_blocks)
         .max_trace_bytes(expected.max_trace_bytes)
+        .max_response_size(expected.max_response_size)
         .compute_state_root_for_eth_simulate(expected.compute_state_root_for_eth_simulate)
         .eth_proof_window(expected.eth_proof_window)
         .pending_block_kind(expected.pending_block_kind)
@@ -1067,7 +1070,10 @@ mod tests {
         }];
 
         let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
-            &eth_api, bundles, None, None,
+            &eth_api,
+            bundles.into(),
+            None,
+            None,
         )
         .await;
 
@@ -1092,7 +1098,10 @@ mod tests {
         }];
 
         let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
-            &eth_api, bundles, None, None,
+            &eth_api,
+            bundles.into(),
+            None,
+            None,
         )
         .await;
 
