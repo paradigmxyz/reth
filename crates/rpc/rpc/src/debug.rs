@@ -1942,9 +1942,10 @@ fn tracer_recorded_bytes(
             }
         },
         // The keccak256 preimage tracer is looked up by name before JavaScript. Each call records
-        // up to its own byte limit, and the response holds the preimages as hex.
+        // up to its own byte limit, and its result, the response serialized from it and the copy
+        // sent hold the preimages as hex, twice their size.
         GethDebugTracerType::JsTracer(name) if name == KECCAK256_PREIMAGE_TRACER => {
-            (DEFAULT_MAX_RECORDED_BYTES as u64).saturating_mul(calls).saturating_mul(3)
+            (DEFAULT_MAX_RECORDED_BYTES as u64).saturating_mul(calls).saturating_mul(7)
         }
         // A JavaScript tracer keeps whatever its code collects.
         GethDebugTracerType::JsTracer(_) => u64::MAX,
@@ -2438,7 +2439,7 @@ mod tests {
         // The keccak256 preimage tracer records up to its own byte limit.
         assert_eq!(
             weight(serde_json::json!({ "tracer": "keccak256PreimageTracer" }), 30_000_000),
-            208
+            464
         );
         // A mux tracer weighs as much as its tracers together, a JavaScript one included.
         assert_eq!(
