@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader as _};
+use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader as _, Transaction as _};
 use alloy_eips::{BlockId, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -35,7 +35,7 @@ use reth_rpc_eth_types::{
     error::EthApiError,
     memory_budget::{bytes_to_mib, calls_gas, traced_calls_bytes},
     utils::CallManyBudget,
-    EthConfig,
+    EthConfig, TransactionSource,
 };
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::{cancel::is_cancelled, pool::BlockingTaskGuard};
@@ -142,6 +142,13 @@ where
             .recover_raw_pooled_transaction(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
+        let weight = parity_trace_weight_mib(
+            [&trace_types],
+            tx.gas_limit(),
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
         let (evm_env, at) = self.eth_api().evm_env_at(block_id.unwrap_or_default()).await?;
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
@@ -153,6 +160,7 @@ where
                 config,
                 at,
                 move |inspector, res, mut db| {
+                    let _memory = memory;
                     inspector
                         .into_parity_builder()
                         .into_trace_results_with_state(&res, &trace_types, &mut db)
@@ -244,9 +252,22 @@ where
         hash: B256,
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<TraceResultsWithTransactionHash>, Eth::Error> {
+        let Some((transaction, _)) = self.eth_api().transaction_and_block(hash).await? else {
+            return Ok(None)
+        };
+        let (TransactionSource::Pool(tx) | TransactionSource::Block { transaction: tx, .. }) =
+            &transaction;
+        let weight = parity_trace_weight_mib(
+            [&trace_types],
+            tx.gas_limit(),
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
         self.eth_api()
             .spawn_trace_transaction_in_block(hash, config, move |_, inspector, res, mut db| {
+                let _memory = memory;
                 let trace_res = inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &mut db)
@@ -623,6 +644,13 @@ where
         let Some(block) = self.eth_api().recovered_block(block_id).await? else {
             return Err(EthApiError::HeaderNotFound(block_id).into());
         };
+        let weight = parity_trace_weight_mib(
+            std::iter::repeat_n(&trace_types, block.body().transactions().len()),
+            block.header().gas_used(),
+            self.eth_api().eth_api_settings().max_trace_bytes,
+        );
+        let memory =
+            self.eth_api().acquire_memory_budget(weight).await.map_err(Eth::Error::from_eth_err)?;
 
         self.eth_api()
             .trace_block_with(
@@ -630,6 +658,8 @@ where
                 Some(block),
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, ctx| {
+                    // The permit is released once the block's traces are built.
+                    let _memory = &memory;
                     let full_trace = ctx
                         .inspector
                         .into_parity_builder()
@@ -992,6 +1022,7 @@ mod tests {
     use super::*;
     use crate::EthApiBuilder;
     use alloy_consensus::{Header, TxLegacy};
+    use alloy_eips::eip2718::Encodable2718;
     use alloy_genesis::Genesis;
     use alloy_primitives::{bytes, Signature, TxKind};
     use alloy_rpc_types_eth::TransactionRequest;
@@ -1010,8 +1041,11 @@ mod tests {
         },
         BlockWriter, StageCheckpointWriter,
     };
+    use reth_rpc_eth_api::helpers::SpawnBlocking;
     use reth_rpc_eth_types::cache::cache_new_blocks_task;
+    use reth_testing_utils::generators::{self, generate_key, sign_tx_with_key_pair};
     use reth_transaction_pool::test_utils::testing_pool;
+    use std::num::NonZeroU32;
 
     #[tokio::test]
     async fn trace_call_many_defaults_to_latest() {
@@ -1053,6 +1087,42 @@ mod tests {
         let (response, _) = module.raw_json_request(&request.to_string(), 1).await.unwrap();
         let response: serde_json::Value = serde_json::from_str(&response).unwrap();
         assert_eq!(response["result"], serde_json::to_value(latest).unwrap());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn raw_transaction_trace_takes_memory_budget() {
+        let provider = MockEthProvider::default();
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let eth_api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .memory_budget_mb(NonZeroU32::new(64))
+        .build();
+        let api = TraceApi::new(eth_api.clone(), BlockingTaskGuard::new(1), EthConfig::default());
+        let tx = TxLegacy {
+            gas_limit: 1_000_000,
+            to: TxKind::Call(Address::with_last_byte(0x42)),
+            ..Default::default()
+        };
+        let tx = sign_tx_with_key_pair(
+            generate_key(&mut generators::rng()),
+            reth_ethereum_primitives::Transaction::Legacy(tx),
+        );
+        let trace_types = HashSet::from_iter([TraceType::Trace]);
+
+        let _held = eth_api.acquire_memory_budget(64).await.unwrap();
+        let err = api
+            .trace_raw_transaction(tx.encoded_2718().into(), trace_types, None)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "request needs 20 MiB of the RPC memory budget, which is in use"
+        );
     }
 
     #[tokio::test]
