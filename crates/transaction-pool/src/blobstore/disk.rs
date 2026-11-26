@@ -689,7 +689,8 @@ impl DiskFileBlobStoreInner {
 
     // Writes a cell sidecar to disk, unless the transaction already has a sidecar.
     fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
-        if self.contains(tx)? {
+        // The blob cache can outlive a deleted sidecar, so only the file counts.
+        if self.blob_disk_file(tx).is_file() {
             return Ok(())
         }
         let mut buf = Vec::with_capacity(1 + data.length());
@@ -1541,6 +1542,24 @@ mod tests {
             err.downcast_ref::<DiskFileBlobStoreError>(),
             Some(DiskFileBlobStoreError::WriteFile(failed, _, _)) if *failed == tx
         ));
+        assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
+    }
+
+    #[test]
+    fn disk_cells_are_stored_over_a_deleted_cached_sidecar() {
+        let (store, _dir) = tmp_store();
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let tx = TxHash::random();
+        store.insert(tx, sidecar.into()).unwrap();
+        store.delete(tx).unwrap();
+        store.cleanup();
+        assert!(store.is_cached(&tx));
+
+        let cells = single_cell_sidecar();
+        store.insert_cells(tx, cells.clone()).unwrap();
+        // The cells outlive the eviction of the deleted sidecar.
+        store.clear_cache();
+        let cell_mask = BlobCellMask::from_bits(1);
         assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
     }
 }
