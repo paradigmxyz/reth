@@ -1172,7 +1172,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn cpu_cores_override_sizes_cpu_pools() {
         let runtime = RuntimeBuilder::new(
             RuntimeConfig::default().with_cpu_cores(NonZeroUsize::new(5).unwrap()),
@@ -1225,7 +1225,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn zero_cpu_threads_still_size_the_proof_pools() {
         let rt = TokioRuntime::new().unwrap();
         let mut config =
@@ -1242,7 +1242,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn proof_worker_threads_keep_pinned_counts() {
         let rt = TokioRuntime::new().unwrap();
         for configured in [1, 8, 16, 17, 64] {
@@ -1259,7 +1259,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn zero_proof_worker_threads_use_the_default() {
         let rt = TokioRuntime::new().unwrap();
         let mut config =
@@ -1275,7 +1275,7 @@ mod tests {
         assert_eq!(runtime.proof_account_worker_threads_override(), None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_runtime_builder() {
         let rt = TokioRuntime::new().unwrap();
         let config =
@@ -1333,7 +1333,7 @@ mod tests {
         assert_eq!(retained.handle().spawn(async { 42 }).await.unwrap(), 42);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn critical_os_thread_uses_requested_name() {
         let runtime = Runtime::test();
         let (tx, rx) = std::sync::mpsc::channel();
@@ -1352,7 +1352,7 @@ mod tests {
         handle.join().unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn critical_os_thread_panic_is_reported() {
         let runtime = Runtime::test();
         let manager_handle = runtime.take_task_manager_handle().unwrap();
@@ -1371,7 +1371,7 @@ mod tests {
     }
 
     #[cfg(feature = "rayon")]
-    #[test]
+    #[reth_concurrency::test]
     fn test_worker_pools_are_lazy() {
         let runtime = Runtime::test();
 

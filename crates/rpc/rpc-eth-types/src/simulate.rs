@@ -1027,7 +1027,7 @@ mod tests {
 
     /// Hashing each block's changes once gives the same state as hashing the cumulative bundle
     /// again after every block, without reading the parent storage of destroyed accounts again.
-    #[test]
+    #[reth_concurrency::test]
     fn simulated_state_reads_parent_storage_once() {
         let wiped = Address::with_last_byte(1);
         let emptied = Address::with_last_byte(2);

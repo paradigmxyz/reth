@@ -290,6 +290,15 @@ impl<N: NodePrimitives> EthStateCache<N> {
         let _ =
             self.to_service.send(CacheAction::InsertBal { block_hash, bal: CachedBal::new(bal) });
     }
+
+    /// Inserts receipts of the block with the given hash that the caller read from the provider.
+    ///
+    /// Requests waiting for the receipts of this block are answered with them.
+    pub fn insert_receipts(&self, block_hash: B256, receipts: Arc<Vec<N::Receipt>>) {
+        let _ = self
+            .to_service
+            .send(CacheAction::ReceiptsResult { block_hash, res: Ok(Some(receipts)) });
+    }
 }
 /// Thrown when the cache service task dropped.
 #[derive(Debug, thiserror::Error)]
@@ -1488,6 +1497,21 @@ mod tests {
         cache.insert_bal(block_hash, test_decoded_evm_bal());
         assert!(cache.get_bal(block_hash).await.unwrap().is_some());
         assert_eq!(fetches.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn insert_receipts_populates_cache_without_provider_fetch() {
+        let cache = EthStateCache::<EthPrimitives>::spawn_with(
+            TestBalProvider::default(),
+            EthStateCacheConfig { max_receipts: 4, ..Default::default() },
+            Runtime::test(),
+        );
+        let block_hash = B256::repeat_byte(0x69);
+        let receipts = Arc::new(vec![Receipt::default()]);
+
+        // the provider has no receipts for the block, so they can only come from the insert.
+        cache.insert_receipts(block_hash, receipts.clone());
+        assert_eq!(cache.get_receipts(block_hash).await.unwrap(), Some(receipts));
     }
 
     #[tokio::test]

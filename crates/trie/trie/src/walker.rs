@@ -118,8 +118,10 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
     /// When deletions are retained, also collects stored descendants hidden by a matching
     /// branch's tree mask. These keys appear in the deletion set even if traversal never visits
     /// them. Root calculations can replace these deletions with regenerated branch updates.
-    pub const fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
+    pub fn with_walk_all_changed_branch_children(mut self, enabled: bool) -> Self {
         self.walk_all_changed_branch_children = enabled;
+        // Restored stacks already have a current node whose skip state depends on this flag.
+        self.update_skip_node();
         self
     }
 
@@ -505,7 +507,7 @@ mod tests {
             .with_walk_all_changed_branch_children(walk_all_changed_branch_children)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn branch_siblings_remain_skippable_by_default() {
         let mut walker = walker_for_matching_branch_children_test(false);
 
@@ -526,7 +528,7 @@ mod tests {
         assert!(walker.can_skip_current_node);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn matching_branch_path_can_make_all_children_unskippable() {
         let mut walker = walker_for_matching_branch_children_test(true);
 
@@ -537,7 +539,7 @@ mod tests {
         assert!(!walker.can_skip_current_node);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn changed_branch_children_remove_orphans() {
         for regenerate_branch in [false, true] {
             let mut storage = BTreeMap::from([
@@ -662,7 +664,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn orphan_cleanup_skips_live_subtrees() {
         let parent = Nibbles::from_nibbles([0x3]);
         let tree_mask = TrieMask::from_nibble(0xa);
@@ -702,6 +704,46 @@ mod tests {
             .filter(|visit| matches!(visit.visit_type, KeyVisitType::Next))
             .count();
         assert!(next_count <= 4, "cleanup walked {next_count} entries for 3 orphan nodes");
+    }
+
+    #[reth_concurrency::test]
+    fn resumed_walk_all_recomputes_cached_children() {
+        let storage = BTreeMap::from([
+            (B256::right_padding_from(&[0x3a, 0x00]), U256::from(1)),
+            (B256::right_padding_from(&[0x3a, 0x10]), U256::from(2)),
+            (B256::right_padding_from(&[0x3b]), U256::from(3)),
+            (B256::right_padding_from(&[0x3c, 0x00]), U256::from(4)),
+            (B256::right_padding_from(&[0x3c, 0x10]), U256::from(5)),
+            (B256::right_padding_from(&[0x80]), U256::from(6)),
+            (B256::right_padding_from(&[0x81]), U256::from(7)),
+        ]);
+        let expected = storage_root_prehashed(storage.clone());
+        let mut harness = TrieTestHarness::new(storage);
+        let mut nodes = harness
+            .storage_trie_updates()
+            .storage_nodes
+            .iter()
+            .map(|(key, node)| (*key, node.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let branch = nodes.get_mut(&Nibbles::from_nibbles([0x3])).unwrap();
+        assert!(branch.hash_mask.is_bit_set(0xc));
+        branch.hashes = vec![B256::repeat_byte(0xee); branch.hashes.len()].into();
+        harness.set_trie_nodes(nodes);
+        let changes =
+            PrefixSetMut::from([Nibbles::unpack(B256::right_padding_from(&[0x3a, 0x00]))]).freeze();
+
+        // Normal traversal trusts the stale sibling hash; walk-all must recompute it.
+        assert_ne!(
+            storage_root_with_progress(&harness, changes.clone(), false, u64::MAX).0,
+            expected
+        );
+        for threshold in [u64::MAX, 0, 1] {
+            assert_eq!(
+                storage_root_with_progress(&harness, changes.clone(), true, threshold).0,
+                expected,
+                "walk-all root with threshold {threshold}"
+            );
+        }
     }
 
     #[test]

@@ -114,6 +114,8 @@ where
     /// This is used to resume iteration from the last checkpoint.
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
+        // Pending leaves may sort before the restored walker's skippable branch.
+        self.should_check_walker_key = true;
         self
     }
 
@@ -319,7 +321,7 @@ mod tests {
             InMemoryTrieCursorFactory, TrieCursorFactory,
         },
         walker::TrieWalker,
-        StateRoot,
+        StateRoot, StateRootProgress,
     };
     use alloy_primitives::{
         b256,
@@ -384,7 +386,7 @@ mod tests {
         trie_updates.account_nodes
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn inserted_leaf_before_deeper_stored_branch_is_included() {
         fn slot(prefix: &[u8]) -> B256 {
             let mut bytes = [0; 32];
@@ -449,16 +451,16 @@ mod tests {
         assert_eq!(incremental_root, rebuilt_root);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_trie_node_iter() {
+        reth_tracing::init_test_tracing();
+
         fn empty_leaf_rlp_for_key(key: Nibbles) -> RlpNode {
             RlpNode::from_rlp(&alloy_rlp::encode(LeafNode::new(
                 key,
                 alloy_rlp::encode(TrieAccount::default()),
             )))
         }
-
-        reth_tracing::init_test_tracing();
 
         // Extension (Key = 0x0000000000000000000000000000000000000000000000000000000000000)
         // └── Branch (`branch_node_0`)
@@ -605,5 +607,61 @@ mod tests {
                 KeyVisit { visit_type: KeyVisitType::Next, visited_key: None },
             ],
         );
+    }
+
+    #[reth_concurrency::test]
+    fn resumed_root_emits_pending_leaf_before_cached_branch() {
+        let first = B256::ZERO;
+        let inserted = b256!("0001000000000000000000000000000000000000000000000000000000000000");
+        let branch_first =
+            b256!("0f00000000000000000000000000000000000000000000000000000000000000");
+        let branch_second =
+            b256!("0f10000000000000000000000000000000000000000000000000000000000000");
+        let old_keys = [first, branch_first, branch_second];
+        let live_keys = [first, inserted, branch_first, branch_second];
+        let factories = |stored, keys: &[B256]| {
+            (
+                MockTrieCursorFactory::new(
+                    stored,
+                    keys.iter().map(|key| (*key, BTreeMap::new())).collect(),
+                ),
+                MockHashedCursorFactory::new(
+                    keys.iter()
+                        .map(|key| (*key, Account { nonce: 1, ..Default::default() }))
+                        .collect(),
+                    keys.iter().map(|key| (*key, BTreeMap::new())).collect(),
+                ),
+            )
+        };
+
+        let (trie, hashed) = factories(BTreeMap::new(), &old_keys);
+        let (_, updates) = StateRoot::new(trie, hashed).root_with_updates().unwrap();
+        let stored = updates.account_nodes.into_iter().collect::<BTreeMap<_, _>>();
+        let (trie, hashed) = factories(BTreeMap::new(), &live_keys);
+        let expected = StateRoot::new(trie, hashed).root().unwrap();
+        let (trie, hashed) = factories(stored.clone(), &live_keys);
+        assert_eq!(StateRoot::new(trie, hashed).root().unwrap(), expected);
+
+        let (trie, hashed) = factories(stored.clone(), &live_keys);
+        let StateRootProgress::Progress(checkpoint, _, _) =
+            StateRoot::new(trie, hashed).with_threshold(1).root_with_progress().unwrap()
+        else {
+            panic!("expected a checkpoint after the first leaf")
+        };
+        assert_eq!(checkpoint.account_root_state.last_hashed_key, first);
+        assert_eq!(checkpoint.account_root_state.walker_stack.len(), 2);
+        assert!(checkpoint.account_root_state.walker_stack[1].hash_flag());
+
+        // The restored walker can skip [0, f], but the leaf at [0, 0, 0, 1] comes first.
+        let (trie, hashed) = factories(stored, &live_keys);
+        let StateRootProgress::Complete(root, _, _) = StateRoot::new(trie, hashed)
+            .with_intermediate_state(Some(*checkpoint))
+            .with_no_threshold()
+            .root_with_progress()
+            .unwrap()
+        else {
+            panic!("expected the resumed root to finish")
+        };
+        assert_eq!(root, expected);
     }
 }
