@@ -397,8 +397,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(req) = self.inflight_requests.get(&resp.request_id) &&
                     let RequestState::Waiting(PeerRequest::GetCells { request, .. }) =
                         &req.request &&
-                    resp.message.validate_response(request).is_err()
+                    let Err(err) = resp.message.validate_response(request)
                 {
+                    debug!(target: "net::session", request_id=?resp.request_id, %err, remote_peer_id=?self.remote_peer_id, "received invalid cells response");
                     if let Some(req) = self.inflight_requests.remove(&resp.request_id) &&
                         let RequestState::Waiting(request) = req.request
                     {
