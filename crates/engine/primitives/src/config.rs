@@ -879,6 +879,9 @@ impl TreeConfig {
 }
 
 /// Clamps the threshold to [`MAX_BACKFILL_RUN_THRESHOLD`].
+///
+/// The live-sync range downloader holds every header and body of a gap in memory until the whole
+/// range is complete, so the clamp bounds that memory.
 const fn clamp_backfill_run_threshold(threshold: u64) -> u64 {
     if threshold > MAX_BACKFILL_RUN_THRESHOLD {
         MAX_BACKFILL_RUN_THRESHOLD
