@@ -1142,7 +1142,7 @@ where
                     .soft_limit_byte_size_pooled_transactions_response,
             );
             // eth/72 peers fetch blobs with `GetCells`.
-            let transactions = if peer.version.is_eth72() {
+            let transactions = if peer.version.is_eth72_or_newer() {
                 self.pool.get_pooled_transaction_elements_without_blobs(request.0, limit)
             } else {
                 self.pool.get_pooled_transaction_elements(request.0, limit)
@@ -1876,7 +1876,7 @@ impl PropagateTransaction {
 
     /// Returns whether the transaction can be announced to a peer on `version`.
     const fn can_announce_to(&self, version: EthVersion) -> bool {
-        !version.is_eth72() || self.propagation_size_without_blobs.is_some()
+        !version.is_eth72_or_newer() || self.propagation_size_without_blobs.is_some()
     }
 }
 
