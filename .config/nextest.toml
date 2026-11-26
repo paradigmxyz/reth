@@ -35,6 +35,8 @@ slow-timeout = { period = "1m", terminate-after = 5 }
 default-filter = '''
 not (
   (binary_id(=reth-cli-commands) and (
+    test(=db::migrate_v2::tests::migrates_changesets_of_aligned_genesis_chain) or
+    test(=db::migrate_v2::tests::migrates_changesets_of_unaligned_genesis_chain) or
     test(=download::extract::tests::extracted_hashes_replace_read_back_only_for_regular_files) or
     test(=download::planning::tests::partition_reusable_moves_only_verified_archives) or
     test(=download::planning::tests::rocksdb_archive_set_reuses_each_verified_sst) or
@@ -113,11 +115,17 @@ not (
     test(=manager::tests::test_notification_if_finished_height_gt_chain_tip) or
     test(=manager::tests::test_sends_chain_reorged_notification) or
     test(=manager::tests::test_sends_chain_reverted_notification) or
+    test(=manager::tests::test_sends_commit_on_other_branch_below_finished_height) or
     test(=notifications::tests::catch_up_with_head_after_pause_backfills_missed_blocks) or
     test(=notifications::tests::exex_notifications_backfill_drains_channel) or
     test(=notifications::tests::exex_notifications_behind_head_canonical) or
+    test(=notifications::tests::exex_notifications_commit_after_revert_buffered_during_backfill) or
     test(=notifications::tests::exex_notifications_same_head_canonical) or
+    test(=notifications::tests::exex_notifications_same_head_commit_after_revert) or
     test(=notifications::tests::exex_notifications_same_head_non_canonical) or
+    test(=notifications::tests::exex_notifications_same_head_reorg_above_head) or
+    test(=notifications::tests::exex_notifications_same_head_reorg_at_head) or
+    test(=notifications::tests::exex_notifications_same_head_skips_reorg_to_head) or
     test(=notifications::tests::test_notifications_ahead_of_head)
   )) or
   binary_id(=reth-exex-test-utils) or
@@ -163,6 +171,7 @@ not (
     test(=providers::blockchain_provider::tests::historical_proofs_complete_masked_trie_rows) or
     test(=providers::blockchain_provider::tests::historical_state_checks_pipeline_progress_on_its_snapshot) or
     test(=providers::blockchain_provider::tests::historical_state_range_provider_reverts_state_change_past_retained_anchor) or
+    test(=providers::blockchain_provider::tests::history_reads_survive_persistence_after_db_tx_creation) or
     test(=providers::blockchain_provider::tests::latest_reads_in_memory_state_like_the_hash_lookup) or
     test(=providers::blockchain_provider::tests::providers_of_one_factory_share_in_memory_blocks) or
     test(=providers::blockchain_provider::tests::state_range_provider_account_range_is_sorted_and_bounded) or
@@ -234,12 +243,15 @@ not (
     test(=segments::tests::test_prune_input_get_next_tx_num_range_no_tx) or
     test(=segments::tests::test_prune_input_get_next_tx_num_range_valid) or
     test(=segments::user::transaction_lookup::tests::prune) or
+    test(=segments::user::transaction_lookup::tests::prune_empty_batch_advances_to_next_batch) or
     test(=segments::user::transaction_lookup::tests::prune_rocksdb) or
+    test(=segments::user::transaction_lookup::tests::prune_time_limit_reached_keeps_checkpoint_below_static_files) or
     test(=segments::user::transaction_lookup::tests::prune_transaction_zero_after_empty_genesis) or
     test(=segments::user::transaction_lookup::tests::prune_transaction_zero_when_earlier_blocks_are_empty)
   )) or
   (binary_id(=reth-rpc) and (
     test(=debug::tests::struct_logs_halt_past_byte_limit) or
+    test(=debug::tests::struct_logs_share_response_size_limit) or
     test(=debug::tests::witness_preserves_parent_storage_and_code_reads) or
     test(=eth::bundle::tests::call_bundle_counts_fees_after_coinbase_selfdestruct) or
     test(=eth::bundle::tests::call_bundle_rejects_fee_cap_below_base_fee_before_london) or
@@ -265,6 +277,15 @@ not (
     test(=eth::core::tests::test_transaction_by_sender_and_nonce_missing_block_returns_error) or
     test(=eth::core::tests::test_transaction_by_sender_and_nonce_returns_matching_transaction) or
     test(=eth::core::tests::test_transaction_by_sender_and_nonce_without_sender_transaction_returns_none) or
+    test(=eth::filter::tests::test_block_hash_filter_changes_delivers_once) or
+    test(=eth::filter::tests::test_logs_at_block_hash_bloom_miss_skips_receipts) or
+    test(=eth::filter::tests::test_logs_at_block_hash_cached_block) or
+    test(=eth::filter::tests::test_logs_at_block_hash_cached_receipts) or
+    test(=eth::filter::tests::test_logs_at_block_hash_caches_receipts) or
+    test(=eth::filter::tests::test_logs_at_block_hash_errors) or
+    test(=eth::filter::tests::test_logs_at_block_hash_expired_history) or
+    test(=eth::filter::tests::test_logs_at_block_hash_from_provider) or
+    test(=eth::filter::tests::test_logs_at_block_hash_waits_for_blocking_io_permit) or
     test(=eth::helpers::state::tests::pending_state_and_access_list_do_not_deadlock) or
     test(=eth::helpers::state::tests::pending_state_reads_use_existing_override) or
     test(=eth::helpers::state::tests::pending_transaction_count_skips_local_pending_block) or
@@ -293,10 +314,12 @@ not (
     test(=otterscan::tests::unknown_transactions_and_unimplemented_history_remain_distinct) or
     test(=reth::tests::balance_changes_ignore_account_existence) or
     test(=trace::tests::genesis_block_has_no_reward_trace) or
+    test(=trace::tests::replay_block_shares_byte_limit) or
     test(=trace::tests::replay_block_vmtrace_includes_root_and_callcode_bytecode) or
     test(=trace::tests::replay_missing_transaction_returns_null) or
     test(=trace::tests::replay_transaction_includes_transaction_hash) or
     test(=trace::tests::trace_call_many_defaults_to_latest) or
+    test(=trace::tests::trace_call_many_shares_byte_limit) or
     test(=trace::tests::trace_filter_defaults_to_latest) or
     test(=trace::tests::trace_get_selects_tree_paths) or
     test(=trace::tests::vm_trace_halts_past_byte_limit)
@@ -320,6 +343,7 @@ not (
     test(=http::test_eth_get_transaction_by_hash_rpc_call) or
     test(=http::test_eth_get_transaction_count_rpc_call) or
     test(=http::test_eth_get_transaction_receipt_rpc_call) or
+    test(=http::test_eth_logs_args) or
     test(=serde::test_eth_balance_serde) or
     test(=ws::test_eth_subscribe_syncing_releases_permit_on_unsubscribe) or
     test(=ws::test_eth_subscribe_syncing_task_exits_on_disconnect)
@@ -414,6 +438,7 @@ not (
   )) or
   binary_id(=reth-trie-db::witness) or
   (binary_id(=reth::it) and (
+    test(=db::db_drop_clears_rocksdb_history) or
     test(=db::db_get_mdbx_packed_trie_keys) or
     test(=db::db_get_mdbx_raw_table_range) or
     test(=db::db_get_mdbx_subkey_points_and_ranges) or
