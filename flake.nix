@@ -106,6 +106,7 @@
 
         withVergenBypass = prev: {
           preBuild = ''
+            export VERGEN_IDEMPOTENT=0
             export VERGEN_GIT_SHA=${self.rev or self.dirtyRev}
             export VERGEN_GIT_DIRTY=${if self ? rev then "false" else "true"}
             export VERGEN_GIT_DESCRIBE=${self.shortRev or self.dirtyRev} 

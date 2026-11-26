@@ -1,7 +1,7 @@
 //! Engine tree configuration.
 
 use alloy_eips::merge::EPOCH_SLOTS;
-use core::time::Duration;
+use core::{num::NonZeroUsize, time::Duration};
 
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 50;
@@ -28,8 +28,6 @@ pub const DEFAULT_MEMORY_BLOCK_BUFFER_TARGET: u64 = 5;
 pub const DEFAULT_BACKFILL_RUN_THRESHOLD: u64 = EPOCH_SLOTS;
 
 /// Largest supported live-sync gap, matching the peer header response limit of 1024.
-///
-/// The range downloader requires a complete response and cannot yet split larger requests.
 pub const MAX_BACKFILL_RUN_THRESHOLD: u64 = 1024;
 
 /// The size of proof targets chunk to spawn in one multiproof calculation.
@@ -225,6 +223,8 @@ pub struct TreeConfig {
     /// When set, BAL storage slots are not read into the execution cache. BAL hashed-state
     /// streaming for parallel state-root computation is controlled separately.
     disable_bal_batch_io: bool,
+    /// BAL read-set prewarm threads; `None` uses the production pool's default.
+    bal_prewarm_threads: Option<NonZeroUsize>,
     /// Whether block execution reuses transaction prewarming results.
     prewarm_reuse: bool,
     /// Whether to skip trie state-root computation during engine validation.
@@ -283,6 +283,7 @@ impl Default for TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_prewarm_threads: None,
             prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
@@ -373,6 +374,7 @@ impl TreeConfig {
             disable_bal_parallel_execution: false,
             disable_bal_parallel_state_root: false,
             disable_bal_batch_io: false,
+            bal_prewarm_threads: None,
             prewarm_reuse: false,
             skip_state_root: false,
             #[cfg(feature = "trie-debug")]
@@ -829,6 +831,17 @@ impl TreeConfig {
         self
     }
 
+    /// Returns the BAL read-set prewarm pool size, or `None` for the production default.
+    pub const fn bal_prewarm_threads(&self) -> Option<NonZeroUsize> {
+        self.bal_prewarm_threads
+    }
+
+    /// Sets the nonzero number of BAL read-set prewarm workers per engine.
+    pub const fn with_bal_prewarm_threads(mut self, threads: NonZeroUsize) -> Self {
+        self.bal_prewarm_threads = Some(threads);
+        self
+    }
+
     /// Returns whether block execution reuses transaction prewarming results.
     pub const fn prewarm_reuse(&self) -> bool {
         self.prewarm_reuse
@@ -865,7 +878,10 @@ impl TreeConfig {
     }
 }
 
-/// Keep live-sync requests within a single peer header response until chunking is supported.
+/// Clamps the threshold to [`MAX_BACKFILL_RUN_THRESHOLD`].
+///
+/// The live-sync range downloader holds every header and body of a gap in memory until the whole
+/// range is complete, so the clamp bounds that memory.
 const fn clamp_backfill_run_threshold(threshold: u64) -> u64 {
     if threshold > MAX_BACKFILL_RUN_THRESHOLD {
         MAX_BACKFILL_RUN_THRESHOLD

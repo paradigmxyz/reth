@@ -38,7 +38,7 @@ alloy-eips.workspace = true
 ## async
 futures.workspace = true
 tokio-util.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["time"] }
 
 ## misc
 eyre.workspace = true
@@ -65,6 +65,7 @@ evm2.workspace = true
 rand.workspace = true
 secp256k1.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
 serde = [

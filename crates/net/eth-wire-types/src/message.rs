@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66 through 71.
+//! Implements Ethereum wire protocol for versions 66 through 73.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
@@ -13,7 +13,7 @@ use super::{
     PooledTransactions, Receipts, Status, StatusEth69, Transactions,
 };
 use crate::{
-    status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, Cells,
+    status::StatusMessage, BlockRangeUpdate, BroadcastPoolTransactions, CellMasks, Cells,
     EthNetworkPrimitives, EthVersion, GetCells, NetworkPrimitives, NewPooledTransactionHashes72,
     RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
@@ -153,7 +153,11 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::PooledTransactions => {
                 EthMessage::PooledTransactions(RequestPair::decode_with(buf, |buf| {
-                    PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
+                    if version >= EthVersion::Eth72 {
+                        PooledTransactions::decode_eth72_with_memory_budget(buf, tx_memory_budget)
+                    } else {
+                        PooledTransactions::decode_with_memory_budget(buf, tx_memory_budget)
+                    }
                 })?)
             }
             EthMessageID::GetNodeData => {
@@ -211,18 +215,18 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 }
                 EthMessage::BlockAccessLists(RequestPair::decode(buf)?)
             }
-            EthMessageID::Cells => {
-                if version < EthVersion::Eth72 {
-                    return Err(MessageError::Invalid(version, EthMessageID::Cells))
-                }
-                EthMessage::Cells(RequestPair::decode(buf)?)
-            }
-            EthMessageID::GetCells => {
-                if version < EthVersion::Eth72 {
-                    return Err(MessageError::Invalid(version, EthMessageID::GetCells))
-                }
-                EthMessage::GetCells(RequestPair::decode(buf)?)
-            }
+            EthMessageID::Cells => EthMessage::Cells(RequestPair::<Cells>::decode_cells(
+                version,
+                message_type,
+                buf,
+                |cells| &cells.cell_mask,
+            )?),
+            EthMessageID::GetCells => EthMessage::GetCells(RequestPair::<GetCells>::decode_cells(
+                version,
+                message_type,
+                buf,
+                |request| &request.cell_mask,
+            )?),
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -396,9 +400,9 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts70(RequestPair<Receipts70<N::Receipt>>),
     /// Represents a `BlockAccessLists` request-response pair for eth/71.
     BlockAccessLists(RequestPair<BlockAccessLists>),
-    /// Represents a `Cells` request-response pair for eth/72.
+    /// Represents shared (eth/72+) or indexed (eth/73+) cells.
     Cells(RequestPair<Cells>),
-    /// Represents a `GetCells` request-response pair for eth/72.
+    /// Represents a shared (eth/72+) or indexed (eth/73+) cell request.
     GetCells(RequestPair<GetCells>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
@@ -679,7 +683,7 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth72() {
+        if version.is_eth72_or_newer() {
             Self::Cells.to_u8()
         } else if version.is_eth71() {
             Self::BlockAccessLists.to_u8()
@@ -803,15 +807,14 @@ impl<T> RequestPair<T> {
             return Err(alloy_rlp::Error::UnexpectedString)
         }
 
-        let initial_length = buf.len();
-        let request_id = u64::decode(buf)?;
-        let message = decode_msg(buf)?;
-
-        let consumed_len = initial_length - buf.len();
-        if consumed_len != header.payload_length {
+        let (mut payload, remaining) = buf.split_at(header.payload_length);
+        let request_id = u64::decode(&mut payload)?;
+        let message = decode_msg(&mut payload)?;
+        if !payload.is_empty() {
             return Err(alloy_rlp::Error::UnexpectedLength)
         }
 
+        *buf = remaining;
         Ok(Self { request_id, message })
     }
 }
@@ -836,29 +839,32 @@ where
     }
 }
 
+impl<T: Decodable> RequestPair<T> {
+    /// Decodes a cell message using its negotiated version and mask form.
+    fn decode_cells(
+        version: EthVersion,
+        id: EthMessageID,
+        buf: &mut &[u8],
+        cell_mask: fn(&T) -> &CellMasks,
+    ) -> Result<Self, MessageError> {
+        if version < EthVersion::Eth72 {
+            return Err(MessageError::Invalid(version, id))
+        }
+        let pair = Self::decode(buf)?;
+        if version == EthVersion::Eth72 && cell_mask(&pair.message).is_indexed() {
+            return Err(MessageError::Invalid(version, id))
+        }
+        Ok(pair)
+    }
+}
+
 /// Allows messages with request ids to be deserialized into RLP bytes.
 impl<T> Decodable for RequestPair<T>
 where
     T: Decodable,
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString)
-        }
-
-        let initial_length = buf.len();
-        let request_id = u64::decode(buf)?;
-        let message = T::decode(buf)?;
-
-        // Check that the buffer consumed exactly payload_length bytes after decoding the
-        // RequestPair
-        let consumed_len = initial_length - buf.len();
-        if consumed_len != header.payload_length {
-            return Err(alloy_rlp::Error::UnexpectedLength)
-        }
-
-        Ok(Self { request_id, message })
+        Self::decode_with(buf, T::decode)
     }
 }
 
@@ -866,14 +872,19 @@ where
 mod tests {
     use super::MessageError;
     use crate::{
-        message::RequestPair, BlockAccessLists, EthMessage, EthMessageID, EthNetworkPrimitives,
-        EthVersion, GetBlockAccessLists, GetNodeData, NodeData, ProtocolMessage,
-        RawCapabilityMessage, Status, StatusMessage,
+        message::RequestPair, BlockAccessLists, Cells, EthMessage, EthMessageID,
+        EthNetworkPrimitives, EthVersion, GetBlockAccessLists, GetCells, GetNodeData, NodeData,
+        PooledTransactions, ProtocolMessage, RawCapabilityMessage, Status, StatusMessage,
+    };
+    use alloy_consensus::{SignableTransaction, TxEip4844, TxEip4844WithSidecar};
+    use alloy_eips::{
+        eip4844::{Blob, Bytes48},
+        eip7594::{BlobTransactionSidecarEip7594, Cell},
     };
     use alloy_hardforks::{ForkHash, ForkId};
-    use alloy_primitives::{hex, B256, U256};
-    use alloy_rlp::{Decodable, Encodable, Error};
-    use reth_ethereum_primitives::BlockBody;
+    use alloy_primitives::{hex, keccak256, Signature, B128, B256, U256};
+    use alloy_rlp::{Decodable, Encodable, Error, Header};
+    use reth_ethereum_primitives::{BlockBody, PooledTransactionVariant};
 
     fn encode<T: Encodable>(value: T) -> Vec<u8> {
         let mut buf = vec![];
@@ -965,6 +976,137 @@ mod tests {
     }
 
     #[test]
+    fn eth72_cell_packets_match_geth_vectors() {
+        // Generated with Geth 24b38e763fdd7dee8b91007d5f1a94cd21c9a7f0.
+        let mask = B128::from((1u128 | (1 << 8) | (1 << 127)).to_le_bytes());
+        let hash =
+            B256::from(hex!("0000000000000000000000000000000000000000000000000000000000001234"));
+        let request = EthMessage::<EthNetworkPrimitives>::GetCells(RequestPair {
+            request_id: 42,
+            message: GetCells { hashes: vec![hash], cell_mask: mask.into() },
+        });
+        let empty = EthMessage::Cells(RequestPair {
+            request_id: 42,
+            message: Cells { cell_mask: mask.into(), ..Default::default() },
+        });
+        assert_eq!(alloy_rlp::encode(&request), hex!("f42ae1a000000000000000000000000000000000000000000000000000000000000012349001010000000000000000000000000080"));
+        assert_eq!(alloy_rlp::encode(&empty), hex!("d42ac0c09001010000000000000000000000000080"));
+        let mut cell = Cell::default();
+        cell[0] = 1;
+        cell[2047] = 2;
+        let response = EthMessage::Cells(RequestPair {
+            request_id: 42,
+            message: Cells {
+                hashes: vec![hash],
+                cells: vec![vec![cell; 3]],
+                cell_mask: mask.into(),
+            },
+        });
+        let encoded = alloy_rlp::encode(&response);
+        assert_eq!(encoded.len(), 6214);
+        assert_eq!(
+            keccak256(&encoded),
+            B256::from(hex!("72c2afa3c896b0666ae473f075c1fc48133563f4bc8d22f7c1abb2aaf215dc3f"))
+        );
+        for message in [request, empty, response] {
+            let encoded = alloy_rlp::encode(&message);
+            assert_eq!(encoded.len(), message.length());
+            let mut packet = vec![message.message_id().to_u8()];
+            packet.extend_from_slice(&encoded);
+            for version in [EthVersion::Eth72, EthVersion::Eth73] {
+                let mut input = packet.as_slice();
+                assert_eq!(
+                    ProtocolMessage::decode_message(version, &mut input).unwrap().message,
+                    message
+                );
+                assert!(input.is_empty());
+            }
+            let err = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                EthVersion::Eth71,
+                &mut packet.as_slice(),
+            )
+            .unwrap_err();
+            assert!(
+                matches!(err, MessageError::Invalid(EthVersion::Eth71, id) if id == message.message_id())
+            );
+        }
+    }
+
+    #[test]
+    fn eth72_cell_packets_reject_nested_fields() {
+        // The layout before EIP-8070 fixed it: `[request_id, [fields...]]`.
+        let nested = |fields: &dyn Encodable| {
+            let inner = Header { list: true, payload_length: fields.length() };
+            let mut packet = Vec::new();
+            Header { list: true, payload_length: 42u64.length() + inner.length_with_payload() }
+                .encode(&mut packet);
+            42u64.encode(&mut packet);
+            inner.encode(&mut packet);
+            fields.encode(&mut packet);
+            packet
+        };
+        for (id, payload) in [
+            (EthMessageID::GetCells, nested(&GetCells::default())),
+            (EthMessageID::Cells, nested(&Cells::default())),
+        ] {
+            let mut packet = vec![id.to_u8()];
+            packet.extend(payload);
+            let err = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                EthVersion::Eth72,
+                &mut packet.as_slice(),
+            )
+            .unwrap_err();
+            assert!(matches!(err, MessageError::RlpError(Error::InputTooShort)), "{err:?}");
+        }
+    }
+
+    #[test]
+    fn pooled_transactions_decode_by_eth_version() {
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3); 128],
+        );
+        let full = PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar {
+                tx: TxEip4844 { blob_versioned_hashes: vec![B256::ZERO], ..Default::default() },
+                sidecar: sidecar.into(),
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let mut without_blobs = full.clone();
+        without_blobs.clear_eip7594_blobs();
+        let decode = |version, tx: &PooledTransactionVariant| {
+            let response =
+                RequestPair { request_id: 7, message: PooledTransactions(vec![tx.clone()]) };
+            let mut packet = vec![EthMessageID::PooledTransactions.to_u8()];
+            packet.extend(alloy_rlp::encode(&response));
+            let decoded = ProtocolMessage::<EthNetworkPrimitives>::decode_message(
+                version,
+                &mut packet.as_slice(),
+            );
+            (decoded.map(|message| message.message), EthMessage::PooledTransactions(response))
+        };
+
+        for (version, tx) in [
+            (EthVersion::Eth71, &full),
+            (EthVersion::Eth71, &without_blobs),
+            (EthVersion::Eth72, &without_blobs),
+        ] {
+            let (decoded, expected) = decode(version, tx);
+            assert_eq!(decoded.unwrap(), expected);
+        }
+        // eth/72 peers fetch blobs with `GetCells`, so a body with blobs is invalid.
+        let (decoded, _) = decode(EthVersion::Eth72, &full);
+        assert!(matches!(
+            decoded,
+            Err(MessageError::RlpError(Error::Custom(
+                "expected a blobless eth/72 pooled transaction"
+            )))
+        ));
+    }
+
+    #[test]
     fn request_pair_encode() {
         let request_pair = RequestPair { request_id: 1337, message: vec![5u8] };
 
@@ -1004,7 +1146,8 @@ mod tests {
         let raw_pair = &hex!("c5820539c20505")[..];
 
         let result = RequestPair::<Vec<u8>>::decode(&mut &*raw_pair);
-        assert!(matches!(result, Err(Error::UnexpectedLength)));
+        // The inner decoder is bounded by the outer list and cannot consume the extra byte.
+        assert_eq!(result, Err(Error::InputTooShort));
     }
 
     #[test]

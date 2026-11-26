@@ -1,6 +1,8 @@
 use super::{
-    extract::{extract_archive_raw, streaming_download_and_extract, CompressionFormat},
-    fetch::ArchiveFetcher,
+    extract::{extract_archive_hashed, streaming_download_and_extract, CompressionFormat},
+    fetch::{
+        panic_payload_message, ArchiveAvailability, ArchiveAvailabilityReader, ArchiveFetcher,
+    },
     manifest::SnapshotArchive,
     planning::{CheckedDownloads, PlannedArchive},
     progress::{
@@ -8,17 +10,29 @@ use super::{
         ArchiveVerificationProgress, DownloadRequestLimiter, SharedProgress,
     },
     session::{ArchiveProcessContext, DownloadSession},
-    verify::OutputVerifier,
+    verify::{ExtractedHashes, OutputVerifier},
     MAX_DOWNLOAD_RETRIES, RETRY_BACKOFF_SECS,
 };
 use eyre::Result;
 use futures::stream::{self, StreamExt};
 use reth_cli_util::cancellation::CancellationToken;
 use reth_fs_util as fs;
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    io::BufReader,
+    panic::{self, AssertUnwindSafe},
+    path::Path,
+    sync::Arc,
+    thread,
+    time::Duration,
+};
 use tracing::{debug, info, warn};
 
 const DOWNLOAD_CACHE_DIR: &str = ".download-cache";
+
+/// Read buffer between the cached archive and the decompressor, so each read of the growing
+/// archive takes the availability lock once per MiB instead of once per decoder read.
+const EXTRACTION_READ_BUFFER_SIZE: usize = 1 << 20;
 
 /// Runs all planned modular archive downloads for one command invocation.
 pub(crate) async fn run_modular_downloads(
@@ -76,7 +90,10 @@ impl ModularDownloadJob {
         let progress_handle = spawn_progress_display(Arc::clone(&shared));
         for reused in &planned_downloads.reused {
             info!(target: "reth::cli", file = %reused.archive.file_name, component = %reused.component, "Skipping already verified plain files");
-            shared.record_reused_archive(reused.archive.size, reused.archive.output_size());
+            shared.record_reused_archive(
+                reused.archive.size.unwrap_or_default(),
+                reused.archive.output_size(),
+            );
         }
         let ctx = self.ctx.clone();
         let results: Vec<Result<()>> = stream::iter(planned_downloads.pending)
@@ -144,6 +161,7 @@ impl ArchiveProcessor {
         let mut attempt = 1;
         let mut last_error: Option<eyre::Error> = None;
         let mut state = ArchiveAttemptState::RunAttempt;
+        let mut extracted = None;
 
         loop {
             match state {
@@ -161,7 +179,10 @@ impl ArchiveProcessor {
                     }
 
                     match self.run_attempt(mode, format) {
-                        Ok(()) => state = ArchiveAttemptState::VerifyOutputs,
+                        Ok(hashes) => {
+                            extracted = hashes;
+                            state = ArchiveAttemptState::VerifyOutputs;
+                        }
                         Err(error) if mode.retries_fetch_errors() => {
                             warn!(target: "reth::cli",
                                 file = %archive.file_name,
@@ -177,7 +198,7 @@ impl ArchiveProcessor {
                     }
                 }
                 ArchiveAttemptState::VerifyOutputs => {
-                    if self.verify_outputs_with_progress()? {
+                    if self.verify_outputs_with_progress(extracted.as_ref())? {
                         state = ArchiveAttemptState::Complete;
                     } else {
                         warn!(target: "reth::cli", file = %archive.file_name, component = %self.archive.component, attempt, "Archive extracted, but output verification failed, retrying");
@@ -230,54 +251,91 @@ impl ArchiveProcessor {
     }
 
     /// Executes one archive attempt according to the selected cache-vs-stream mode.
-    fn run_attempt(&self, mode: ArchiveMode, format: CompressionFormat) -> Result<()> {
+    ///
+    /// Returns the hashes of outputs computed while extracting, when the mode computes them.
+    fn run_attempt(
+        &self,
+        mode: ArchiveMode,
+        format: CompressionFormat,
+    ) -> Result<Option<ExtractedHashes>> {
         mode.execute(self, format)
     }
 
-    /// Downloads the archive into the cache, then extracts from the cached file.
-    fn run_cached_attempt(&self, format: CompressionFormat) -> Result<()> {
+    /// Downloads the archive into the cache while extracting the downloaded prefix of the cached
+    /// file.
+    fn run_cached_attempt(&self, format: CompressionFormat) -> Result<Option<ExtractedHashes>> {
         let cache_dir =
             self.ctx.cache_dir().ok_or_else(|| eyre::eyre!("Missing download cache directory"))?;
-        let fetcher =
-            ArchiveFetcher::new(self.archive().url.clone(), cache_dir, self.ctx.session().clone());
+        let fetcher = ArchiveFetcher::new(
+            self.archive().url.clone(),
+            cache_dir,
+            self.ctx.session().clone(),
+            self.archive().size,
+        );
 
         if self.archive.ty == super::manifest::SnapshotComponentType::State {
             debug!(target: "reth::cli", url = %self.archive().url, "Downloading state snapshot archive");
         }
 
-        let download_result = {
-            let mut download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
-            let result = fetcher.download(Some(&mut download_progress));
-            if let Ok(ref downloaded) = result &&
-                download_progress.has_tracked_bytes()
-            {
-                download_progress.complete(downloaded.size);
-            }
-            result
-        };
+        let availability = ArchiveAvailability::default();
+        let (download_result, extraction) = thread::scope(|scope| {
+            let extraction = scope.spawn(|| {
+                // Stops the download, which no longer has a reader. An unpack failure stops it
+                // before extraction waits for the decoder, which may be waiting on the download.
+                let mut stopped_download = false;
+                // A panic must also stop the download instead of letting it run to completion.
+                let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                    self.extract_cached_archive(&availability, format, || {
+                        stopped_download = availability.abort()
+                    })
+                }))
+                .unwrap_or_else(|payload| {
+                    Err(eyre::eyre!(
+                        "Archive extraction panicked: {}",
+                        panic_payload_message(payload)
+                    ))
+                });
+                let stopped_download =
+                    stopped_download || (result.is_err() && availability.abort());
+                (result, stopped_download)
+            });
 
-        let downloaded = match download_result {
-            Ok(downloaded) => downloaded,
-            Err(error) => {
-                fetcher.cleanup_downloaded_files();
-                return Err(error);
-            }
-        };
-
-        info!(target: "reth::cli",
-            file = %self.archive().file_name,
-            component = %self.archive.component,
-            size = %super::progress::DownloadProgress::format_size(downloaded.size),
-            "Archive download complete"
-        );
-
-        let extract_result = self.extract_cached_archive(&downloaded.path, format);
+            let download_result = {
+                let _abort_guard = availability.abort_on_drop();
+                let mut download_progress =
+                    ArchiveDownloadProgress::new(self.ctx.session().progress());
+                let result = fetcher.download(Some(&mut download_progress), Some(&availability));
+                if let Ok(downloaded) = &result {
+                    if download_progress.has_tracked_bytes() {
+                        download_progress.complete(downloaded.size);
+                    }
+                    info!(target: "reth::cli",
+                        file = %self.archive().file_name,
+                        component = %self.archive.component,
+                        size = %super::progress::DownloadProgress::format_size(downloaded.size),
+                        "Archive download complete"
+                    );
+                }
+                result
+            };
+            let extraction = extraction
+                .join()
+                .unwrap_or_else(|_| (Err(eyre::eyre!("Archive extraction panicked")), false));
+            (download_result, extraction)
+        });
         fetcher.cleanup_downloaded_files();
-        extract_result
+
+        // Report the side that failed first: an aborted download fails extraction and vice versa.
+        let (extract_result, extraction_stopped_download) = extraction;
+        if extraction_stopped_download {
+            return extract_result.map(Some)
+        }
+        download_result?;
+        extract_result.map(Some)
     }
 
     /// Streams the archive directly into extraction without keeping a cached copy.
-    fn run_streaming_attempt(&self, format: CompressionFormat) -> Result<()> {
+    fn run_streaming_attempt(&self, format: CompressionFormat) -> Result<Option<ExtractedHashes>> {
         let _download_progress = ArchiveDownloadProgress::new(self.ctx.session().progress());
         streaming_download_and_extract(
             &self.archive().url,
@@ -285,32 +343,54 @@ impl ArchiveProcessor {
             self.ctx.target_dir(),
             self.ctx.static_files_dir(),
             self.ctx.session(),
-        )
+        )?;
+        Ok(None)
     }
 
-    /// Extracts a cached archive file while updating shared extraction activity.
-    fn extract_cached_archive(&self, archive_path: &Path, format: CompressionFormat) -> Result<()> {
+    /// Extracts the cached archive as its download publishes it, while updating shared extraction
+    /// activity, and returns the hashes of the regular files it wrote. `on_unpack_error` runs as
+    /// described by [`extract_archive_hashed`].
+    fn extract_cached_archive(
+        &self,
+        availability: &ArchiveAvailability,
+        format: CompressionFormat,
+        on_unpack_error: impl FnOnce(),
+    ) -> Result<ExtractedHashes> {
+        let verifier = self.output_verifier();
+        let outputs = self
+            .archive()
+            .output_files
+            .iter()
+            .map(|output| verifier.output_path(output))
+            .collect::<Result<HashSet<_>>>()?;
         let mut extraction_progress = ArchiveExtractionProgress::new(self.ctx.session().progress());
-        let file = fs::open(archive_path)?;
-        let result = extract_archive_raw(
-            file,
+        let reader = BufReader::with_capacity(
+            EXTRACTION_READ_BUFFER_SIZE,
+            ArchiveAvailabilityReader::new(availability),
+        );
+        let result = extract_archive_hashed(
+            reader,
             format,
             self.ctx.target_dir(),
             self.ctx.static_files_dir(),
+            outputs,
             Some(&mut extraction_progress),
+            on_unpack_error,
         );
         extraction_progress.finish();
         result
     }
 
     /// Returns `true` if all declared plain outputs verify while updating shared verification
-    /// progress.
-    fn verify_outputs_with_progress(&self) -> Result<bool> {
+    /// progress. Outputs with a hash in `extracted` are not read back.
+    fn verify_outputs_with_progress(&self, extracted: Option<&ExtractedHashes>) -> Result<bool> {
         let mut verification_progress =
             ArchiveVerificationProgress::new(self.ctx.session().progress());
-        let verified = self
-            .output_verifier()
-            .verify_with_progress(&self.archive().output_files, Some(&verification_progress))?;
+        let verified = self.output_verifier().verify_with_progress(
+            &self.archive().output_files,
+            Some(&verification_progress),
+            extracted,
+        )?;
         if verified {
             verification_progress.complete(self.archive().output_size());
         }
@@ -344,7 +424,11 @@ impl ArchiveMode {
     }
 
     /// Runs the selected archive mode for a single attempt.
-    fn execute(&self, processor: &ArchiveProcessor, format: CompressionFormat) -> Result<()> {
+    fn execute(
+        &self,
+        processor: &ArchiveProcessor,
+        format: CompressionFormat,
+    ) -> Result<Option<ExtractedHashes>> {
         match self {
             Self::Cached => processor.run_cached_attempt(format),
             Self::Streaming => processor.run_streaming_attempt(format),

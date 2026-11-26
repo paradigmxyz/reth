@@ -7,7 +7,7 @@ use crate::{
 use futures_util::future::Either;
 use interprocess::local_socket::{
     tokio::prelude::{LocalSocketListener, LocalSocketStream},
-    traits::tokio::{Listener, Stream},
+    traits::tokio::Listener,
     GenericFilePath, ListenerOptions, ToFsName,
 };
 use jsonrpsee::{
@@ -198,8 +198,7 @@ where
             match try_accept_conn(&listener, stopped).await {
                 AcceptConnection::Established { local_socket_stream, stop } => {
                     let Some(conn_permit) = connection_guard.try_acquire() else {
-                        let (_reader, mut writer) = local_socket_stream.split();
-                        let _ = writer
+                        let _ = (&local_socket_stream)
                             .write_all(b"Too many connections. Please try again later.")
                             .await;
                         stopped = stop;
@@ -354,6 +353,7 @@ where
                     request.as_bytes(),
                     is_single.unwrap_or(true),
                     BatchRequestConfig::Unlimited,
+                    max_request_body_size,
                     &conn.rpc_service,
                 )
                 .await
@@ -620,7 +620,7 @@ pub fn dummy_name() -> String {
 mod tests {
     use super::*;
     use futures::{future::select, StreamExt};
-    use interprocess::local_socket::tokio::{RecvHalf, SendHalf};
+    use interprocess::local_socket::traits::tokio::Stream as _;
     use jsonrpsee::{
         core::{
             middleware::{Batch, BatchEntry, Notification},
@@ -645,16 +645,15 @@ mod tests {
 
     /// Raw JSON-RPC client that talks to the server over the IPC socket.
     struct TestClient {
-        send: SendHalf,
-        recv: FramedRead<RecvHalf, StreamCodec>,
+        recv: FramedRead<LocalSocketStream, StreamCodec>,
         next_id: u64,
     }
 
     impl TestClient {
         async fn connect(endpoint: &str) -> Self {
             let name = endpoint.to_fs_name::<GenericFilePath>().unwrap();
-            let (recv, send) = LocalSocketStream::connect(name).await.unwrap().split();
-            Self { send, recv: FramedRead::new(recv, StreamCodec::stream_incoming()), next_id: 0 }
+            let stream = LocalSocketStream::connect(name).await.unwrap();
+            Self { recv: FramedRead::new(stream, StreamCodec::stream_incoming()), next_id: 0 }
         }
 
         /// Sends a call and returns its response, or `None` if the server closed the
@@ -671,8 +670,9 @@ mod tests {
             json!({"jsonrpc": "2.0", "id": self.next_id, "method": method, "params": params})
         }
 
-        async fn send(&mut self, msg: Value) -> io::Result<()> {
-            self.send.write_all(msg.to_string().as_bytes()).await
+        async fn send(&self, msg: Value) -> io::Result<()> {
+            let mut send = self.recv.get_ref();
+            send.write_all(msg.to_string().as_bytes()).await
         }
 
         /// Returns the next message from the server, or `None` if the connection is closed.

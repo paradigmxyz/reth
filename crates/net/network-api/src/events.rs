@@ -335,7 +335,14 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
             Self::GetReceipts69 { .. } => version == EthVersion::Eth69,
             Self::GetReceipts70 { .. } => version >= EthVersion::Eth70,
             Self::GetBlockAccessLists { .. } => version >= EthVersion::Eth71,
-            Self::GetCells { .. } => version >= EthVersion::Eth72,
+            Self::GetCells { request, .. } => {
+                version >=
+                    if request.cell_mask.is_indexed() {
+                        EthVersion::Eth73
+                    } else {
+                        EthVersion::Eth72
+                    }
+            }
             _ => true,
         }
     }
@@ -450,6 +457,7 @@ impl<R> fmt::Debug for PeerRequestSender<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::{B128, B256};
 
     #[test]
     fn test_get_block_access_lists_version_support() {
@@ -469,6 +477,18 @@ mod tests {
 
         assert!(!req.is_supported_by_eth_version(EthVersion::Eth71));
         assert!(req.is_supported_by_eth_version(EthVersion::Eth72));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth73));
+        let (tx, _rx) = oneshot::channel();
+        let req = PeerRequest::<EthNetworkPrimitives>::GetCells {
+            request: GetCells::from_masks(
+                vec![B256::ZERO, B256::repeat_byte(1)],
+                vec![B128::ZERO, B128::repeat_byte(1)],
+            )
+            .unwrap(),
+            response: tx,
+        };
+        assert!(!req.is_supported_by_eth_version(EthVersion::Eth72));
+        assert!(req.is_supported_by_eth_version(EthVersion::Eth73));
     }
 
     #[test]

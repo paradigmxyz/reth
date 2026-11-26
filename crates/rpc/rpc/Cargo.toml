@@ -29,7 +29,7 @@ reth-rpc-engine-api.workspace = true
 evm2.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-rpc-convert.workspace = true
-evm2-inspectors = { workspace = true, features = ["std"] }
+evm2-inspectors = { workspace = true, features = ["serde", "std"] }
 reth-network-peers = { workspace = true, features = ["secp256k1"] }
 reth-evm = { workspace = true, features = ["witness"] }
 reth-evm-ethereum = { workspace = true, features = ["std"] }
@@ -87,7 +87,7 @@ sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 itertools.workspace = true
-humantime = { workspace = true, optional = true }
+jiff = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-testing-utils.workspace = true
@@ -96,15 +96,15 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
-reth-storage-overlay.workspace = true
 
 rand.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 jsonrpsee = { workspace = true, features = ["server"] }
 
 [features]
 js-tracer = [
-    "dep:humantime",
+    "dep:jiff",
     "evm2-inspectors/js-tracer",
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",

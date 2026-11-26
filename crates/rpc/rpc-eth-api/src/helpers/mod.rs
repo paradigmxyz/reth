@@ -41,7 +41,7 @@ pub use signer::EthSigner;
 pub use spec::EthApiSpec;
 pub use state::{EthState, LoadState};
 pub use subscriptions::EthSubscriptions;
-pub use trace::Trace;
+pub use trace::{RequestTraceBudget, Trace};
 pub use transaction::{EthTransactions, LoadTransaction};
 
 /// Extension trait that bundles traits needed for tracing transactions.

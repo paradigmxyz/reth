@@ -38,6 +38,7 @@ derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
+rpds.workspace = true
 serde = { workspace = true, optional = true }
 
 # test-utils
@@ -47,6 +48,7 @@ rand = { workspace = true, optional = true }
 evm2 = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-signer.workspace = true
@@ -67,8 +69,10 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-trie/serde",
     "evm2?/serde",
+    "rpds/serde",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "alloy-primitives/getrandom",
     "dep:evm2",
     "alloy-signer",

@@ -47,9 +47,11 @@ alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-genesis.workspace = true
 alloy-chains = { workspace = true, features = ["arbitrary"] }
 arbitrary = { workspace = true, features = ["derive"] }
+bincode.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 rand.workspace = true
+serde_json.workspace = true
 test-case.workspace = true
 
 [features]
@@ -67,6 +69,7 @@ std = [
     "reth-ethereum-primitives/std",
     "reth-primitives-traits/std",
     "serde?/std",
+    "serde_json/std",
     "thiserror/std",
     "reth-chainspec/std",
     "alloy-trie/std",

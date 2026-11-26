@@ -1,15 +1,17 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    helpers::{
+        Call, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi,
+    },
+    CallManyRequest, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, SimulateV1Request,
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, eip7928::BlockAccessList, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
-    simulate::{SimulatePayload, SimulatedBlock},
+    simulate::SimulatedBlock,
     state::{EvmOverrides, StateOverride},
     BlockOverrides, Bundle, EIP1186AccountProofResponse, EthCallResponse, FeeHistory, Index,
     StateContext, SyncStatus, Work,
@@ -243,7 +245,7 @@ pub trait EthApi<
     #[method(name = "simulateV1")]
     async fn simulate_v1(
         &self,
-        opts: SimulatePayload<TxReq>,
+        opts: SimulateV1Request<TxReq>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<B>>>;
 
@@ -269,7 +271,7 @@ pub trait EthApi<
     #[method(name = "callMany")]
     async fn call_many(
         &self,
-        bundles: Vec<Bundle<TxReq>>,
+        bundles: CallManyRequest<Vec<Bundle<TxReq>>>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>>;
@@ -754,11 +756,15 @@ where
     /// Handler for: `eth_simulateV1`
     async fn simulate_v1(
         &self,
-        payload: SimulatePayload<RpcTxReq<T::NetworkTypes>>,
+        payload: SimulateV1Request<RpcTxReq<T::NetworkTypes>>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<RpcBlock<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateV1");
+        // Decoding allocates a request per simulated call, so it runs under the same permit as
+        // the simulation.
         let _permit = self.tracing_task_guard().clone().acquire_owned().await;
+        let max_blocks = usize::try_from(Call::max_simulate_blocks(self)).unwrap_or(usize::MAX);
+        let payload = payload.into_inner(max_blocks)?;
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
     }
 
@@ -786,16 +792,18 @@ where
         request: RpcTxReq<T::NetworkTypes>,
     ) -> RpcResult<FillTransaction<TxTy<T::Primitives>>> {
         trace!(target: "rpc::eth", ?request, "Serving eth_fillTransaction");
+        let _permit = self.acquire_owned_blocking_io().await;
         Ok(EthTransactions::fill_transaction(self, request).await?)
     }
 
     /// Handler for: `eth_callMany`
     async fn call_many(
         &self,
-        bundles: Vec<Bundle<RpcTxReq<T::NetworkTypes>>>,
+        bundles: CallManyRequest<Vec<Bundle<RpcTxReq<T::NetworkTypes>>>>,
         state_context: Option<StateContext>,
         state_override: Option<StateOverride>,
     ) -> RpcResult<Vec<Vec<EthCallResponse>>> {
+        let bundles = bundles.into_inner()?;
         trace!(target: "rpc::eth", ?bundles, ?state_context, ?state_override, "Serving eth_callMany");
         Ok(EthCall::call_many(self, bundles, state_context, state_override).await?)
     }
@@ -820,6 +828,7 @@ where
         block_overrides: Option<Box<BlockOverrides>>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?request, ?block_number, "Serving eth_estimateGas");
+        let _permit = self.acquire_owned_blocking_io().await;
         Ok(EthCall::estimate_gas_at(
             self,
             request,
