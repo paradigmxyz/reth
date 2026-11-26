@@ -3619,4 +3619,26 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn earliest_history_starts_after_a_transaction_file_gap() -> eyre::Result<()> {
+        let (static_dir, _) = create_test_static_files_dir();
+        let segment = StaticFileSegment::Transactions;
+        let static_files: StaticFileProvider<EthPrimitives> =
+            StaticFileProviderBuilder::read_write(&static_dir).with_blocks_per_file(10).build()?;
+        {
+            let mut writer = static_files.latest_writer(segment)?;
+            for block in 0..=24 {
+                writer.increment_block(block)?;
+            }
+            writer.commit()?;
+        }
+        static_files.initialize_index()?;
+        assert_eq!(static_files.earliest_history_height(), 0);
+
+        // An older file separated from the tip by a gap does not extend the available history.
+        static_files.delete_jar(segment, 10)?;
+        assert_eq!(static_files.earliest_history_height(), 20);
+        Ok(())
+    }
 }
