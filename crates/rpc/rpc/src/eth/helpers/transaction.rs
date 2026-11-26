@@ -656,6 +656,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fill_transaction_estimates_tip_only_request() {
+        let address = Address::random();
+        let balance = U256::from(100u128) * U256::from(1_000_000_000_000_000_000u128);
+        let accounts = AddressMap::from_iter([(address, ExtendedAccount::new(0, balance))]);
+        let eth_api = mock_eth_api(accounts);
+
+        // Without a gas limit the request is estimated, which must see the filled fee cap rather
+        // than reject the tip as above an omitted, zero cap.
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            max_priority_fee_per_gas: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let filled =
+            eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
+
+        assert_eq!(filled.tx.gas_limit(), 21_000);
+        assert_eq!(filled.tx.max_priority_fee_per_gas(), Some(1_000_000_000));
+        assert!(filled.tx.max_fee_per_gas() >= 1_000_000_000);
+    }
+
+    #[tokio::test]
     async fn test_fill_transaction_fills_all_missing_fields() {
         let address = Address::random();
 
