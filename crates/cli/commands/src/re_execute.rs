@@ -157,9 +157,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             eyre::eyre!("hash for block {block_number} not found in the database")
                         })?;
                         eyre::Ok(StateProviderDatabase(
-                            state_provider_factory
-                                .state_provider_from_consistent_view(provider, hash)?
-                                .into_evm_state_provider(),
+                            provider.historical_state_by_hash(hash)?.into_evm_state_provider(),
                         ))
                     }
                 };

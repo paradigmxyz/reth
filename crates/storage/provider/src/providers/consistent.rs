@@ -13,7 +13,9 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{BlockState, CanonicalInMemoryState, InMemoryStateSnapshot, Snapshotted};
+use reth_chain_state::{
+    BlockState, CanonicalInMemoryState, ExecutedBlock, InMemoryStateSnapshot, Snapshotted,
+};
 use reth_chainspec::ChainInfo;
 use reth_db_api::{
     models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices},
@@ -27,9 +29,11 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{BlockBodyIndicesProvider, NodePrimitivesProvider, StorageChangeSetReader};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, NodePrimitivesProvider, StateProviderBox, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayBuilder, OverlayStateProvider, OwnedProvider};
+use reth_storage_overlay::{OverlayBuilder, OverlayManager, OverlayStateProvider, OwnedProvider};
 use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -48,6 +52,8 @@ use std::{
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider, with the in-memory blocks tracked while its transaction opened.
     storage_provider: Snapshotted<DatabaseProviderRO<N::DB, N>, N::Primitives>,
+    /// Manager of the overlays built over this view.
+    overlay_manager: OverlayManager<N::Primitives>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -69,7 +75,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             .in_memory_state()
             .snapshot_during(|| storage_provider_factory.provider())
             .transpose()?;
-        Ok(Self { storage_provider, canonical_in_memory_state: state })
+        let overlay_manager = storage_provider_factory.overlay_manager().clone();
+        Ok(Self { storage_provider, overlay_manager, canonical_in_memory_state: state })
     }
 
     /// Disables the timeout and backtrace recording of the database transaction, for views held
@@ -92,6 +99,74 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Returns the database provider of this view.
     pub(crate) fn database_provider(&self) -> &DatabaseProviderRO<N::DB, N> {
         &self.storage_provider
+    }
+
+    /// Returns the state after block `block_hash`, which must be in this view's in-memory blocks or
+    /// on disk.
+    ///
+    /// The trie reverts it computes go into the changeset cache the engine shares, so use it for
+    /// blocks the node itself chose, such as the head. See [`Self::historical_state_by_hash`].
+    ///
+    /// Returns an error if the block is unknown to this view, or if this view's state tables have
+    /// advanced past its finished block.
+    pub fn state_by_hash(self, block_hash: B256) -> ProviderResult<StateProviderBox> {
+        self.state_after(block_hash, true)
+    }
+
+    /// Returns the state after block `block_hash` like [`Self::state_by_hash`], without writing the
+    /// trie reverts it computes to the changeset cache the engine shares.
+    ///
+    /// Use it for blocks a caller such as RPC chose.
+    pub fn historical_state_by_hash(self, block_hash: B256) -> ProviderResult<StateProviderBox> {
+        self.state_after(block_hash, false)
+    }
+
+    /// Returns the state after `parent_hash` with `block`, a block built on it that is not tracked,
+    /// executed on top.
+    pub fn state_with_block_appended(
+        self,
+        parent_hash: B256,
+        block: ExecutedBlock<N::Primitives>,
+    ) -> ProviderResult<StateProviderBox> {
+        let overlay_builder = match self.in_memory().state_by_hash(parent_hash) {
+            Some(parent) => self.overlay_manager.overlay_builder_for_state(parent),
+            None => self.overlay_manager.overlay_builder(parent_hash),
+        }
+        .with_appended_block(block);
+        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
+    }
+
+    /// Returns `true` if this view's state tables have advanced past its finished block, as they
+    /// do while a pipeline run has committed executed state but not yet moved `Finish`.
+    pub(crate) fn execution_ahead_of_finish(&self) -> ProviderResult<bool> {
+        let finish = self.storage_provider.best_block_number()?;
+        Ok(self
+            .storage_provider
+            .get_stage_checkpoint(StageId::Execution)?
+            .is_some_and(|execution| execution.block_number > finish))
+    }
+
+    /// Returns the state after `block_hash`, writing trie reverts to the shared changeset cache if
+    /// `cache_trie_reverts` is set.
+    fn state_after(
+        self,
+        block_hash: B256,
+        cache_trie_reverts: bool,
+    ) -> ProviderResult<StateProviderBox> {
+        if self.in_memory().state_by_hash(block_hash).is_none() &&
+            self.storage_provider.block_number(block_hash)?.is_none()
+        {
+            return Err(ProviderError::BlockHashNotFound(block_hash))
+        }
+        if self.execution_ahead_of_finish()? {
+            return Err(ProviderError::StateUnavailableDuringSync)
+        }
+
+        let mut overlay_builder = self.overlay_manager.overlay_builder(block_hash);
+        if !cache_trie_reverts {
+            overlay_builder = overlay_builder.without_trie_revert_caching();
+        }
+        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
     }
 
     /// Returns an overlay state provider over this view's database provider, resolving in-memory
