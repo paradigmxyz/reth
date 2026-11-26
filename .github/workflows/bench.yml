@@ -1409,12 +1409,23 @@ jobs:
           mkdir -p "$HOME/.local/bin"
 
           # apt packages
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends gh
-          sudo apt-get install -y --no-install-recommends \
+          # apt-get with lock wait + retries (other apt processes on the runner can hold the lock)
+          apt_get() {
+            local attempt
+            for attempt in 1 2 3 4; do
+              sudo apt-get -o DPkg::Lock::Timeout=120 "$@" && return 0
+              echo "::warning::apt-get $* failed (attempt $attempt/5), retrying in $((attempt * 15))s"
+              sleep $((attempt * 15))
+            done
+            sudo apt-get -o DPkg::Lock::Timeout=120 "$@"
+          }
+
+          apt_get update -qq
+          apt_get install -y --no-install-recommends gh
+          apt_get install -y --no-install-recommends \
             python3 make jq zstd curl dmsetup m4 \
             linux-tools-"$(uname -r)" || \
-            sudo apt-get install -y --no-install-recommends linux-tools-generic
+            apt_get install -y --no-install-recommends linux-tools-generic
 
           # mc (MinIO client)
           if ! command -v mc &>/dev/null; then
