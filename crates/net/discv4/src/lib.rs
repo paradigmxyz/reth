@@ -1272,8 +1272,7 @@ impl Discv4Service {
                         // full, we can't add any additional peers to that bucket, but we still want
                         // to emit an event that we discovered the node
                         self.on_discovered_at_capacity(record);
-                        // already pinged above if not bonded
-                        needs_bond = false;
+                        needs_bond = true;
                     }
                     BucketInsertResult::TooManyIncoming | BucketInsertResult::NodeExists => {
                         needs_bond = true;
@@ -3792,11 +3791,12 @@ mod tests {
             from: record.into(),
             to: service.local_node_record.into(),
             expire: service.ping_expiration(),
-            enr_sq: None,
+            enr_sq: Some(1),
         };
 
         service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
         assert!(updates.try_recv().is_err());
+        assert!(!service.pending_enr_requests.contains_key(&record.id));
         let request = &service.pending_pings[&record.id];
         assert!(matches!(request.reason, PingReason::AtCapacity));
         let echo_hash = request.echo_hash;
@@ -3807,13 +3807,12 @@ mod tests {
             Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
         ));
 
-        // Once bonded, the node is announced without another ping.
+        // Once bonded, the node is announced right away.
         service.on_ping(ping, record.udp_addr(), record.id, B256::random());
         assert!(matches!(
             updates.try_recv(),
             Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
         ));
-        assert!(!service.pending_pings.contains_key(&record.id));
     }
 
     #[tokio::test]
