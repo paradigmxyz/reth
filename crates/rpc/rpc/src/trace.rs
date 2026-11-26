@@ -15,7 +15,9 @@ use alloy_rpc_types_trace::{
     tracerequest::TraceCallRequest,
 };
 use evm2_inspectors::{
-    opcode::OpcodeGasInspector, storage::StorageInspector, tracing::TracingInspectorConfig,
+    opcode::OpcodeGasInspector,
+    storage::StorageInspector,
+    tracing::{TracingInspector, TracingInspectorConfig},
 };
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
@@ -25,8 +27,8 @@ use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{LoadTransaction, Trace, TraceExt},
-    FromEthApiError, RpcNodeCore,
+    helpers::{LoadTransaction, RequestTraceBudget, Trace, TraceExt},
+    CallManyRequest, FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::CallManyBudget, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
@@ -162,6 +164,8 @@ where
         // execute all transactions on top of each other and record the traces
         self.eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
+                // The calls share one trace byte budget, since they share one response.
+                let trace_budget = RequestTraceBudget::new(eth_api.trace_limits());
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 
@@ -177,11 +181,13 @@ where
                     )?;
                     budget.admit(&mut tx_env)?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let inspector = eth_api.tracing_inspector(config);
+                    let inspector =
+                        TracingInspector::new(config).with_limits(trace_budget.limits());
                     let (inspector, res) = eth_api
                         .inspect(&mut db, evm_env, &tx_env, inspector)
                         .map_err(|err| budget.map_call_err(err))?;
                     budget.charge(&res.result)?;
+                    trace_budget.charge(inspector.recorded_bytes());
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -741,9 +747,12 @@ where
     /// Handler for `trace_callMany`
     async fn trace_call_many(
         &self,
-        calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
+        calls: CallManyRequest<Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>>,
         block_id: Option<BlockId>,
     ) -> RpcResult<Vec<TraceResults>> {
+        // Decoding is bounded by the call limit, so malformed input is rejected without waiting
+        // for a tracing permit.
+        let calls = calls.into_inner()?;
         let _permit = self.acquire_trace_permit().await;
         Self::trace_call_many(self, calls, block_id).await.map_err(Into::into)
     }
@@ -1008,6 +1017,150 @@ mod tests {
                 ),
             }
         }
+    }
+
+    /// The smallest power of two of trace bytes for which `trace` succeeds.
+    async fn smallest_passing_limit<T, E>(trace: impl AsyncFn(usize) -> Result<T, E>) -> usize {
+        let mut limit = 1 << 12;
+        while trace(limit).await.is_err() {
+            limit *= 2;
+            assert!(limit < 1 << 32, "no limit fits");
+        }
+        limit
+    }
+
+    #[tokio::test]
+    async fn trace_call_many_shares_byte_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        provider.add_block(header.hash_slow(), Block { header, body: BlockBody::default() });
+        let call = TransactionRequest::default().to(target).gas_limit(100_000);
+        let vm_trace = HashSet::from_iter([TraceType::VmTrace]);
+        let api = |max_trace_bytes: usize| {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(Some(max_trace_bytes))
+            .build();
+            TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default())
+        };
+
+        // One call fits within the limit, but more than half of it.
+        let limit = smallest_passing_limit(async |limit| {
+            api(limit).trace_call_many(vec![(call.clone(), vm_trace.clone())], None).await
+        })
+        .await;
+        api(limit / 2)
+            .trace_call_many(vec![(call.clone(), vm_trace.clone())], None)
+            .await
+            .unwrap_err();
+
+        // Two such calls in one request do not fit.
+        let err = api(limit)
+            .trace_call_many(vec![(call.clone(), vm_trace.clone()); 2], None)
+            .await
+            .unwrap_err();
+        assert_eq!(err.to_string(), "fatal error: trace recorded byte limit exceeded");
+    }
+
+    #[tokio::test]
+    async fn replay_block_shares_byte_limit() {
+        let provider = MockEthProvider::default();
+        let target = Address::with_last_byte(0x42);
+        // JUMPDEST PUSH1 0 JUMP: loops until out of gas, recording steps but no memory.
+        provider.add_account(
+            target,
+            ExtendedAccount::new(0, U256::ZERO).with_bytecode(bytes!("5b600056")),
+        );
+        let mut transactions = Vec::new();
+        for nonce in 0..2 {
+            let tx = TransactionSigned::new_unhashed(
+                TxLegacy {
+                    nonce,
+                    gas_limit: 100_000,
+                    to: TxKind::Call(target),
+                    ..Default::default()
+                }
+                .into(),
+                Signature::test_signature(),
+            );
+            provider.add_account(
+                tx.recover_signer().unwrap(),
+                ExtendedAccount::new(nonce, U256::from(1_000_000)),
+            );
+            transactions.push(tx);
+        }
+        let parent = Header { gas_limit: 30_000_000, ..Default::default() };
+        let parent_hash = parent.hash_slow();
+        provider.add_header(parent_hash, parent);
+        let block = Block {
+            header: Header { parent_hash, number: 1, gas_limit: 30_000_000, ..Default::default() },
+            body: BlockBody { transactions, ..Default::default() },
+        };
+        let block_hash = block.header.hash_slow();
+        let tx_hashes = block.body.transactions.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>();
+        let senders =
+            block.body.transactions.iter().map(|tx| tx.recover_signer().unwrap()).collect();
+        provider.add_block(block_hash, block.clone());
+        let recovered = RecoveredBlock::new_unhashed(block, senders);
+        let vm_trace = HashSet::from_iter([TraceType::VmTrace]);
+        let api = async |max_trace_bytes: usize| {
+            let eth_api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_trace_bytes(Some(max_trace_bytes))
+            .build();
+            // Seed the RPC cache: MockEthProvider does not implement recovered_block.
+            cache_new_blocks_task(
+                eth_api.cache().clone(),
+                futures::stream::iter([CanonStateNotification::Commit {
+                    new: Arc::new(Chain::new(
+                        [recovered.clone()],
+                        ExecutionOutcome {
+                            receipts: vec![vec![]],
+                            first_block: 1,
+                            ..Default::default()
+                        },
+                        Default::default(),
+                    )),
+                }]),
+            )
+            .await;
+            TraceApi::new(eth_api, BlockingTaskGuard::new(1), EthConfig::default())
+        };
+
+        // Each transaction fits within the limit, but more than half of it.
+        let limit = smallest_passing_limit(async |limit| {
+            api(limit).await.replay_transaction(tx_hashes[0], vm_trace.clone()).await
+        })
+        .await;
+
+        // Both in one block replay do not fit: the second runs out.
+        let err = api(limit)
+            .await
+            .replay_block_transactions(block_hash.into(), vm_trace.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "internal EVM error occurred when executing transaction {}: fatal error: trace \
+                 recorded byte limit exceeded",
+                tx_hashes[1]
+            )
+        );
     }
 
     #[tokio::test]

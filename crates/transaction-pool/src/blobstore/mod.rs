@@ -5,6 +5,7 @@ use alloy_eips::{
     eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{TxHash, B256};
+pub use cells::BlobTxCellSidecar;
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -19,6 +20,7 @@ use std::{
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+mod cells;
 mod converter;
 pub mod disk;
 mod mem;
