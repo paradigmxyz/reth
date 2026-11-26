@@ -1867,8 +1867,11 @@ fn geth_trace_weight_mib(
     let recorded = match &opts.tracer {
         None => {
             let config = &opts.config;
+            // Each call applies the step limit on its own.
             let steps = match config.limit {
-                Some(limit) if limit > 0 => (limit / MIN_STRUCT_LOG_JSON_LEN).min(gas),
+                Some(limit) if limit > 0 => {
+                    (limit / MIN_STRUCT_LOG_JSON_LEN).saturating_mul(calls).min(gas)
+                }
                 _ => gas,
             };
             let step_bytes = if config.disable_stack == Some(true) {
@@ -1889,10 +1892,14 @@ fn geth_trace_weight_mib(
                 let memory_hex_bytes = gas.saturating_mul(512).isqrt().saturating_mul(64);
                 bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
             }
-            // The calls of a response share both limits.
-            let limit = max_trace_bytes.into_iter().chain(max_response_size).min();
+            // Each call may record the trace byte limit, and all of them the response size.
+            let limit = max_trace_bytes
+                .map(|max| (max as u64).saturating_mul(calls))
+                .into_iter()
+                .chain(max_response_size.map(|max| max as u64))
+                .min();
             // The logs, the response serialized from them and the copy sent.
-            limit.map_or(bytes, |limit| bytes.min(limit as u64)).saturating_mul(3)
+            limit.map_or(bytes, |limit| bytes.min(limit)).saturating_mul(3)
         }
         Some(GethDebugTracerType::BuiltInTracer(tracer)) => match tracer {
             GethDebugBuiltInTracerType::FourByteTracer |
@@ -2406,6 +2413,17 @@ mod tests {
         assert_eq!(
             weight(serde_json::json!({ "disableStorage": true, "enableMemory": true }), 300_000),
             496
+        );
+        // Each call records up to the trace byte limit.
+        assert_eq!(
+            geth_trace_weight_mib(
+                &opts(serde_json::json!({ "disableStorage": true })),
+                50_000_000,
+                4,
+                Some(1 << 20),
+                max_response_size
+            ),
+            40
         );
         // Without limits, the estimate stands.
         assert_eq!(
