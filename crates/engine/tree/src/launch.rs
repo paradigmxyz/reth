@@ -27,7 +27,6 @@ use reth_provider::{
 };
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
-use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use std::{convert::Infallible, sync::Arc};
 
@@ -80,12 +79,12 @@ where
     pub pipeline: Pipeline<N>,
     /// Runtime the pipeline runs on.
     pub pipeline_task_spawner: Runtime,
-    /// Provider factory handed to the persistence service.
+    /// Provider factory used by persistence and the source of the engine tree's overlay context.
     pub provider: ProviderFactory<N>,
     /// Blockchain provider backing the engine tree.
     pub blockchain_db: BlockchainProvider<N>,
     /// Writer of the canonical in-memory state that `blockchain_db` reads. The engine tree
-    /// changes that state through it.
+    /// changes that state through it. It must track the in-memory blocks of `provider`.
     pub canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N::Primitives>,
     /// Pruner run by the persistence service.
     pub pruner: PrunerWithFactory<ProviderFactory<N>>,
@@ -93,8 +92,6 @@ where
     pub payload_builder: PayloadBuilderHandle<N::Payload>,
     /// Validator for incoming payloads.
     pub payload_validator: V,
-    /// Overlay manager for state on top of the database.
-    pub overlay_manager: OverlayManager,
     /// Engine tree configuration.
     pub tree_config: TreeConfig,
     /// Sender for sync metric events.
@@ -112,7 +109,7 @@ where
         + BlockAccessListsClient
         + 'static,
     S: Stream<Item = BeaconEngineMessage<N::Payload>> + Send + Sync + Unpin + 'static,
-    V: EngineValidator<N::Payload> + WaitForCaches,
+    V: EngineValidator<N::Payload> + WaitForCaches<N::Primitives>,
     C: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     /// Spawns the engine services and returns the [`ChainOrchestrator`] driving them.
@@ -146,7 +143,6 @@ where
             pruner,
             payload_builder,
             payload_validator,
-            overlay_manager,
             tree_config,
             sync_metrics_tx,
             evm_config,
@@ -156,6 +152,7 @@ where
         let backfill_sync = backfill(pipeline, pipeline_task_spawner)?;
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
+        let overlay_context = provider.overlay_context().clone();
         let persistence_handle =
             PersistenceHandle::<N::Primitives>::spawn_service(provider, pruner, sync_metrics_tx);
 
@@ -166,7 +163,7 @@ where
             persistence_handle,
             payload_builder,
             canonical_in_memory_state_writer,
-            overlay_manager,
+            overlay_context,
             tree_config,
             engine_kind,
             evm_config,

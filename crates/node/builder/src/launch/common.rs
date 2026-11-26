@@ -38,7 +38,6 @@ use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use reth_chain_state::InMemoryState;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
@@ -86,7 +85,7 @@ use reth_stages::{
     MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
@@ -473,35 +472,11 @@ where
     DB: Database + Clone + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
-    /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
-    /// between the database and static files. **It may execute a pipeline unwind if it fails this
-    /// check.**
-    pub async fn create_provider_factory<N, Evm>(
+    /// Opens the attached storage, then runs `recover` to finish interrupted writes before
+    /// checking consistency. May unwind the pipeline if the database and static files disagree.
+    async fn create_provider_factory<N, Evm>(
         &self,
-        overlay_manager: OverlayManager,
-        rocksdb_provider: Option<RocksDBProvider>,
-        disabled_stages: &[StageId],
-    ) -> eyre::Result<ProviderFactory<N>>
-    where
-        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    {
-        self.create_provider_factory_with_recovery::<N, Evm>(
-            InMemoryState::read_only(),
-            overlay_manager,
-            rocksdb_provider,
-            disabled_stages,
-            |_| Ok(()),
-        )
-        .await
-    }
-
-    /// Like [`Self::create_provider_factory`], but first runs `recover` to finish writes an earlier
-    /// run left half-committed, before the consistency check.
-    pub async fn create_provider_factory_with_recovery<N, Evm>(
-        &self,
-        in_memory_state: InMemoryState<N::Primitives>,
-        overlay_manager: OverlayManager,
+        overlay_context: OverlayContext<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
@@ -561,13 +536,12 @@ where
                 prune_config.minimum_pruning_distance,
             );
         let bal_store = BalStoreHandle::new(bal_store);
-        let factory = ProviderFactory::new_with_in_memory_state(
+        let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
-            in_memory_state,
-            overlay_manager,
+            overlay_context,
             self.task_executor().clone(),
         )?
         .with_prune_modes(prune_config.segments)
@@ -717,33 +691,11 @@ where
         Ok(factory)
     }
 
-    /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N, Evm>(
-        self,
-        overlay_manager: OverlayManager,
-        rocksdb_provider: Option<RocksDBProvider>,
-        disabled_stages: &[StageId],
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
-    where
-        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    {
-        self.with_provider_factory_and_recovery::<N, Evm>(
-            InMemoryState::read_only(),
-            overlay_manager,
-            rocksdb_provider,
-            disabled_stages,
-            |_| Ok(()),
-        )
-        .await
-    }
-
-    /// Like [`Self::with_provider_factory`], but first runs `recover` to finish writes an earlier
-    /// run left half-committed, before the consistency check.
+    /// Creates a [`ProviderFactory`] with the supplied overlay context and attaches it
+    /// to the launch context. Runs `recover` before checking storage consistency.
     pub async fn with_provider_factory_and_recovery<N, Evm>(
         self,
-        in_memory_state: InMemoryState<N::Primitives>,
-        overlay_manager: OverlayManager,
+        overlay_context: OverlayContext<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
@@ -753,9 +705,8 @@ where
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let factory = self
-            .create_provider_factory_with_recovery::<N, Evm>(
-                in_memory_state,
-                overlay_manager,
+            .create_provider_factory::<N, Evm>(
+                overlay_context,
                 rocksdb_provider,
                 disabled_stages,
                 recover,

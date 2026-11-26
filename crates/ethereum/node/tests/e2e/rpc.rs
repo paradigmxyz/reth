@@ -56,7 +56,7 @@ use reth_provider::{
 };
 use reth_rpc_api::servers::AdminApiServer;
 use reth_rpc_server_types::RpcModuleSelection;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
 use std::{
@@ -874,7 +874,7 @@ async fn test_sepolia_amsterdam_eth_config() -> eyre::Result<()> {
                     RocksDBProvider::builder(datadir.path().join("rocksdb"))
                         .with_default_tables()
                         .build()?,
-                    OverlayManager::default(),
+                    OverlayContext::default(),
                     Runtime::test(),
                 )?;
             init_genesis_with_settings(&provider_factory, node_config.storage_settings())?;

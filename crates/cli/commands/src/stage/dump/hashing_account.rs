@@ -10,7 +10,7 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use tracing::info;
 
 pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = DatabaseEnv>>(
@@ -41,7 +41,7 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Databas
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
                 RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
-                OverlayManager::default(),
+                OverlayContext::default(),
                 runtime,
             )?,
             to,

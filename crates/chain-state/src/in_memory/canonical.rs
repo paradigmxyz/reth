@@ -87,10 +87,9 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().contains(hash)
     }
 
-    /// Returns the in-memory blocks tracked now. Use [`Self::snapshot_during`] when opening a
-    /// read transaction that needs a matching block snapshot.
-    pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
-        self.inner.blocks.read().snapshot()
+    /// Returns whether both handles read the same tracked blocks.
+    pub fn shares_blocks_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
     }
 
     /// Runs `f` and returns its result with a snapshot of the blocks that were tracked during the

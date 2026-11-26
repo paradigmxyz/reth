@@ -1042,14 +1042,13 @@ mod tests {
     use alloy_eips::eip7702::constants::EIP7702_CLEARED_DELEGATION;
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use evm2::{evm::EmptyDB, BaseEvmTypes};
-    use reth_chain_state::InMemoryState;
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::OverlayContext;
     use reth_tasks::WorkerPool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
@@ -1064,8 +1063,7 @@ mod tests {
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
                 B256::ZERO,
-                InMemoryState::read_only(),
-                OverlayManager::default(),
+                OverlayContext::default(),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),
@@ -1129,8 +1127,7 @@ mod tests {
                 provider: OverlayStateProviderFactory::new(
                     provider.clone(),
                     B256::ZERO,
-                    InMemoryState::read_only(),
-                    OverlayManager::default(),
+                    OverlayContext::default(),
                 ),
                 bal_prewarm_pool: None,
                 metrics: PrewarmMetrics::default(),
@@ -1170,12 +1167,8 @@ mod tests {
         provider.enable_database_provider();
         provider.add_header(B256::ZERO, Default::default());
         provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
-        ctx.provider = OverlayStateProviderFactory::new(
-            provider,
-            B256::ZERO,
-            InMemoryState::read_only(),
-            OverlayManager::default(),
-        );
+        ctx.provider =
+            OverlayStateProviderFactory::new(provider, B256::ZERO, OverlayContext::default());
         assert!(ctx.evm_for_ctx().evm.is_some());
         let tx = Recovered::new_unchecked(
             TransactionSigned::new_unhashed(
@@ -1222,8 +1215,7 @@ mod tests {
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
                 B256::ZERO,
-                InMemoryState::read_only(),
-                OverlayManager::default(),
+                OverlayContext::default(),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {

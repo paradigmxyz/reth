@@ -41,7 +41,7 @@ use reth_provider::{
     BlockNumReader, StorageSettingsCache,
 };
 use reth_rpc_layer::JwtSecret;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -113,11 +113,12 @@ impl<B> EngineNodeLauncher<B> {
         // earlier stay no-ops, and derived metrics cache their first instance for the process.
         install_prometheus_recorder();
 
-        // Create the in-memory state of this node with the writer of its blocks, and the overlay
-        // manager that will be shared across the provider and engine.
+        // The provider and engine share a single overlay context bound to the writer's blocks.
         let (in_memory_state, in_memory_state_writer) = InMemoryState::<N::Primitives>::new();
-        let overlay_manager =
-            OverlayManager::with_worker_pool(ctx.task_executor.state_trie_overlay_worker_pool());
+        let overlay_context = OverlayContext::with_worker_pool(
+            in_memory_state,
+            ctx.task_executor.state_trie_overlay_worker_pool(),
+        );
         let disabled_stages = N::disabled_stages();
 
         // setup the launch context
@@ -131,11 +132,10 @@ impl<B> EngineNodeLauncher<B> {
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
-            // Create the provider factory with the shared overlay manager, letting the backfill
+            // Create the provider factory with the shared overlay context, letting the backfill
             // finish writes an earlier run left half-committed before the consistency check
             .with_provider_factory_and_recovery::<_, <CB::Components as NodeComponents<T>>::Evm>(
-                in_memory_state,
-                overlay_manager.clone(),
+                overlay_context,
                 rocksdb_provider,
                 disabled_stages,
                 |factory| backfill.recover(factory),
@@ -253,11 +253,10 @@ impl<B> EngineNodeLauncher<B> {
         // Build the engine validator with all required components
         let engine_validator = validator_builder
             .clone()
-            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), overlay_manager.clone())
+            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
             .await?;
 
         // Create the consensus engine stream with optional reorg
-        let reorg_overlay_manager = overlay_manager.clone();
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
             .maybe_skip_new_payload(node_config.debug.skip_new_payload)
@@ -266,11 +265,7 @@ impl<B> EngineNodeLauncher<B> {
                 ctx.components().evm_config().clone(),
                 || async {
                     validator_builder
-                        .build_tree_validator(
-                            &add_ons_ctx,
-                            engine_tree_config.clone(),
-                            reorg_overlay_manager.clone(),
-                        )
+                        .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
                         .await
                 },
                 node_config.debug.reorg_frequency,
@@ -303,7 +298,6 @@ impl<B> EngineNodeLauncher<B> {
             pruner,
             payload_builder: ctx.components().payload_builder_handle().clone(),
             payload_validator: engine_validator,
-            overlay_manager,
             tree_config: engine_tree_config,
             sync_metrics_tx: ctx.sync_metrics_tx(),
             evm_config: ctx.components().evm_config().clone(),

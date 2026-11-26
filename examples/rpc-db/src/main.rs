@@ -33,7 +33,7 @@ use reth_ethereum::{
     },
     tasks::Runtime,
 };
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 
@@ -56,7 +56,7 @@ async fn main() -> eyre::Result<()> {
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"))?,
         RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
-        OverlayManager::default(),
+        OverlayContext::default(),
         runtime.clone(),
     )?;
 

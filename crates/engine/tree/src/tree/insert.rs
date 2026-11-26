@@ -50,7 +50,7 @@ where
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T> + WaitForCaches,
+    V: EngineValidator<T> + WaitForCaches<N>,
 {
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
@@ -511,11 +511,10 @@ where
         } else {
             self.canonical_in_memory_state_writer.insert_executed(executed.clone());
         }
-        let tree_state = &self.state.tree_state;
-        tree_state.overlay_manager.precompute_child_execution_overlays(
-            tree_state.in_memory_state(),
-            executed.recovered_block().hash(),
-        );
+        self.state
+            .tree_state
+            .overlay_context
+            .precompute_child_execution_overlays(executed.recovered_block().hash());
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 

@@ -723,8 +723,7 @@ mod tests {
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory.clone(),
             anchor_hash,
-            provider_factory.in_memory_state().clone(),
-            provider_factory.overlay_manager().clone(),
+            provider_factory.overlay_context().clone(),
         );
         let ctx = test_ctx(factory.clone());
 
@@ -758,8 +757,7 @@ mod tests {
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory.clone(),
             anchor_hash,
-            provider_factory.in_memory_state().clone(),
-            provider_factory.overlay_manager().clone(),
+            provider_factory.overlay_context().clone(),
         );
         let ctx = test_ctx(factory);
 
@@ -844,8 +842,7 @@ mod tests {
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
             provider_factory.clone(),
             anchor_hash,
-            provider_factory.in_memory_state().clone(),
-            provider_factory.overlay_manager().clone(),
+            provider_factory.overlay_context().clone(),
         );
         let runtime = reth_tasks::Runtime::test();
 

@@ -317,6 +317,9 @@ impl StaticFileWriterError {
 /// Consistent database view error.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 pub enum ConsistentViewError {
+    /// The database factory and canonical state were wired to different in-memory blocks.
+    #[display("database factory and canonical state do not share the same in-memory blocks")]
+    MismatchedInMemoryState,
     /// Error thrown on attempt to initialize provider while node is still syncing.
     #[display("node is syncing. best block: {best_block:?}")]
     Syncing {

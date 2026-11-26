@@ -34,7 +34,7 @@ use reth_storage_api::{
     StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayStateProvider, OwnedProvider};
+use reth_storage_overlay::{OverlayStateProvider, OverlayStateProviderMode, OwnedProvider};
 use reth_trie::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     metrics::TrieRootMetrics,
@@ -192,7 +192,8 @@ impl<N: ProviderNodeTypes> BlockchainProvider<N> {
         };
         // Peers choose the root, so its reverts stay out of the cache the engine shares.
         Ok(Some(Box::new(HistoricalStateRangeView {
-            provider: provider.into_overlay_provider(block_hash, false, None),
+            provider: provider
+                .into_overlay_provider(block_hash, OverlayStateProviderMode::UncachedReverts),
         })))
     }
 }
@@ -3801,8 +3802,7 @@ mod tests {
         let rebuilt_from_hash = OverlayStateProviderFactory::new(
             provider.database.clone(),
             block_hash,
-            provider.database.in_memory_state().clone(),
-            provider.database.overlay_manager().clone(),
+            provider.database.overlay_context().clone(),
         )
         .database_provider_ro()?;
 

@@ -20,7 +20,7 @@ use reth_provider::{
     DatabaseProviderFactory, ProviderFactory, StageCheckpointReader, StorageSettings,
 };
 use reth_stages_types::StageId;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::Runtime;
 use std::{path::Path, sync::Arc};
 use tempfile::TempDir;
@@ -187,7 +187,7 @@ async fn import_chain(
             chain_spec.clone(),
             StaticFileProvider::read_write(datadir.join("static_files"))?,
             RocksDBProvider::builder(datadir.join("rocksdb")).with_default_tables().build()?,
-            OverlayManager::default(),
+            OverlayContext::default(),
             runtime.clone(),
         )?;
 
@@ -302,7 +302,7 @@ mod tests {
                 .with_default_tables()
                 .build()
                 .unwrap(),
-            OverlayManager::default(),
+            OverlayContext::default(),
             runtime,
         )
         .expect("failed to create provider factory")

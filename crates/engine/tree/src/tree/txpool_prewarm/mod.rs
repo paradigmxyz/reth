@@ -242,12 +242,11 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::U256;
     use evm2::BaseEvmTypes;
-    use reth_chain_state::InMemoryState;
     use reth_chainspec::ChainSpecBuilder;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::OverlayContext;
     use reth_tasks::Runtime;
 
     type TestHandle = Handle<EthPrimitives, MockEthProvider, EthEvmConfig>;
@@ -266,8 +265,7 @@ mod tests {
         let state_provider_factory = OverlayStateProviderFactory::new(
             MockEthProvider::default(),
             parent.hash(),
-            InMemoryState::read_only(),
-            OverlayManager::default(),
+            OverlayContext::default(),
         );
         handle.start(parent, Default::default(), state_provider_factory);
     }

@@ -35,7 +35,7 @@ use reth_storage_api::{
     NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use std::{
     ops::{RangeBounds, RangeInclusive},
     path::Path,
@@ -88,10 +88,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
-    /// Executed blocks that are not on disk yet.
-    in_memory_state: InMemoryState<N::Primitives>,
-    /// Manager for state trie overlays and cached changesets.
-    overlay_manager: OverlayManager,
+    /// The in-memory blocks and the caches shared by this node.
+    overlay_context: OverlayContext<N::Primitives>,
     /// Store for block access lists.
     bal_store: BalStoreHandle,
     /// Task runtime for spawning parallel I/O work.
@@ -115,87 +113,42 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Database
 }
 
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
-    /// Creates a database provider factory for storage whose blocks are all on disk.
+    /// Creates a database provider factory using the supplied in-memory blocks and overlay caches.
     ///
-    /// As with [`Self::new_with_in_memory_state`], call [`Self::check_consistency`] after
-    /// creation to detect inconsistent storage backends.
+    /// Call [`Self::check_consistency`] to detect inconsistent storage backends. If it returns
+    /// unwind targets, unwind to the minimum of the two targets before using the factory.
     pub fn new(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager,
+        overlay_context: OverlayContext<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new_with_in_memory_state(
-            db,
-            chain_spec,
-            static_file_provider,
-            rocksdb_provider,
-            InMemoryState::read_only(),
-            overlay_manager,
-            runtime,
-        )
-    }
-
-    /// Creates a database provider factory using the node's live in-memory state.
-    ///
-    /// The storage backends used by the produced factory MAY be inconsistent.
-    /// It is recommended to call [`Self::check_consistency`] after
-    /// creation to ensure consistency between the database and static files.
-    /// If the function returns unwind targets, the caller MUST unwind the
-    /// inner database to the minimum of the two targets to ensure consistency.
-    pub fn new_with_in_memory_state(
-        db: N::DB,
-        chain_spec: Arc<N::ChainSpec>,
-        static_file_provider: StaticFileProvider<N::Primitives>,
-        rocksdb_provider: RocksDBProvider,
-        in_memory_state: InMemoryState<N::Primitives>,
-        overlay_manager: OverlayManager,
-        runtime: reth_tasks::Runtime,
-    ) -> ProviderResult<Self> {
-        // Load storage settings from database at init time. Creates a temporary provider
-        // to read persisted settings, falling back to legacy defaults if none exist.
-        //
-        // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::v1();
-        let database_provider_metrics = Arc::new(DatabaseProviderMetrics::default());
-        let storage_settings = DatabaseProvider::<_, N>::new(
-            db.tx()?,
-            chain_spec.clone(),
-            static_file_provider.clone(),
-            Default::default(),
-            Default::default(),
-            Arc::new(RwLock::new(legacy_settings)),
-            rocksdb_provider.clone(),
-            in_memory_state.clone(),
-            overlay_manager.clone(),
-            runtime.clone(),
-            db.path(),
-            database_provider_metrics.clone(),
-        )
-        .storage_settings()?
-        .unwrap_or(legacy_settings);
-
-        Ok(Self {
+        let factory = Self {
             db,
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::default(),
             storage: Default::default(),
-            storage_settings: Arc::new(RwLock::new(storage_settings)),
+            storage_settings: Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider,
-            in_memory_state,
-            overlay_manager,
+            overlay_context,
             bal_store: BalStoreHandle::new(InMemoryBalStore::default()),
             runtime,
             minimum_pruning_distance: MINIMUM_UNWIND_SAFE_DISTANCE,
-            database_provider_metrics,
+            database_provider_metrics: Arc::new(DatabaseProviderMetrics::default()),
             read_only_sync: None,
-        })
+        };
+
+        // Read persisted settings at startup. Both the factory and its providers use this cache.
+        let settings = factory.provider()?.storage_settings()?.unwrap_or(legacy_settings);
+        factory.set_storage_settings_cache(settings);
+        Ok(factory)
     }
 
-    /// Creates a factory for storage whose blocks are all on disk and performs consistency checks.
+    /// Creates a factory and checks its storage backends for consistency.
     ///
     /// This will call [`Self::check_consistency`] internally and return
     /// [`ProviderError::MustUnwind`] if inconsistencies are found. It may also
@@ -206,10 +159,10 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager,
+        overlay_context: OverlayContext<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> ProviderResult<Self> {
-        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, overlay_manager, runtime)
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider, overlay_context, runtime)
             .and_then(Self::assert_consistent)
     }
 }
@@ -227,9 +180,9 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         self
     }
 
-    /// Returns the shared overlay manager.
-    pub const fn overlay_manager(&self) -> &OverlayManager {
-        &self.overlay_manager
+    /// Returns the in-memory blocks and overlay caches shared by the node.
+    pub const fn overlay_context(&self) -> &OverlayContext<N::Primitives> {
+        &self.overlay_context
     }
 
     /// Sets the minimum pruning distance for an existing [`ProviderFactory`].
@@ -349,8 +302,8 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Returns the executed blocks that are not on disk yet, canonical or not.
-    pub const fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
-        &self.in_memory_state
+    pub fn in_memory_state(&self) -> &InMemoryState<N::Primitives> {
+        self.overlay_context.in_memory_state()
     }
 }
 
@@ -379,14 +332,14 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
 }
 
 impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
-    /// Opens a database by path whose blocks are all on disk. The factory owns the database.
+    /// Opens and owns the database at `path`.
     pub fn new_with_database_path<P: AsRef<Path>>(
         path: P,
         chain_spec: Arc<N::ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
-        overlay_manager: OverlayManager,
+        overlay_context: OverlayContext<N::Primitives>,
         runtime: reth_tasks::Runtime,
     ) -> RethResult<Self> {
         Self::new(
@@ -394,7 +347,7 @@ impl<N: ProviderNodeTypes<DB = DatabaseEnv>> ProviderFactory<N> {
             chain_spec,
             static_file_provider,
             rocksdb_provider,
-            overlay_manager,
+            overlay_context,
             runtime,
         )
         .map_err(RethError::Provider)
@@ -405,9 +358,6 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Returns a provider with a created `DbTx` inside, which allows fetching data from the
     /// database using different types of providers. Example: [`HeaderProvider`]
     /// [`BlockHashReader`]. This may fail if the inner read database transaction fails to open.
-    ///
-    /// This sets the [`PruneModes`] to [`None`], because they should only be relevant for writing
-    /// data.
     #[track_caller]
     pub fn provider(&self) -> ProviderResult<DatabaseProviderRO<N::DB, N>> {
         let db_tx = self.db.tx()?;
@@ -419,21 +369,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         // mdbx transaction open that might rely on this data.
         self.sync_providers_if_needed()?;
 
-        Ok(DatabaseProvider::new(
-            db_tx,
-            self.chain_spec.clone(),
-            self.static_file_provider.clone(),
-            self.prune_modes.clone(),
-            self.storage.clone(),
-            self.storage_settings.clone(),
-            self.rocksdb_provider.clone(),
-            self.in_memory_state.clone(),
-            self.overlay_manager.clone(),
-            self.runtime.clone(),
-            self.db.path(),
-            self.database_provider_metrics.clone(),
-        )
-        .with_minimum_pruning_distance(self.minimum_pruning_distance))
+        Ok(DatabaseProvider::new(db_tx, self, None))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, which allows fetching and updating
@@ -442,24 +378,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// open.
     #[track_caller]
     pub fn provider_rw(&self) -> ProviderResult<DatabaseProviderRW<N::DB, N>> {
-        Ok(DatabaseProviderRW(
-            DatabaseProvider::new_rw(
-                self.db.tx_mut()?,
-                self.chain_spec.clone(),
-                self.static_file_provider.clone(),
-                self.prune_modes.clone(),
-                self.storage.clone(),
-                self.storage_settings.clone(),
-                self.rocksdb_provider.clone(),
-                self.in_memory_state.clone(),
-                self.overlay_manager.clone(),
-                self.runtime.clone(),
-                self.db.path(),
-                self.database_provider_metrics.clone(),
-            )
-            .with_reader_txn_tracker(self.db.clone())
-            .with_minimum_pruning_distance(self.minimum_pruning_distance),
-        ))
+        Ok(DatabaseProviderRW(self.open_write_provider(CommitOrder::Normal)?))
     }
 
     /// Returns a provider with a created `DbTxMut` inside, configured for unwind operations.
@@ -472,22 +391,16 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     pub fn unwind_provider_rw(
         &self,
     ) -> ProviderResult<DatabaseProvider<<N::DB as Database>::TXMut, N>> {
-        Ok(DatabaseProvider::new_unwind_rw(
-            self.db.tx_mut()?,
-            self.chain_spec.clone(),
-            self.static_file_provider.clone(),
-            self.prune_modes.clone(),
-            self.storage.clone(),
-            self.storage_settings.clone(),
-            self.rocksdb_provider.clone(),
-            self.in_memory_state.clone(),
-            self.overlay_manager.clone(),
-            self.runtime.clone(),
-            self.db.path(),
-            self.database_provider_metrics.clone(),
-        )
-        .with_reader_txn_tracker(self.db.clone())
-        .with_minimum_pruning_distance(self.minimum_pruning_distance))
+        self.open_write_provider(CommitOrder::Unwind)
+    }
+
+    #[track_caller]
+    fn open_write_provider(
+        &self,
+        commit_order: CommitOrder,
+    ) -> ProviderResult<DatabaseProvider<<N::DB as Database>::TXMut, N>> {
+        Ok(DatabaseProvider::new(self.db.tx_mut()?, self, Some(commit_order))
+            .with_reader_txn_tracker(self.db.clone()))
     }
 
     /// State provider for latest block
@@ -1047,8 +960,7 @@ where
             storage,
             storage_settings,
             rocksdb_provider,
-            in_memory_state: _,
-            overlay_manager,
+            overlay_context,
             bal_store,
             runtime,
             minimum_pruning_distance,
@@ -1063,7 +975,7 @@ where
             .field("storage", &storage)
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
-            .field("overlay_manager", &overlay_manager)
+            .field("overlay_context", &overlay_context)
             .field("bal_store", &bal_store)
             .field("runtime", &runtime)
             .field("minimum_pruning_distance", &minimum_pruning_distance)
@@ -1085,8 +997,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage: self.storage.clone(),
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
-            in_memory_state: self.in_memory_state.clone(),
-            overlay_manager: self.overlay_manager.clone(),
+            overlay_context: self.overlay_context.clone(),
             bal_store: self.bal_store.clone(),
             runtime: self.runtime.clone(),
             minimum_pruning_distance: self.minimum_pruning_distance,
@@ -1163,7 +1074,7 @@ mod tests {
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
-            OverlayManager::default(),
+            OverlayContext::default(),
             reth_tasks::Runtime::test(),
         )
         .unwrap();

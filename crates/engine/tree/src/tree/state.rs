@@ -6,7 +6,7 @@ use reth_chain_state::{
     BlockState, EthPrimitives, ExecutedBlock, InMemoryState, InMemoryStateBlockCounts,
 };
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 
 /// Keeps track of the state of the tree.
 ///
@@ -23,21 +23,18 @@ use reth_storage_overlay::OverlayManager;
 pub struct TreeState<N: NodePrimitives = EthPrimitives> {
     /// Currently tracked canonical head of the chain.
     pub(crate) current_canonical_head: BlockNumHash,
-    /// Tracks the executed blocks, canonical or not.
-    in_memory_state: InMemoryState<N>,
-    /// Manages state trie overlays for in-memory blocks.
-    pub(crate) overlay_manager: OverlayManager,
+    /// Holds the tracked blocks and their overlay caches.
+    pub(crate) overlay_context: OverlayContext<N>,
 }
 
 impl<N: NodePrimitives> TreeState<N> {
     /// Returns a new tree state that points to the given canonical head and reads the executed
-    /// blocks from the given in-memory state.
+    /// blocks from the given overlay context.
     pub const fn new(
         current_canonical_head: BlockNumHash,
-        in_memory_state: InMemoryState<N>,
-        overlay_manager: OverlayManager,
+        overlay_context: OverlayContext<N>,
     ) -> Self {
-        Self { current_canonical_head, in_memory_state, overlay_manager }
+        Self { current_canonical_head, overlay_context }
     }
 
     /// Returns the number of tracked executed blocks, canonical or not.
@@ -95,8 +92,8 @@ impl<N: NodePrimitives> TreeState<N> {
     }
 
     /// Returns the in-memory state that tracks the executed blocks, canonical or not.
-    pub(crate) const fn in_memory_state(&self) -> &InMemoryState<N> {
-        &self.in_memory_state
+    fn in_memory_state(&self) -> &InMemoryState<N> {
+        self.overlay_context.in_memory_state()
     }
 }
 
@@ -116,7 +113,7 @@ mod tests {
         let canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(in_memory_state_writer);
         (
-            TreeState::new(BlockNumHash::default(), in_memory_state, OverlayManager::default()),
+            TreeState::new(BlockNumHash::default(), OverlayContext::new(in_memory_state)),
             canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
             canonical_in_memory_state_writer,
         )

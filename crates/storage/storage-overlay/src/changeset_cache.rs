@@ -1,226 +1,17 @@
-//! Trie changeset caching utilities.
-//!
-//! This module provides functionality to compute trie changesets for a given block,
-//! which represent the old trie node values before the block was processed.
-//!
-//! It also provides an efficient in-memory cache for these changesets, which is essential for:
-//! - **Reorg support**: Quickly access changesets to revert blocks during chain reorganizations
-//! - **Memory efficiency**: Explicit eviction releases persisted changesets
+//! Cache for persisted trie node before-values.
 
-use crate::{database_state_frontiers, OverlayBuilder, OverlayManager, OverlayStateProvider};
-use alloy_eips::BlockNumHash;
-use alloy_primitives::{map::B256Map, BlockNumber, B256};
+use alloy_primitives::{BlockNumber, B256};
 use parking_lot::RwLock;
-use reth_chain_state::{InMemoryState, InMemoryStateSnapshot, Snapshotted};
 use reth_metrics::{
     metrics::{Counter, Gauge},
     Metrics,
 };
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
-use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
-    StorageChangeSetReader, StorageSettingsCache,
-};
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
-use reth_trie::trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory};
-use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
-use reth_trie_db::{DatabaseTrieCursorFactory, TrieTableAdapter};
+use reth_trie_common::updates::TrieUpdatesSorted;
 use std::{
     collections::{BTreeMap, HashMap},
-    ops::RangeInclusive,
     sync::Arc,
 };
-use tracing::{debug, warn};
-
-#[cfg(test)]
-use reth_trie::{changesets::compute_trie_changesets, HashedPostStateSorted, TrieInputSorted};
-#[cfg(test)]
-use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseStateRoot};
-
-/// Gets complete trie before-values for an inclusive block range, oldest values taking
-/// precedence. For an already-open write transaction, take `snapshot` before changing any
-/// state tables. The snapshot must cover the blocks not yet persisted in that transaction.
-pub fn get_or_compute_cached_changesets_range<N, Provider>(
-    overlay_manager: &OverlayManager,
-    in_memory_state: &InMemoryState<N>,
-    snapshot: &InMemoryStateSnapshot<N>,
-    provider: &Provider,
-    range: RangeInclusive<BlockNumber>,
-) -> ProviderResult<Arc<TrieUpdatesSorted>>
-where
-    N: NodePrimitives,
-    Provider: DBProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + StageCheckpointReader
-        + PruneCheckpointReader
-        + BlockNumReader
-        + StorageSettingsCache,
-{
-    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
-    overlay_manager.changeset_cache().get_or_compute_range(
-        provider,
-        range,
-        partial_state_trie,
-        finish,
-        true,
-        || {
-            OverlayBuilder::new(
-                finish.hash,
-                snapshot.clone(),
-                in_memory_state.clone(),
-                overlay_manager.clone(),
-            )
-        },
-    )
-}
-
-/// Computes block trie updates using the changeset cache and the snapshot paired with the database
-/// transaction.
-///
-/// # Algorithm
-///
-/// For block N:
-/// 1. Get cumulative trie reverts from block N+1 to db tip using the cache
-/// 2. Create an overlay cursor factory with these reverts (representing trie state after block N)
-/// 3. Walk through account trie changesets for block N
-/// 4. For each changed path, look up the current value using the overlay cursor
-/// 5. Walk through storage trie changesets for block N
-/// 6. For each changed path, look up the current value using the overlay cursor
-/// 7. Return the collected trie updates
-///
-/// # Arguments
-///
-/// * `provider` - Database provider for accessing changesets and block data
-/// * `block_number` - Block number to compute trie updates for
-///
-/// # Returns
-///
-/// Trie updates representing the state of trie nodes after the block was processed
-///
-/// # Errors
-///
-/// Returns error if:
-/// - Block number exceeds database tip
-/// - Database access fails
-/// - Cache retrieval fails
-pub fn compute_block_trie_updates<N, Provider>(
-    overlay_manager: &OverlayManager,
-    in_memory_state: &InMemoryState<N>,
-    provider: &Snapshotted<Provider, N>,
-    block_number: BlockNumber,
-) -> ProviderResult<TrieUpdatesSorted>
-where
-    N: NodePrimitives,
-    Provider: DBProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + BlockNumReader
-        + StorageSettingsCache,
-{
-    let snapshot = provider.snapshot();
-    let provider = &**provider;
-    reth_trie_db::with_adapter!(provider, |A| {
-        compute_block_trie_updates_inner::<_, _, A>(
-            overlay_manager,
-            in_memory_state,
-            snapshot,
-            provider,
-            block_number,
-        )
-    })
-}
-
-fn compute_block_trie_updates_inner<N, Provider, A>(
-    overlay_manager: &OverlayManager,
-    in_memory_state: &InMemoryState<N>,
-    snapshot: &InMemoryStateSnapshot<N>,
-    provider: &Provider,
-    block_number: BlockNumber,
-) -> ProviderResult<TrieUpdatesSorted>
-where
-    N: NodePrimitives,
-    Provider: DBProvider
-        + ChangeSetReader
-        + StorageChangeSetReader
-        + PruneCheckpointReader
-        + StageCheckpointReader
-        + BlockNumReader
-        + StorageSettingsCache,
-    A: TrieTableAdapter,
-{
-    let tx = provider.tx_ref();
-    let cache = overlay_manager.changeset_cache();
-    let (partial_state_trie, finish) = database_state_frontiers(provider)?;
-
-    let overlay_at_finish = || {
-        OverlayBuilder::new(
-            finish.hash,
-            snapshot.clone(),
-            in_memory_state.clone(),
-            overlay_manager.clone(),
-        )
-    };
-
-    // Step 1: Get the trie changesets for the target block from cache
-    let changesets = cache.get_or_compute(
-        provider,
-        block_number,
-        partial_state_trie,
-        finish,
-        overlay_at_finish,
-    )?;
-
-    // Step 2: Get the trie reverts for the state after the target block using the cache
-    let reverts = cache.get_or_compute_range(
-        provider,
-        (block_number + 1)..=finish.number,
-        partial_state_trie,
-        finish,
-        true,
-        overlay_at_finish,
-    )?;
-
-    // Step 3: Create an InMemoryTrieCursorFactory with the reverts
-    // This gives us the trie state as it was after the target block was processed
-    let db_cursor_factory = DatabaseTrieCursorFactory::<_, A>::new(tx);
-    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
-
-    // Step 4: Collect all account trie nodes that changed in the target block
-    let account_nodes_ref = changesets.account_nodes_ref();
-    let mut account_nodes = Vec::with_capacity(account_nodes_ref.len());
-    let mut account_cursor = cursor_factory.account_trie_cursor()?;
-
-    // Iterate over the account nodes from the changesets
-    for (nibbles, _old_node) in account_nodes_ref {
-        // Look up the current value of this trie node using the overlay cursor
-        let node_value = account_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
-        account_nodes.push((*nibbles, node_value));
-    }
-
-    // Step 5: Collect all storage trie nodes that changed in the target block
-    let mut storage_tries = B256Map::default();
-
-    // Iterate over the storage tries from the changesets
-    for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
-        let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
-        let storage_nodes_ref = storage_changeset.storage_nodes_ref();
-        let mut storage_nodes = Vec::with_capacity(storage_nodes_ref.len());
-
-        // Iterate over the storage nodes for this account
-        for (nibbles, _old_node) in storage_nodes_ref {
-            // Look up the current value of this storage trie node
-            let node_value = storage_cursor.seek_exact(*nibbles)?.map(|(_, node)| node);
-            storage_nodes.push((*nibbles, node_value));
-        }
-
-        storage_tries.insert(*hashed_address, StorageTrieUpdatesSorted { storage_nodes });
-    }
-
-    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
-}
+use tracing::debug;
 
 /// Thread-safe changeset cache.
 ///
@@ -258,270 +49,12 @@ impl ChangesetCache {
         self.inner.write().evict(up_to_block)
     }
 
-    /// Gets changesets from cache, or computes them on-the-fly if missing.
-    ///
-    /// This is the primary API for retrieving changesets. It checks the cache first, then falls
-    /// back to computing from database state if missing.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_number` - Block number (for cache insertion and logging)
-    /// * `provider` - Database provider for DB access
-    ///
-    /// # Returns
-    ///
-    /// Changesets for the block, either from cache or computed on-the-fly.
-    pub(crate) fn get_or_compute<N, P>(
-        &self,
-        provider: &P,
-        block_number: BlockNumber,
-        partial_state_trie: BlockNumHash,
-        finish: BlockNumHash,
-        finish_builder: impl FnOnce() -> OverlayBuilder<N>,
-    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
-    where
-        N: NodePrimitives,
-        P: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + StageCheckpointReader
-            + PruneCheckpointReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    {
-        self.get_or_compute_range(
-            provider,
-            block_number..=block_number,
-            partial_state_trie,
-            finish,
-            true,
-            finish_builder,
-        )
+    pub(crate) fn get(&self, key: &ChangesetRangeKey) -> Option<Arc<TrieUpdatesSorted>> {
+        self.inner.read().get(key)
     }
 
-    /// Gets or computes trie reverts for a range of blocks.
-    ///
-    /// If all blocks in the range are cached, this method retrieves and accumulates those
-    /// per-block trie changesets (reverts) in reverse order (newest to oldest), so that older
-    /// values take precedence when there are conflicts.
-    ///
-    /// If any block is missing from cache, this falls back to one aggregate database computation
-    /// for the whole range. The aggregate result restores the trie to the state before the range
-    /// and is inserted into the range cache when `write_reverts_to_cache` is set.
-    ///
-    /// # Arguments
-    ///
-    /// * `provider` - Database provider for DB access and block lookups
-    /// * `range` - Block range to accumulate reverts for (inclusive)
-    /// * `write_reverts_to_cache` - Whether to retain the accumulated reverts. Callers serving
-    ///   ranges an untrusted peer chooses pass `false`, since entries stay until their start block
-    ///   is evicted.
-    ///
-    /// # Returns
-    ///
-    /// Accumulated trie reverts for all blocks in the specified range
-    ///
-    /// # Errors
-    ///
-    /// Returns error if:
-    /// - Any block in the range is beyond the database tip
-    /// - Database access fails
-    /// - Block hash lookup fails
-    /// - Changeset computation fails
-    pub(crate) fn get_or_compute_range<N, P>(
-        &self,
-        provider: &P,
-        range: RangeInclusive<BlockNumber>,
-        partial_state_trie: BlockNumHash,
-        finish: BlockNumHash,
-        write_reverts_to_cache: bool,
-        finish_builder: impl FnOnce() -> OverlayBuilder<N>,
-    ) -> ProviderResult<Arc<TrieUpdatesSorted>>
-    where
-        N: NodePrimitives,
-        P: DBProvider
-            + ChangeSetReader
-            + StorageChangeSetReader
-            + StageCheckpointReader
-            + PruneCheckpointReader
-            + BlockNumReader
-            + StorageSettingsCache,
-    {
-        let start_block = *range.start();
-        let end_block = *range.end();
-        let timer = Instant::now();
-
-        if end_block > finish.number {
-            return Err(ProviderError::InsufficientChangesets {
-                requested: end_block,
-                available: 0..=finish.number,
-            });
-        }
-
-        debug!(
-            target: "trie::changeset_cache",
-            start_block,
-            end_block,
-            ?partial_state_trie,
-            ?finish,
-            "Starting get_or_compute_range"
-        );
-
-        if start_block > end_block {
-            debug!(
-                target: "trie::changeset_cache",
-                start_block,
-                end_block,
-                "Empty changeset range requested"
-            );
-            return Ok(Arc::new(TrieUpdatesSorted::default()))
-        }
-
-        let end_block_hash = provider.block_hash(end_block)?.ok_or_else(|| {
-            ProviderError::other(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("block hash not found for block number {}", end_block),
-            ))
-        })?;
-        let range_key = ChangesetRangeKey::new(start_block, end_block, end_block_hash);
-
-        if let Some(accumulated_reverts) = self.inner.read().get(&range_key) {
-            let elapsed = timer.elapsed();
-
-            debug!(
-                target: "trie::changeset_cache",
-                ?elapsed,
-                start_block,
-                end_block,
-                ?end_block_hash,
-                num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
-                "Changeset cache HIT for block range"
-            );
-
-            return Ok(accumulated_reverts)
-        }
-
-        let mut cached_reverts =
-            Vec::with_capacity(end_block.saturating_sub(start_block).saturating_add(1) as usize);
-        let mut all_cached = true;
-
-        for block_number in range.rev() {
-            // Get the block hash for this block number
-            let block_hash = if block_number == end_block {
-                end_block_hash
-            } else {
-                provider.block_hash(block_number)?.ok_or_else(|| {
-                    ProviderError::other(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        format!("block hash not found for block number {}", block_number),
-                    ))
-                })?
-            };
-
-            debug!(
-                target: "trie::changeset_cache",
-                block_number,
-                ?block_hash,
-                "Looked up block hash for block number in range"
-            );
-
-            let block_key = ChangesetRangeKey::single(block_number, block_hash);
-            if let Some(changesets) = self.inner.read().get(&block_key) {
-                cached_reverts.push(changesets);
-            } else {
-                all_cached = false;
-                break
-            }
-        }
-
-        if all_cached {
-            // `merge_slice` gives precedence to earlier items, so pass reverts oldest-to-newest.
-            cached_reverts.reverse();
-            let accumulated_reverts = Arc::new(TrieUpdatesSorted::merge_slice(&cached_reverts));
-            let elapsed = timer.elapsed();
-
-            let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
-            let num_storage_tries = accumulated_reverts.storage_tries_ref().len();
-
-            debug!(
-                target: "trie::changeset_cache",
-                ?elapsed,
-                start_block,
-                end_block,
-                num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
-                num_account_nodes,
-                num_storage_tries,
-                "Finished accumulating cached trie reverts for block range"
-            );
-
-            if write_reverts_to_cache {
-                self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
-            }
-            return Ok(accumulated_reverts)
-        }
-
-        warn!(
-            target: "trie::changeset_cache",
-            start_block,
-            end_block,
-            "Changeset cache MISS in range, falling back to aggregate DB-based computation"
-        );
-
-        let finish_builder = finish_builder();
-        let finish_state = finish_builder.parent_state().cloned();
-        let overlay = finish_builder.with_no_reverts().build_state_trie_overlay_at_frontiers(
-            provider,
-            partial_state_trie,
-            finish,
-            true,
-        )?;
-
-        // Forward updates are a best-effort optimization to speed up compute_range_trie_changesets,
-        // missing blocks do not affect correctness.
-        let mut forward_updates = finish_state
-            .iter()
-            .flat_map(|state| state.chain())
-            .take_while(|state| state.number() >= start_block)
-            .map(|state| (state.number(), state.block_ref().trie_updates()))
-            .collect::<Vec<_>>();
-        forward_updates.reverse();
-
-        let state_trie_provider = OverlayStateProvider::<&P, N>::new_with_state_trie(
-            provider,
-            overlay,
-            provider.cached_storage_settings().is_v2(),
-        );
-
-        let accumulated_reverts = Arc::new(reth_trie_db::compute_range_trie_changesets(
-            provider,
-            &state_trie_provider,
-            &forward_updates,
-            start_block..=end_block,
-            finish.number,
-        )?);
-
-        let elapsed = timer.elapsed();
-
-        let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
-        let num_storage_tries = accumulated_reverts.storage_tries_ref().len();
-
-        debug!(
-            target: "trie::changeset_cache",
-            ?elapsed,
-            start_block,
-            end_block,
-            ?end_block_hash,
-            num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
-            num_account_nodes,
-            num_storage_tries,
-            "Finished accumulating trie reverts for block range"
-        );
-
-        if write_reverts_to_cache {
-            self.inner.write().insert(range_key, Arc::clone(&accumulated_reverts));
-        }
-
-        Ok(accumulated_reverts)
+    pub(crate) fn insert(&self, key: ChangesetRangeKey, changesets: Arc<TrieUpdatesSorted>) {
+        self.inner.write().insert(key, changesets)
     }
 }
 
@@ -531,18 +64,22 @@ impl ChangesetCache {
 /// a different chain. For a single block, `start_block == end_block` and `end_block_hash` is that
 /// block's hash.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct ChangesetRangeKey {
+pub(crate) struct ChangesetRangeKey {
     start_block: BlockNumber,
     end_block: BlockNumber,
     end_block_hash: B256,
 }
 
 impl ChangesetRangeKey {
-    const fn new(start_block: BlockNumber, end_block: BlockNumber, end_block_hash: B256) -> Self {
+    pub(crate) const fn new(
+        start_block: BlockNumber,
+        end_block: BlockNumber,
+        end_block_hash: B256,
+    ) -> Self {
         Self { start_block, end_block, end_block_hash }
     }
 
-    const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
+    pub(crate) const fn single(block_number: BlockNumber, block_hash: B256) -> Self {
         Self::new(block_number, block_number, block_hash)
     }
 }
@@ -703,7 +240,10 @@ impl ChangesetCacheInner {
 mod tests {
     use super::*;
     use crate::{
-        test_utils::{overlay_manager_with_writer, test_overlay_builder},
+        builder::{OverlayBuildMode, OverlaySnapshot, TrieRevertCache},
+        database_state_frontiers,
+        test_utils::overlay_context_with_writer,
+        OverlayBuilder, OverlayContext, OverlayStateProvider, OverlayStateProviderMode,
         StateTrieOverlay,
     };
     use alloy_consensus::Header;
@@ -724,8 +264,24 @@ mod tests {
         StaticFileSegment, StaticFileWriter,
     };
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
-    use reth_storage_api::{StageCheckpointWriter, TrieWriter};
-    use reth_trie::{BranchNodeCompact, Nibbles, SortedTrieData, StateRoot};
+    use reth_storage_api::{
+        BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointWriter, StorageChangeSetReader,
+        StorageSettingsCache, TrieWriter,
+    };
+    use reth_storage_errors::provider::ProviderError;
+    use reth_trie::{
+        changesets::compute_trie_changesets,
+        trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+        BranchNodeCompact, HashedPostStateSorted, Nibbles, SortedTrieData, StateRoot,
+        TrieInputSorted,
+    };
+    use reth_trie_common::updates::StorageTrieUpdatesSorted;
+    use reth_trie_db::{
+        DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseStateRoot,
+        DatabaseTrieCursorFactory, TrieTableAdapter,
+    };
+
+    use std::ops::RangeInclusive;
 
     // Helper function to create empty TrieUpdatesSorted for testing
     fn create_test_changesets() -> Arc<TrieUpdatesSorted> {
@@ -887,8 +443,7 @@ mod tests {
 
     #[reth_concurrency::test]
     fn consumers_restore_trie_values_masked_by_deferred_blocks() {
-        let manager = OverlayManager::default();
-        let in_memory_state = InMemoryState::read_only();
+        let context = OverlayContext::<reth_chain_state::EthPrimitives>::default();
         let factory = create_test_provider_factory();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
         let provider = factory.provider_rw().unwrap();
@@ -916,49 +471,60 @@ mod tests {
         assert!(masked.is_empty());
         provider.write_trie_updates_sorted(&masked).unwrap();
         provider.commit().unwrap();
-        let provider = in_memory_state.snapshot_during(|| factory.provider()).transpose().unwrap();
+        let provider = context.snapshot_during(|| factory.provider()).transpose().unwrap();
         for (start, end, before) in [
             (4, 4, Arc::new(TrieUpdatesSorted::new(vec![(path, None)], B256Map::default()))),
             (5, 10, Arc::clone(&block4)),
             (5, 5, Arc::default()),
         ] {
-            manager.changeset_cache().inner.write().insert(
+            context.manager().changeset_cache().inner.write().insert(
                 ChangesetRangeKey::new(start, end, blocks[end as usize].recovered_block().hash()),
                 before,
             );
         }
         let (frontier, finish) = database_state_frontiers(&*provider).unwrap();
-        let overlay =
-            test_overlay_builder(&manager, &in_memory_state, blocks[4].recovered_block().hash())
-                .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
-                .unwrap();
+        let builder = |mode| {
+            OverlayBuilder::new(
+                blocks[4].recovered_block().hash(),
+                OverlaySnapshot::from_view(&provider),
+                OverlayBuildMode::Provider(mode),
+            )
+        };
+        let overlay = builder(OverlayStateProviderMode::Cached)
+            .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+            .unwrap();
         assert_eq!(overlay.input().nodes, block4);
-        assert_eq!(
-            compute_block_trie_updates(&manager, &in_memory_state, &provider, 4).unwrap(),
-            *block4
-        );
+        assert_eq!(context.compute_block_trie_updates(&factory, 4).unwrap(), *block4);
 
         // With only per-block entries left, the reverts are merged again on every build, and a
-        // builder that opted out keeps the merged range out of the cache.
-        manager.evict_cached_changesets(11);
+        // provider that opted out keeps the merged range out of the cache.
+        context.evict_cached_changesets(11);
         for number in 5..=10 {
             insert_test_changesets(
-                &mut manager.changeset_cache().inner.write(),
+                &mut context.manager().changeset_cache().inner.write(),
                 blocks[number as usize].recovered_block().hash(),
                 number,
                 Arc::default(),
             );
         }
-        let cached = || manager.changeset_cache().inner.read().entries.len();
-        let builder =
-            test_overlay_builder(&manager, &in_memory_state, blocks[4].recovered_block().hash());
-        builder
-            .clone()
-            .without_trie_revert_caching()
-            .build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true)
+        let cached = || context.manager().changeset_cache().inner.read().entries.len();
+        let parent_hash = blocks[4].recovered_block().hash();
+        OverlayStateProvider::new_ref(
+            &provider,
+            parent_hash,
+            OverlayStateProviderMode::UncachedReverts,
+        )
+        .account_trie_cursor()
+        .unwrap();
+        assert_eq!(cached(), 6);
+        OverlayStateProvider::new(provider, parent_hash, OverlayStateProviderMode::UncachedReverts)
+            .account_trie_cursor()
             .unwrap();
         assert_eq!(cached(), 6);
-        builder.build_state_trie_overlay_at_frontiers(&*provider, frontier, finish, true).unwrap();
+        let view = context.snapshot_during(|| factory.provider()).transpose().unwrap();
+        OverlayStateProvider::new(view, parent_hash, OverlayStateProviderMode::Cached)
+            .account_trie_cursor()
+            .unwrap();
         assert_eq!(cached(), 7);
     }
 
@@ -1000,7 +566,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let (manager, in_memory_state, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         for (block, updates) in [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
@@ -1012,13 +578,18 @@ mod tests {
                 SortedTrieData::new(Arc::default(), updates),
             ));
         }
-        let before = factory.provider().unwrap();
-        let cache = manager.changeset_cache();
-        let (frontier, finish) = database_state_frontiers(&before).unwrap();
+        let before = context.snapshot_during(|| factory.provider()).transpose().unwrap();
+        let cache = context.manager().changeset_cache();
+        let (frontier, finish) = database_state_frontiers(&*before).unwrap();
         let result = cache
-            .get_or_compute_range(&before, 1..=2, frontier, finish, true, || {
-                test_overlay_builder(&manager, &in_memory_state, finish.hash)
-            })
+            .get_or_compute_range(
+                &*before,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCache::ReadWrite,
+                &OverlaySnapshot::from_view(&before),
+            )
             .unwrap();
         assert_eq!(
             result.storage_tries_ref()[&hashed_address].storage_nodes_ref(),
@@ -1029,38 +600,51 @@ mod tests {
         provider_rw.write_trie_updates_sorted(&finish_updates).unwrap();
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(3)).unwrap();
         provider_rw.commit().unwrap();
-        let after = factory.provider().unwrap();
-        let (frontier, finish) = database_state_frontiers(&after).unwrap();
+        let after = context.snapshot_during(|| factory.provider()).transpose().unwrap();
+        let (frontier, finish) = database_state_frontiers(&*after).unwrap();
         let advanced = cache
-            .get_or_compute_range(&after, 1..=2, frontier, finish, true, || {
-                test_overlay_builder(&manager, &in_memory_state, finish.hash)
-            })
+            .get_or_compute_range(
+                &*after,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCache::ReadWrite,
+                &OverlaySnapshot::from_view(&after),
+            )
             .unwrap();
         assert!(Arc::ptr_eq(&advanced, &result));
 
         // A cold calculation at the newer frontier must also serve the older reader.
         cache.evict(2);
         let advanced = cache
-            .get_or_compute_range(&after, 1..=2, frontier, finish, true, || {
-                test_overlay_builder(&manager, &in_memory_state, finish.hash)
-            })
+            .get_or_compute_range(
+                &*after,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCache::ReadWrite,
+                &OverlaySnapshot::from_view(&after),
+            )
             .unwrap();
         assert_eq!(advanced, result);
 
         // An older reader must still receive the deletion after the frontier advances.
-        let cached = get_or_compute_cached_changesets_range(
-            &manager,
-            &in_memory_state,
-            &in_memory_state.snapshot(),
-            &before,
-            1..=2,
-        )
-        .unwrap();
+        let (frontier, finish) = database_state_frontiers(&*before).unwrap();
+        let cached = cache
+            .get_or_compute_range(
+                &*before,
+                1..=2,
+                frontier,
+                finish,
+                TrieRevertCache::ReadWrite,
+                &OverlaySnapshot::from_view(&before),
+            )
+            .unwrap();
         assert!(Arc::ptr_eq(&cached, &advanced));
     }
 
     #[reth_concurrency::test]
-    fn miss_fallback_resolves_finish_from_pinned_blocks_after_persistence_removes_it() {
+    fn miss_fallback_resolves_finish_from_snapshot_after_persistence_removes_it() {
         let factory = create_test_provider_factory();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..4).collect::<Vec<_>>();
         let address = Address::with_last_byte(1);
@@ -1097,7 +681,7 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        let (manager, in_memory_state, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         let executed = [
             (&blocks[1], Arc::new(storage_updates(vec![(removed, Some(node))]))),
             (&blocks[2], Arc::clone(&finish_updates)),
@@ -1113,47 +697,34 @@ mod tests {
         })
         .collect::<Vec<_>>();
         in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: executed });
-        let snapshot = in_memory_state.snapshot();
-        let provider = factory.provider().unwrap();
-        let cache = manager.changeset_cache();
-        let (frontier, finish) = database_state_frontiers(&provider).unwrap();
-        let pinned = || {
-            OverlayBuilder::new(
-                finish.hash,
-                snapshot.clone(),
-                in_memory_state.clone(),
-                manager.clone(),
-            )
+        let before = context.snapshot_during(|| factory.provider()).transpose().unwrap();
+        let cache = context.manager().changeset_cache();
+        let (frontier, finish) = database_state_frontiers(&*before).unwrap();
+        let from_snapshot = || {
+            cache
+                .get_or_compute_range(
+                    &*before,
+                    1..=2,
+                    frontier,
+                    finish,
+                    TrieRevertCache::ReadOnly,
+                    &OverlaySnapshot::from_view(&before),
+                )
+                .unwrap()
         };
-        // Nothing is cached, so this takes the fallback that builds the overlay at Finish.
-        let expected =
-            cache.get_or_compute_range(&provider, 1..=2, frontier, finish, false, pinned).unwrap();
 
-        // Persistence commits Finish and the engine removes it, while the provider still reads
-        // the frontiers it opened with.
-        let persisted = blocks[2].recovered_block().num_hash();
-        in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
-
-        let err = cache
-            .get_or_compute_range(&provider, 1..=2, frontier, finish, false, || {
-                test_overlay_builder(&manager, &in_memory_state, finish.hash)
-            })
-            .unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            format!(
-                "overlay anchor #{} ({}) is after partial state trie frontier #{} ({}); missing trie updates for blocks #{}..=#{}",
-                finish.number,
-                finish.hash,
-                frontier.number,
-                frontier.hash,
-                frontier.number + 1,
-                finish.number,
-            )
-        );
-        let from_pinned =
-            cache.get_or_compute_range(&provider, 1..=2, frontier, finish, false, pinned).unwrap();
-        assert_eq!(from_pinned, expected);
+        // Nothing is cached, so both calls compute at Finish using the snapshot that matches
+        // the old transaction, even after a later write has persisted its forward updates.
+        let expected = from_snapshot();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_trie_updates_sorted(&finish_updates).unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2)).unwrap();
+        provider_rw.commit().unwrap();
+        in_memory_state_writer.on_blocks_persisted(finish, finish, None);
+        let after = context.snapshot_during(|| factory.provider()).transpose().unwrap();
+        assert_eq!(database_state_frontiers(&*after).unwrap(), (finish, finish));
+        assert!(after.snapshot().state_by_hash(finish.hash).is_none());
+        assert_eq!(from_snapshot(), expected);
     }
 
     #[reth_concurrency::test]
@@ -1291,36 +862,31 @@ mod tests {
             .unwrap(),
             result,
         );
-        let manager = OverlayManager::default();
-        let in_memory_state = InMemoryState::<reth_chain_state::EthPrimitives>::read_only();
-        let snapshot = in_memory_state.snapshot();
-        let block_updates = |block_number| {
-            reth_trie_db::with_adapter!(&*provider, |A| {
-                compute_block_trie_updates_inner::<_, _, A>(
-                    &manager,
-                    &in_memory_state,
-                    &snapshot,
-                    &*provider,
-                    block_number,
-                )
-            })
-            .unwrap()
-        };
+        drop(state_trie_provider);
+        provider.commit().unwrap();
+        let context = OverlayContext::<reth_chain_state::EthPrimitives>::default();
+        let block_updates =
+            |block_number| context.compute_block_trie_updates(&factory, block_number).unwrap();
         assert_eq!(block_updates(1), second);
         assert_eq!(block_updates(2), first);
+        assert!(matches!(
+            context.compute_block_trie_updates(&factory, 3),
+            Err(ProviderError::BlockNotExecuted { requested: 3, executed: 2 })
+        ));
 
         // Recompute block 1 against its own tip instead of a later tip. Its changeset is identical.
+        let provider = factory.provider().unwrap();
         let at_first = OverlayStateProvider::<&_, reth_ethereum_primitives::EthPrimitives>::new_with_state_trie(
-            &*provider,
+            &provider,
             StateTrieOverlay::new(TrieInputSorted::new(
                 Arc::new(second),
-                Arc::new(HashedPostStateSorted::from_reverts(&*provider, 2..=2).unwrap()),
+                Arc::new(HashedPostStateSorted::from_reverts(&provider, 2..=2).unwrap()),
                 Default::default(),
             )),
             provider.cached_storage_settings().is_v2(),
         );
         let at_first =
-            reth_trie_db::compute_range_trie_changesets(&*provider, &at_first, &[], 1..=1, 1)
+            reth_trie_db::compute_range_trie_changesets(&provider, &at_first, &[], 1..=1, 1)
                 .unwrap();
         assert_eq!(first, at_first);
     }
@@ -1360,13 +926,18 @@ mod tests {
             );
         }
 
-        let overlay_manager = OverlayManager::default();
-        let in_memory_state = InMemoryState::read_only();
+        let context = OverlayContext::<reth_chain_state::EthPrimitives>::default();
+        let (_, snapshot) = OverlaySnapshot::split(context.snapshot_during(|| ()));
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let accumulated = cache
-            .get_or_compute_range(&*provider, 1..=2, partial_state_trie, finish, true, || {
-                test_overlay_builder(&overlay_manager, &in_memory_state, finish.hash)
-            })
+            .get_or_compute_range(
+                &*provider,
+                1..=2,
+                partial_state_trie,
+                finish,
+                TrieRevertCache::ReadWrite,
+                &snapshot,
+            )
             .unwrap();
         assert_eq!(accumulated.account_nodes_ref(), &[(path, Some(older_node))]);
     }
@@ -1456,32 +1027,41 @@ mod tests {
         )
         .unwrap();
         assert!(actual.storage_tries_ref().get(&hashed_address).is_none());
+        let context = OverlayContext::<reth_chain_state::EthPrimitives>::default();
+        assert_eq!(*context.trie_changesets_for_unwind(&*provider, 1).unwrap(), actual);
 
         let cache = ChangesetCache::new();
-        let overlay_manager = OverlayManager::default();
-        let in_memory_state = InMemoryState::read_only();
+        let context = OverlayContext::<reth_chain_state::EthPrimitives>::default();
+        let (_, snapshot) = OverlaySnapshot::split(context.snapshot_during(|| ()));
         let (partial_state_trie, finish) = database_state_frontiers(&*provider).unwrap();
         let uncached = cache
-            .get_or_compute_range(&*provider, 1..=3, partial_state_trie, finish, false, || {
-                test_overlay_builder(&overlay_manager, &in_memory_state, finish.hash)
-            })
+            .get_or_compute_range(
+                &*provider,
+                1..=3,
+                partial_state_trie,
+                finish,
+                TrieRevertCache::ReadOnly,
+                &snapshot,
+            )
             .unwrap();
         assert_eq!(*uncached, actual);
         assert!(cache.inner.read().entries.is_empty());
 
         let from_cache_api = cache
-            .get_or_compute_range(&*provider, 1..=3, partial_state_trie, finish, true, || {
-                test_overlay_builder(&overlay_manager, &in_memory_state, finish.hash)
-            })
+            .get_or_compute_range(
+                &*provider,
+                1..=3,
+                partial_state_trie,
+                finish,
+                TrieRevertCache::ReadWrite,
+                &snapshot,
+            )
             .unwrap();
         assert_eq!(*from_cache_api, actual);
         assert_eq!(cache.inner.read().entries.len(), 1);
 
-        let block_changesets = cache
-            .get_or_compute(&*provider, 2, partial_state_trie, finish, || {
-                test_overlay_builder(&overlay_manager, &in_memory_state, finish.hash)
-            })
-            .unwrap();
+        let block_changesets =
+            cache.get_or_compute(&*provider, 2, partial_state_trie, finish, &snapshot).unwrap();
         assert_eq!(*block_changesets, legacy_compute_block_trie_changesets(&*provider, 2));
         assert_eq!(cache.inner.read().entries.len(), 2);
     }
