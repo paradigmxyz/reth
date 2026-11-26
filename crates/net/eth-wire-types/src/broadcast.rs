@@ -966,8 +966,8 @@ impl Decodable for NewPooledTransactionHashes72 {
 
 /// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
 ///
-/// This keeps capacity hints bounded when a malformed packet spends most of its bytes on the
-/// one-byte `types` string before the size and hash lists are validated.
+/// This caps the initial allocation for the size and hash lists, which grow past it only as their
+/// entries are decoded.
 const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
     2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 
