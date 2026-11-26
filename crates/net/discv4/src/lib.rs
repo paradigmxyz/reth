@@ -1126,6 +1126,17 @@ impl Discv4Service {
         };
     }
 
+    /// Announces a full-bucket node once its endpoint is proven, pinging it first unless it is
+    /// already bonded at the record's IP.
+    fn on_discovered_at_capacity(&mut self, record: NodeRecord) {
+        if self.has_bond(record.id, record.address) {
+            trace!(target: "discv4", ?record, "discovered proven record but bucket is full");
+            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
+        } else {
+            self.try_ping(record, PingReason::AtCapacity);
+        }
+    }
+
     /// Adds all nodes
     ///
     /// See [`Self::add_node`]
@@ -1260,9 +1271,9 @@ impl Discv4Service {
                         // we received a ping but the corresponding bucket for the peer is already
                         // full, we can't add any additional peers to that bucket, but we still want
                         // to emit an event that we discovered the node
-                        trace!(target: "discv4", ?record, "discovered new record but bucket is full");
-                        self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
-                        needs_bond = true;
+                        self.on_discovered_at_capacity(record);
+                        // already pinged above if not bonded
+                        needs_bond = false;
                     }
                     BucketInsertResult::TooManyIncoming | BucketInsertResult::NodeExists => {
                         needs_bond = true;
@@ -1449,6 +1460,10 @@ impl Discv4Service {
                 // timer than the ping_request timer.
                 self.pending_lookup.insert(node.id, (Instant::now(), ctx));
             }
+            PingReason::AtCapacity => {
+                trace!(target: "discv4", ?node, "discovered proven record but bucket is full");
+                self.notify(DiscoveryUpdate::DiscoveredAtCapacity(node));
+            }
         }
     }
 
@@ -1623,7 +1638,7 @@ impl Discv4Service {
                         }
                         BucketInsertResult::Full => {
                             // new node but the node's bucket is already full
-                            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(closest))
+                            self.on_discovered_at_capacity(closest)
                         }
                         _ => {}
                     }
@@ -2692,6 +2707,9 @@ enum PingReason {
     RePing,
     /// Part of a lookup to ensure endpoint is proven before we can send a `FindNode` request.
     Lookup(NodeRecord, LookupContext),
+    /// Ping to a new peer whose bucket is full, announced as
+    /// [`DiscoveryUpdate::DiscoveredAtCapacity`] once the pong proves its endpoint.
+    AtCapacity,
 }
 
 /// Represents node related updates state changes in the underlying node table
@@ -2699,7 +2717,8 @@ enum PingReason {
 pub enum DiscoveryUpdate {
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
-    /// A new node was discovered but _not_ added to the table because it is currently full.
+    /// A new node with a proven endpoint was discovered but _not_ added to the table because it
+    /// is currently full.
     DiscoveredAtCapacity(NodeRecord),
     /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
     EnrForkId(NodeRecord, ForkId),
@@ -2719,6 +2738,21 @@ mod tests {
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
     use std::{future::poll_fn, net::Ipv6Addr};
+
+    /// Fills the bucket of `id` with proven nodes, so that `id` can't be inserted.
+    fn fill_bucket(service: &mut Discv4Service, id: PeerId) {
+        let key = kad_key(id);
+        let index = service.kbuckets.get_index(&key).unwrap();
+        while service.kbuckets.get_bucket(&key).unwrap().num_entries() < MAX_NODES_PER_BUCKET {
+            let peer = PeerId::random();
+            if service.kbuckets.get_index(&kad_key(peer)) == Some(index) {
+                insert_proven_node(
+                    service,
+                    NodeRecord::new("10.2.0.1:30303".parse().unwrap(), peer),
+                );
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
@@ -3749,6 +3783,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ping_at_capacity_announced_after_pong() {
+        let (_discv4, mut service) = create_discv4().await;
+        let mut updates = service.update_stream().into_inner();
+        let record = NodeRecord::new("10.1.0.1:30303".parse().unwrap(), PeerId::random());
+        fill_bucket(&mut service, record.id);
+        let ping = Ping {
+            from: record.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+
+        service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
+        assert!(updates.try_recv().is_err());
+        let request = &service.pending_pings[&record.id];
+        assert!(matches!(request.reason, PingReason::AtCapacity));
+        let echo_hash = request.echo_hash;
+
+        service.on_pong(make_pong(&service, echo_hash), record.udp_addr(), record.id);
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
+        ));
+
+        // Once bonded, the node is announced without another ping.
+        service.on_ping(ping, record.udp_addr(), record.id, B256::random());
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
+        ));
+        assert!(!service.pending_pings.contains_key(&record.id));
+    }
+
+    #[tokio::test]
     async fn test_failed_ping_to_other_endpoint_revalidates_proven_node() {
         let (_discv4, mut service) = create_discv4().await;
         let expired = Instant::now() + service.config.ping_expiration * 2;
@@ -3999,6 +4067,33 @@ mod tests {
         assert!(request.answered);
         assert_eq!(request.response_count, 1);
         assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_at_capacity_announced_after_pong() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let mut updates = service.update_stream().into_inner();
+        let discovered =
+            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
+        fill_bucket(&mut service, discovered.id);
+
+        let msg =
+            Neighbours { nodes: vec![discovered], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        assert!(updates.try_recv().is_err());
+        let request = &service.pending_pings[&discovered.id];
+        assert!(matches!(request.reason, PingReason::AtCapacity));
+
+        service.on_pong(
+            make_pong(&service, request.echo_hash),
+            discovered.udp_addr(),
+            discovered.id,
+        );
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == discovered
+        ));
     }
 
     #[tokio::test]
