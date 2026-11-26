@@ -16,6 +16,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fmt,
     net::SocketAddr,
+    ops::Bound::{Excluded, Unbounded},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -227,6 +228,8 @@ async fn run<P: DependencyProofProvider + Clone + 'static>(
 ) {
     let mut peers = BTreeMap::<PeerId, Peer>::new();
     let mut pending = B256Map::<Pending>::default();
+    // Keep the cursor across fetch attempts so silent peers cannot monopolize every deadline.
+    let mut last_peer = None;
     let mut serving = FuturesUnordered::<BoxFuture<'static, (PeerId, BytesMut)>>::new();
     let mut interval = tokio::time::interval(Duration::from_millis(250));
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -268,7 +271,7 @@ async fn run<P: DependencyProofProvider + Clone + 'static>(
                                     Ok(Err(error)) => { error!(target: "reth::eip8288", %error, "Cannot serve dependency proof"); None },
                                     Err(error) => { error!(target: "reth::eip8288", %error, "Proof read worker failed"); None },
                                 };
-                                (id, encode_response(hash, proof.as_deref()))
+                                (id, encode_response(hash, proof.as_ref().map(|proof| proof.as_ref())))
                             }.boxed());
                         }
                     } else if let Some(download) = pending.get_mut(&hash) && download.peer == Some(id) {
@@ -304,7 +307,9 @@ async fn run<P: DependencyProofProvider + Clone + 'static>(
                 for download in pending.values_mut() {
                     if download.next_try > Instant::now() { continue }
                     download.peer = None;
-                    if let Some((id, peer)) = peers.iter().find(|(id, _)| !download.tried.contains(*id)) {
+                    let start = last_peer.map_or(Unbounded, Excluded);
+                    if let Some((id, peer)) = peers.range((start, Unbounded)).chain(peers.iter()).find(|(id, _)| !download.tried.contains(*id)) {
+                        last_peer = Some(*id);
                         download.tried.insert(*id);
                         let mut message = BytesMut::with_capacity(33);
                         message.extend_from_slice(&[0]);
@@ -382,7 +387,7 @@ mod tests {
                 block_hash: B256::repeat_byte(3),
                 commitment: keccak256(&proof),
             };
-            let fetched = tokio::spawn(async move { fetcher.fetch(request).await });
+            let fetched = tokio::spawn(fetcher.fetch(request));
             let message = tokio::time::timeout(Duration::from_secs(2), first_messages.recv())
                 .await
                 .unwrap()
@@ -420,6 +425,54 @@ mod tests {
             }
             driver.abort();
             assert!(driver.await.unwrap_err().is_cancelled());
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_retries_reach_peers_beyond_the_first_deadline() {
+        let (handler, fetcher, driver) = DependencyProofProtocolHandler::new(EmptyProofs);
+        let driver = tokio::spawn(driver);
+        let proof = Bytes::from_static(b"authenticated proof");
+        let request = DependencyProofRequest {
+            block_hash: B256::repeat_byte(7),
+            commitment: keccak256(&proof),
+        };
+        let mut peers = Vec::new();
+        for index in 1..=6 {
+            let id = PeerId::repeat_byte(index);
+            let (outgoing, mut messages) = mpsc::channel(2);
+            handler.0.send(Event::Opened(id, outgoing)).await.unwrap();
+            let handler = handler.clone();
+            let proof = proof.clone();
+            peers.push(tokio::spawn(async move {
+                let mut requests = 0;
+                while let Some(message) = messages.recv().await {
+                    assert_eq!(message[0], 0);
+                    assert_eq!(&message[1..], request.block_hash.as_slice());
+                    requests += 1;
+                    if index == 6 {
+                        handler
+                            .0
+                            .send(Event::Message(
+                                id,
+                                encode_response(request.block_hash, Some(&proof)).freeze().into(),
+                            ))
+                            .await
+                            .unwrap();
+                    }
+                }
+                requests
+            }));
+        }
+
+        // Five silent peers exhaust the first window; the next fetch must start after them.
+        assert_eq!(fetcher.fetch(request).await.unwrap(), None);
+        assert_eq!(fetcher.fetch(request).await.unwrap(), Some(proof));
+
+        driver.abort();
+        assert!(driver.await.unwrap_err().is_cancelled());
+        for peer in peers {
+            assert_eq!(peer.await.unwrap(), 1);
         }
     }
 }

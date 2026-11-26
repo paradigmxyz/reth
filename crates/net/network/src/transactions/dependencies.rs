@@ -508,14 +508,14 @@ fn rotate_pending<T: PoolTransaction>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxEip8141WithSidecar;
+    use alloy_consensus::transaction::TxEip8141WithSidecar;
     use alloy_eips::{
-        eip4844::Blob,
+        eip4844::{Blob, Bytes48},
         eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
         eip8141::{Frame, FrameLimits, FrameMode, TransactionFees},
         eip8288::{LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
     };
-    use alloy_primitives::{Address, Bytes48, U256};
+    use alloy_primitives::{Address, U256};
     use alloy_rlp::RlpEncodable;
     use reth_transaction_pool::{
         blobstore::InMemoryBlobStore,

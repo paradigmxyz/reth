@@ -230,7 +230,7 @@ where
 impl<Client, B> BlockDownloader for BasicBlockDownloader<Client, B>
 where
     Client: BlockClient<Block = B> + BlockAccessListsClient,
-    B: Block,
+    B: Block + 'static,
 {
     type Block = B;
 
@@ -310,6 +310,11 @@ where
             for block in &downloaded_blocks {
                 if let Err(error) = consensus.validate_header(block.block().sealed_header()) {
                     tracing::debug!(target: "engine::download", %error, "Skipping proof retrieval for an invalid header");
+                    continue;
+                }
+                // Body commitments can be invalid even when the header is valid on its own.
+                if let Err(error) = consensus.validate_block_pre_execution(block.block()) {
+                    tracing::debug!(target: "engine::download", %error, "Skipping proof retrieval for an invalid body");
                     continue;
                 }
                 loop {
@@ -452,14 +457,27 @@ impl<B: Block> BlockDownloader for NoopBlockDownloader<B> {
 mod tests {
     use super::*;
     use crate::test_utils::insert_headers_into_client;
-    use alloy_consensus::Header;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
+    use alloy_consensus::{proofs::calculate_withdrawals_root, Header};
+    use alloy_eips::{
+        eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M, eip7685::EMPTY_REQUESTS_HASH,
+        eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH, eip8288::dependency_digest,
+    };
+    use alloy_primitives::keccak256;
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_consensus::{ConsensusError, HeaderValidator, SupplementalDataFuture};
     use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_primitives::{Block, BlockBody};
     use reth_network_p2p::test_utils::TestFullBlockClient;
-    use reth_primitives_traits::SealedHeader;
-    use std::{future::poll_fn, sync::Arc};
+    use reth_primitives_traits::{SealedBlock, SealedHeader};
+    use std::{
+        future::poll_fn,
+        sync::{
+            atomic::{self, AtomicUsize},
+            Arc,
+        },
+        time::Duration,
+    };
 
     struct TestHarness {
         block_downloader:
@@ -686,5 +704,140 @@ mod tests {
 
         // ensure we have no in flight full block request
         assert_eq!(block_downloader.inflight_full_block_requests.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn invalid_body_commitments_do_not_wait_for_unavailable_proofs() {
+        let consensus: Arc<dyn Consensus<Block>> = Arc::new(EthBeaconConsensus::new(Arc::new(
+            ChainSpecBuilder::mainnet().bogota_activated().build(),
+        )));
+        let header = Header {
+            number: 1,
+            timestamp: 1,
+            base_fee_per_gas: Some(7),
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            withdrawals_root: Some(calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            parent_beacon_block_root: Some(B256::ZERO),
+            requests_hash: Some(EMPTY_REQUESTS_HASH),
+            block_access_list_hash: Some(EMPTY_BLOCK_ACCESS_LIST_HASH),
+            slot_number: Some(1),
+            block_deps_hash: Some(dependency_digest(&[])),
+            dependency_proof_hash: Some(keccak256([])),
+            ..Default::default()
+        };
+        let body = BlockBody { withdrawals: Some(Default::default()), ..Default::default() };
+        let ancestor = SealedBlock::seal_slow(Block { header: header.clone(), body: body.clone() });
+        consensus.validate_header(ancestor.sealed_header()).unwrap();
+        consensus.validate_block_pre_execution(&ancestor).unwrap();
+
+        for invalid_dependencies in [false, true] {
+            let mut header = header.clone();
+            header.number += 1;
+            header.parent_hash = ancestor.hash();
+            header.timestamp += 1;
+            header.dependency_proof_hash = Some(B256::repeat_byte(1));
+            if invalid_dependencies {
+                header.block_deps_hash = Some(B256::ZERO);
+            }
+            let block = SealedBlock::seal_slow(Block { header, body: body.clone() });
+            consensus.validate_header(block.sealed_header()).unwrap();
+            consensus.validate_body_against_header(block.body(), block.sealed_header()).unwrap();
+            assert_matches!(
+                (invalid_dependencies, consensus.validate_block_pre_execution(&block)),
+                (true, Err(ConsensusError::DependencyCommitmentMismatch)) |
+                    (false, Err(ConsensusError::DependencyProofCommitmentMismatch))
+            );
+            assert_matches!(
+                consensus.prepare_block_supplemental_data(block.sealed_header().clone()).await,
+                Err(ConsensusError::DependencyProofUnavailable(hash)) if hash == block.hash()
+            );
+
+            let mut downloader =
+                BasicBlockDownloader::new(TestFullBlockClient::default(), consensus.clone());
+            let expected = vec![
+                SealedBlockWith::from_block(ancestor.clone()),
+                SealedBlockWith::from_block(block),
+            ];
+            downloader
+                .set_buffered_blocks
+                .extend(expected.iter().cloned().map(OrderedDownloadedBlock).map(Reverse));
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(1),
+                poll_fn(|cx| downloader.poll(cx)),
+            )
+            .await
+            .expect(
+                "known-invalid bodies must reach engine validation without waiting for a proof",
+            );
+            assert_matches!(outcome, DownloadOutcome::Blocks(blocks) => assert_eq!(blocks, expected));
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct UnavailableOnceConsensus {
+        attempts: AtomicUsize,
+    }
+
+    impl HeaderValidator<Header> for UnavailableOnceConsensus {
+        fn validate_header(&self, _: &SealedHeader<Header>) -> Result<(), ConsensusError> {
+            Ok(())
+        }
+
+        fn validate_header_against_parent(
+            &self,
+            _: &SealedHeader<Header>,
+            _: &SealedHeader<Header>,
+        ) -> Result<(), ConsensusError> {
+            Ok(())
+        }
+    }
+
+    impl Consensus<Block> for UnavailableOnceConsensus {
+        fn validate_body_against_header(
+            &self,
+            _: &BlockBody,
+            _: &SealedHeader<Header>,
+        ) -> Result<(), ConsensusError> {
+            Ok(())
+        }
+
+        fn validate_block_pre_execution(
+            &self,
+            _: &SealedBlock<Block>,
+        ) -> Result<(), ConsensusError> {
+            Ok(())
+        }
+
+        fn prepare_block_supplemental_data(
+            &self,
+            _: SealedHeader<Header>,
+        ) -> SupplementalDataFuture {
+            let attempt = self.attempts.fetch_add(1, atomic::Ordering::Relaxed);
+            Box::pin(async move {
+                if attempt == 0 {
+                    Err(ConsensusError::DependencyProofUnavailable(B256::ZERO))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_bodies_retry_unavailable_proofs() {
+        let consensus = Arc::new(UnavailableOnceConsensus::default());
+        let mut downloader =
+            BasicBlockDownloader::new(TestFullBlockClient::default(), consensus.clone());
+        let block = SealedBlockWith::from_block(SealedBlock::seal_slow(Block::default()));
+        downloader.set_buffered_blocks.push(Reverse(OrderedDownloadedBlock(block.clone())));
+
+        let outcome =
+            tokio::time::timeout(Duration::from_secs(2), poll_fn(|cx| downloader.poll(cx)))
+                .await
+                .expect("valid bodies must resume when supplemental data becomes available");
+        assert_matches!(outcome, DownloadOutcome::Blocks(blocks) => assert_eq!(blocks, vec![block]));
+        assert_eq!(consensus.attempts.load(atomic::Ordering::Relaxed), 2);
     }
 }
