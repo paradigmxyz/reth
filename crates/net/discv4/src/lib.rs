@@ -1126,8 +1126,8 @@ impl Discv4Service {
         };
     }
 
-    /// Announces a full-bucket node once its endpoint is proven, pinging it first unless it is
-    /// already bonded at the record's IP.
+    // Announces a full-bucket node once its endpoint is proven, pinging it first unless it is
+    // already bonded at the record's IP.
     fn on_discovered_at_capacity(&mut self, record: NodeRecord) {
         if self.has_bond(record.id, record.address) {
             trace!(target: "discv4", ?record, "discovered proven record but bucket is full");
@@ -2738,18 +2738,18 @@ mod tests {
     use reth_network_peers::mainnet_nodes;
     use std::{future::poll_fn, net::Ipv6Addr};
 
-    /// Fills the bucket of `id` with proven nodes, so that `id` can't be inserted.
-    fn fill_bucket(service: &mut Discv4Service, id: PeerId) {
-        let key = kad_key(id);
-        let index = service.kbuckets.get_index(&key).unwrap();
-        while service.kbuckets.get_bucket(&key).unwrap().num_entries() < MAX_NODES_PER_BUCKET {
-            let peer = PeerId::random();
-            if service.kbuckets.get_index(&kad_key(peer)) == Some(index) {
-                insert_proven_node(
-                    service,
-                    NodeRecord::new("10.2.0.1:30303".parse().unwrap(), peer),
-                );
+    /// Fills the farthest bucket, which half of all ids map to, and returns a new id in it.
+    fn full_bucket_peer(service: &mut Discv4Service) -> PeerId {
+        loop {
+            let id = PeerId::random();
+            let key = kad_key(id);
+            if service.kbuckets.get_index(&key) != Some(u8::MAX as usize) {
+                continue
             }
+            if service.kbuckets.get_bucket(&key).unwrap().num_entries() == MAX_NODES_PER_BUCKET {
+                return id
+            }
+            insert_proven_node(service, NodeRecord::new("10.2.0.1:30303".parse().unwrap(), id));
         }
     }
 
@@ -3785,8 +3785,8 @@ mod tests {
     async fn test_ping_at_capacity_announced_after_pong() {
         let (_discv4, mut service) = create_discv4().await;
         let mut updates = service.update_stream().into_inner();
-        let record = NodeRecord::new("10.1.0.1:30303".parse().unwrap(), PeerId::random());
-        fill_bucket(&mut service, record.id);
+        let record =
+            NodeRecord::new("10.1.0.1:30303".parse().unwrap(), full_bucket_peer(&mut service));
         let ping = Ping {
             from: record.into(),
             to: service.local_node_record.into(),
@@ -4073,9 +4073,10 @@ mod tests {
         let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
         let (mut service, record) = pending_find_node_service(node_addr).await;
         let mut updates = service.update_stream().into_inner();
-        let discovered =
-            NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), PeerId::random());
-        fill_bucket(&mut service, discovered.id);
+        let discovered = NodeRecord::new(
+            SocketAddr::from(([10, 0, 0, 9], 30303)),
+            full_bucket_peer(&mut service),
+        );
 
         let msg =
             Neighbours { nodes: vec![discovered], expire: service.find_node_expiration() + 1000 };
