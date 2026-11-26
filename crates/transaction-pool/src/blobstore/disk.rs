@@ -475,7 +475,10 @@ impl BlobStore for DiskFileBlobStore {
         }
 
         for (idx, tx_hash) in missing_tx_hashes {
-            if self.inner.contains(tx_hash)? {
+            // The index can point to a transaction now stored as cells, which only count below.
+            if !self.inner.cell_sidecars.read().contains_key(&tx_hash) &&
+                self.inner.contains(tx_hash)?
+            {
                 result[idx] = true;
             }
         }
@@ -1527,7 +1530,7 @@ mod tests {
     #[test]
     fn disk_failed_replacement_keeps_the_cell_file() {
         let (store, _dir) = tmp_uncached_store();
-        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
         let tx = TxHash::random();
         let cells = single_cell_sidecar();
         store.insert_cells(tx, cells.clone()).unwrap();
@@ -1543,6 +1546,8 @@ mod tests {
             Some(DiskFileBlobStoreError::WriteFile(failed, _, _)) if *failed == tx
         ));
         assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
+        // The full sidecar was indexed, but the cells cannot rebuild its blob.
+        assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![false]);
     }
 
     #[test]
@@ -1561,5 +1566,20 @@ mod tests {
         store.clear_cache();
         let cell_mask = BlobCellMask::from_bits(1);
         assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
+    }
+
+    #[test]
+    fn disk_has_blobs_ignores_index_entries_of_cell_files() {
+        let (store, _dir) = tmp_uncached_store();
+        let (sidecar, versioned_hash, _) = eip7594_single_blob_sidecar();
+        let tx = TxHash::random();
+        store.insert(tx, sidecar.into()).unwrap();
+        store.delete(tx).unwrap();
+        store.cleanup();
+        // The index still points to `tx`, which comes back with one cell.
+        store.insert_cells(tx, single_cell_sidecar()).unwrap();
+
+        assert_eq!(store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(), vec![None]);
+        assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![false]);
     }
 }
