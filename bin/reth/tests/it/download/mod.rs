@@ -2,6 +2,8 @@ mod server;
 
 use self::server::SnapshotServer;
 use super::{reth_ok, RETH};
+use alloy_node_bindings::Reth;
+use alloy_provider::{Provider, ProviderBuilder};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -324,5 +326,79 @@ async fn completion_only_suggests_startup_for_matching_chain() {
             })
             .unwrap();
         assert_eq!(suffix, expected_suffix);
+    }
+}
+
+#[tokio::test]
+async fn future_transaction_cutoff_restores_a_bootable_node() {
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/rpc/rpc-e2e-tests/testdata/rpc-compat");
+    let chain = fixture.join("genesis.json");
+    let chain = chain.to_str().unwrap();
+    let source = tempfile::tempdir().unwrap();
+    let archives = tempfile::tempdir().unwrap();
+    reth_ok(&[
+        "import",
+        "--db.max-size",
+        "256MB",
+        "--db.growth-step",
+        "8MB",
+        "--datadir",
+        source.path().to_str().unwrap(),
+        "--chain",
+        chain,
+        fixture.join("chain.rlp").to_str().unwrap(),
+    ]);
+    // Pre-Cancun slot preimages are auxiliary to this restore and occupy a sparse 4 GiB file.
+    fs::remove_dir_all(source.path().join("db/preimage")).unwrap();
+    reth_ok(&[
+        "snapshot-manifest",
+        "-d",
+        source.path().to_str().unwrap(),
+        "-o",
+        archives.path().to_str().unwrap(),
+        "--chain-id",
+        "3503995874084926",
+    ]);
+    let manifest = archives.path().join("manifest.json");
+    let snapshot: Value = serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    let tip = snapshot["block"].as_u64().unwrap();
+    assert_eq!(tip, 45);
+    assert!(snapshot["components"]["rocksdb_indices"].is_object());
+
+    for include_indices in [false, true] {
+        let target = tempfile::tempdir().unwrap();
+        let mut flags = vec![
+            "download",
+            "--manifest-path",
+            manifest.to_str().unwrap(),
+            "--chain",
+            chain,
+            "--datadir",
+            target.path().to_str().unwrap(),
+            "--with-txs-since",
+            "100",
+            "--with-state-history",
+            "--with-receipts",
+            "--with-senders",
+        ];
+        if include_indices {
+            flags.push("--with-rocksdb");
+        }
+        reth_ok(&flags);
+        let node = Reth::at(RETH)
+            .instance(0)
+            .http_port(0)
+            .ws_port(0)
+            .auth_port(0)
+            .chain_or_path(chain)
+            .data_dir(target.path())
+            .disable_discovery()
+            .args(["--port", "0", "--max-outbound-peers", "0", "--max-inbound-peers", "0"])
+            .spawn();
+        let rpc = ProviderBuilder::new().connect_http(node.endpoint_url());
+        assert_eq!(rpc.get_block_number().await.unwrap(), tip);
+        let capabilities: Value = rpc.client().request_noparams("eth_capabilities").await.unwrap();
+        assert_eq!(capabilities["blocks"]["oldestBlock"], format!("{:#x}", tip + 1));
     }
 }

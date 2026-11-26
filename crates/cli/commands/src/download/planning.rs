@@ -134,6 +134,20 @@ pub(crate) struct PlannedDownloads {
 }
 
 impl PlannedDownloads {
+    /// Returns whether a selected archive will supply the file at `path`.
+    pub(super) fn contains_output(
+        &self,
+        path: &Path,
+        verifier: &OutputVerifier<'_>,
+    ) -> Result<bool> {
+        for output in self.archives.iter().flat_map(|planned| &planned.archive.output_files) {
+            if verifier.output_path(output)? == path {
+                return Ok(true)
+            }
+        }
+        Ok(false)
+    }
+
     /// Verifies every archive's existing outputs in parallel and splits off the archives that
     /// already match, so each output file is hashed at most once before work begins.
     pub(crate) fn partition_reusable(
@@ -307,19 +321,21 @@ pub(crate) fn collect_planned_archives(
             let files = snapshot_archives
                 .iter()
                 .flat_map(|archive| &archive.output_files)
-                .filter_map(|output| static_file_relative_path(Path::new(&output.path)))
+                .map(|output| Path::new(&output.path))
+                .map(|path| path.strip_prefix(".").unwrap_or(path))
                 .collect::<HashSet<_>>();
             for path in &files {
                 if let Some(name) = transaction_jar_name(path) {
                     eyre::ensure!(
-                        path.components().count() == 1,
+                        path.parent() == Some(Path::new("static_files")),
                         "Transaction static file {name} must be directly under static_files"
                     );
                     for extension in ["", CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION] {
-                        let required = Path::new(name).with_extension(extension);
+                        let required =
+                            Path::new("static_files").join(name).with_extension(extension);
                         eyre::ensure!(
                             files.contains(required.as_path()),
-                            "Incomplete transaction static file: missing static_files/{}",
+                            "Incomplete transaction static file: missing {}",
                             required.display()
                         );
                     }
@@ -845,24 +861,28 @@ mod tests {
     }
 
     #[test]
-    fn transaction_jar_in_subdirectory_is_rejected() {
-        let mut manifest = test_manifest_with_component_tip(9, 10);
+    fn transaction_jar_outside_static_files_root_is_rejected() {
         let ty = SnapshotComponentType::Transactions;
-        let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(ty.key())
-        else {
-            unreachable!()
-        };
-        chunked.chunk_output_files[0] = ["", ".conf", ".off"]
-            .map(|extension| OutputFileChecksum {
-                path: format!("static_files/backup/static_file_transactions_0_9{extension}"),
-                size: 0,
-                blake3: String::new(),
-            })
-            .into();
-        let err =
-            collect_planned_archives(&manifest, &BTreeMap::from([(ty, ComponentSelection::All)]))
-                .unwrap_err();
-        assert_eq!(err.to_string(), "Transaction static file static_file_transactions_0_9 must be directly under static_files");
+        for directory in ["static_files/backup/", "backup/", ""] {
+            let mut manifest = test_manifest_with_component_tip(9, 10);
+            let Some(ComponentManifest::Chunked(chunked)) = manifest.components.get_mut(ty.key())
+            else {
+                unreachable!()
+            };
+            chunked.chunk_output_files[0] = ["", ".conf", ".off"]
+                .map(|extension| OutputFileChecksum {
+                    path: format!("{directory}static_file_transactions_0_9{extension}"),
+                    size: 0,
+                    blake3: String::new(),
+                })
+                .into();
+            let err = collect_planned_archives(
+                &manifest,
+                &BTreeMap::from([(ty, ComponentSelection::All)]),
+            )
+            .unwrap_err();
+            assert_eq!(err.to_string(), "Transaction static file static_file_transactions_0_9 must be directly under static_files");
+        }
     }
 
     #[test]
