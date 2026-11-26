@@ -98,7 +98,7 @@ use reth_execution_types::ChangedAccount;
 
 use alloy_eips::{
     eip2718::Encodable2718,
-    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarVariant},
     Typed2718,
 };
 use reth_primitives_traits::Recovered;
@@ -505,19 +505,12 @@ where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         if transaction.is_eip4844() {
-            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            let hash = *transaction.hash();
             let sidecar = match encoding {
-                BlobSidecarEncoding::WithBlobs => sidecar,
+                BlobSidecarEncoding::WithBlobs => self.blob_store.get(hash).ok()??,
+                // This also serves transactions stored only as cells, without rebuilding blobs.
                 BlobSidecarEncoding::WithoutBlobs => {
-                    let sidecar = sidecar.as_eip7594()?;
-                    Arc::new(
-                        BlobTransactionSidecarEip7594::new(
-                            Vec::new(),
-                            sidecar.commitments.clone(),
-                            sidecar.cell_proofs.clone(),
-                        )
-                        .into(),
-                    )
+                    Arc::new(self.blob_store.get_without_blobs(hash).ok()??.into())
                 }
             };
             transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
