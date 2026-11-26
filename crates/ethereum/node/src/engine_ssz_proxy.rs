@@ -33,7 +33,8 @@ use http_body_util::{BodyExt, LengthLimitError, Limited};
 use jsonrpsee::server::{HttpBody, HttpRequest, HttpResponse};
 use reth_chainspec::{EthereumHardfork, EthereumHardforks};
 use reth_engine_primitives::EngineApiValidator;
-use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes};
+use reth_payload_primitives::EngineApiMessageVersion;
 use reth_primitives_traits::AlloyBlockHeader;
 use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
 use reth_rpc::EngineApi;
@@ -535,7 +536,10 @@ where
         witness_handler: Arc<dyn EngineSszWitness>,
     ) -> HttpResponse {
         // Resolve only once so the witness cannot be paired with a newer build snapshot.
-        let payload = match self.get_built_payload_v6_metered(payload_id).await {
+        let payload = match self
+            .get_payload_inner::<EthBuiltPayload>(payload_id, EngineApiMessageVersion::V6)
+            .await
+        {
             Ok(payload) => payload,
             Err(error) => return engine_error_response(error),
         };
@@ -1341,7 +1345,6 @@ mod tests {
     use reth_engine_primitives::{
         BeaconEngineMessage, BeaconForkChoiceUpdateError, ConsensusEngineHandle,
     };
-    use reth_ethereum_engine_primitives::EthBuiltPayload;
     use reth_ethereum_primitives::Block;
     use reth_network_api::noop::NoopNetwork;
     use reth_payload_builder::PayloadBuilderHandle;

@@ -518,9 +518,11 @@ where
             .map_err(|_| EngineApiError::UnknownPayload)
     }
 
-    /// Helper function for validating the payload timestamp and retrieving & converting the payload
-    /// into desired envelope.
-    async fn get_payload_inner<R>(
+    /// Retrieves and converts a built payload after validating its timestamp for `version`.
+    ///
+    /// Use `EngineT::BuiltPayload` as `R` to retain the resolved snapshot. Returns
+    /// [`EngineApiError::UnknownPayload`] for an unknown job or a resolution/conversion failure.
+    pub async fn get_payload_inner<R>(
         &self,
         payload_id: PayloadId,
         version: EngineApiMessageVersion,
@@ -698,18 +700,6 @@ where
         let res = Self::get_payload_v6(self, payload_id).await;
         self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
         res
-    }
-
-    /// Retrieves one Amsterdam payload snapshot with the same validation and resolution as
-    /// `getPayloadV6`, retaining the built block for witness generation.
-    pub async fn get_built_payload_v6_metered(
-        &self,
-        payload_id: PayloadId,
-    ) -> EngineApiResult<EngineT::BuiltPayload> {
-        let start = Instant::now();
-        let result = self.get_payload_inner(payload_id, EngineApiMessageVersion::V6).await;
-        self.inner.metrics.latency.get_payload_v6.record(start.elapsed());
-        result
     }
 
     /// Fetches all the blocks for the provided range starting at `start`, containing `count`
