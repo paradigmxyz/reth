@@ -167,11 +167,13 @@ not (
     test(=server::tests::test_metrics_endpoint)
   )) or
   (binary_id(=reth-provider) and (
+    test(=providers::blockchain_provider::tests::consistent_provider_keeps_the_in_memory_blocks_tracked_when_it_opened) or
     test(=providers::blockchain_provider::tests::get_state_preserves_empty_block_receipts) or
     test(=providers::blockchain_provider::tests::historical_proofs_complete_masked_trie_rows) or
     test(=providers::blockchain_provider::tests::historical_state_checks_pipeline_progress_on_its_snapshot) or
     test(=providers::blockchain_provider::tests::historical_state_range_provider_reverts_state_change_past_retained_anchor) or
     test(=providers::blockchain_provider::tests::history_reads_survive_persistence_after_db_tx_creation) or
+    test(=providers::blockchain_provider::tests::in_memory_state_checks_pipeline_progress) or
     test(=providers::blockchain_provider::tests::latest_reads_in_memory_state_like_the_hash_lookup) or
     test(=providers::blockchain_provider::tests::providers_of_one_factory_share_in_memory_blocks) or
     test(=providers::blockchain_provider::tests::state_range_provider_account_range_is_sorted_and_bounded) or

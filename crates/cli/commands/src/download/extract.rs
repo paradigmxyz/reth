@@ -277,6 +277,14 @@ fn unpack_archive<R: Read>(
         })?;
         // Check the path before it can contribute an extraction hash or touch the output tree.
         let entry_type = entry.header().entry_type();
+        // `tar` yields some metadata headers as entries, but unpacking them writes no file.
+        if entry_type.is_pax_global_extensions() ||
+            entry_type.is_pax_local_extensions() ||
+            entry_type.is_gnu_longname() ||
+            entry_type.is_gnu_longlink()
+        {
+            continue
+        }
         let path = entry.path()?;
         eyre::ensure!(
             !entry_type.is_symlink() && !entry_type.is_hard_link(),
@@ -953,6 +961,7 @@ fn download_and_extract(
             session.cancel_token().clone(),
         )?
     };
+    fetcher.cleanup_downloaded_files();
     ensure_execution_files(installed)?;
     if !quiet {
         info!(target: "reth::cli",
@@ -961,7 +970,6 @@ fn download_and_extract(
         );
     }
 
-    fetcher.cleanup_downloaded_files();
     session.record_archive_output_complete(total_size);
 
     Ok(())
@@ -1060,6 +1068,7 @@ pub(crate) async fn stream_and_extract(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::download::fetch::tests::spawn_response_server;
     use std::io::Write;
 
     #[test]
@@ -1519,6 +1528,66 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fs::read(target.path().join("db/data")).unwrap(), b"data");
+    }
+
+    #[test]
+    fn legacy_restore_ignores_tar_metadata_entries() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let records = b"15 comment=abc\n";
+        let mut header = tar::Header::new_ustar();
+        header.set_entry_type(tar::EntryType::XGlobalHeader);
+        header.set_size(records.len() as u64);
+        header.set_mode(0o600);
+        archive.append_data(&mut header, "db/data", records.as_slice()).unwrap();
+
+        let snapshot = tempfile::tempdir().unwrap();
+        let path = snapshot.path().join("snapshot.tar.zst");
+        fs::write(&path, zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap())
+            .unwrap();
+        let url = Url::from_file_path(path).unwrap();
+        let target = tempfile::tempdir().unwrap();
+
+        let err = blocking_download_and_extract(
+            url.as_str(),
+            target.path(),
+            None,
+            false,
+            None,
+            CancellationToken::new(),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Snapshot archive contains no execution files");
+        assert!(!target.path().join("db").exists());
+    }
+
+    #[test]
+    fn rejected_legacy_download_removes_the_archive() {
+        let mut archive = tar::Builder::new(Vec::new());
+        let mut header = tar::Header::new_gnu();
+        header.set_size(4);
+        header.set_mode(0o600);
+        archive.append_data(&mut header, "README.txt", b"docs".as_slice()).unwrap();
+        let compressed = zstd::encode_all(archive.into_inner().unwrap().as_slice(), 0).unwrap();
+        let headers = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            compressed.len()
+        );
+        let url = spawn_response_server(vec![[headers.as_bytes(), &compressed].concat().leak()]);
+        let target = tempfile::tempdir().unwrap();
+
+        let err = blocking_download_and_extract(
+            &url,
+            target.path(),
+            None,
+            true,
+            Some(DownloadRequestLimiter::new(1)),
+            CancellationToken::new(),
+            Some(Duration::ZERO),
+        )
+        .unwrap_err();
+        assert_eq!(err.to_string(), "Snapshot archive contains no execution files");
+        assert!(!target.path().join("archive.tar.zst").exists());
     }
 
     #[test]

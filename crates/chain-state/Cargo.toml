@@ -38,6 +38,7 @@ tracing.workspace = true
 derive_more.workspace = true
 metrics.workspace = true
 pin-project.workspace = true
+rpds.workspace = true
 serde = { workspace = true, optional = true }
 
 # test-utils
@@ -67,6 +68,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-trie/serde",
     "evm2?/serde",
+    "rpds/serde",
 ]
 test-utils = [
     "reth-concurrency/test-utils",

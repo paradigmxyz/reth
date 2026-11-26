@@ -1407,7 +1407,7 @@ pub(crate) fn panic_payload_message(payload: Box<dyn Any + Send + 'static>) -> S
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use reqwest::StatusCode;
     use reth_cli_util::cancellation::CancellationToken;
@@ -2010,7 +2010,7 @@ mod tests {
 
     /// Answers successive HTTP requests on localhost with `responses` in order, repeating the last
     /// one for any later request, and returns the URL.
-    fn spawn_response_server(responses: Vec<&'static [u8]>) -> String {
+    pub(crate) fn spawn_response_server(responses: Vec<&'static [u8]>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/archive.tar.zst", listener.local_addr().unwrap());
         std::thread::spawn(move || {
