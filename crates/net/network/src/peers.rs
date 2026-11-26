@@ -5347,6 +5347,11 @@ mod tests {
         assert!(!peers.peers.contains_key(&failed));
         peers.on_active_outgoing_established(successful);
         assert_eq!(peers.persistable_peers().next().unwrap().record.id, successful);
+
+        // the next candidate dial forgets the one that ended without a handshake.
+        peers.candidates.insert(PeerId::random(), PeerCandidate { addr, fork_id: None });
+        peers.fill_outbound_slots();
+        assert_eq!(peers.candidate_dials.len(), 1);
     }
 
     #[tokio::test]
