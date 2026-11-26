@@ -1055,12 +1055,17 @@ mod tests {
     use super::*;
     use std::sync::atomic::Ordering;
 
-    #[cfg(unix)]
-    use std::os::unix::fs::PermissionsExt;
-
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let store = DiskFileBlobStore::open(dir.path(), Default::default()).unwrap();
+        (store, dir)
+    }
+
+    // A store that caches no full sidecars, so reads go to disk.
+    fn tmp_uncached_store() -> (DiskFileBlobStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let config = DiskFileBlobStoreConfig::default().with_max_cached_entries(0);
+        let store = DiskFileBlobStore::open(dir.path(), config).unwrap();
         (store, dir)
     }
 
@@ -1488,9 +1493,7 @@ mod tests {
 
     #[test]
     fn disk_cells_keep_the_index_on_a_full_blob() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = DiskFileBlobStoreConfig::default().with_max_cached_entries(0);
-        let store = DiskFileBlobStore::open(dir.path(), config).unwrap();
+        let (store, _dir) = tmp_uncached_store();
         let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
         store.insert(TxHash::random(), sidecar.into()).unwrap();
         // Another transaction keeps one cell of the same blob.
@@ -1520,23 +1523,18 @@ mod tests {
         assert_eq!(store.blobs_len(), 0);
     }
 
-    #[cfg(unix)]
     #[test]
     fn disk_failed_replacement_keeps_the_cell_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = DiskFileBlobStoreConfig::default().with_max_cached_entries(0);
-        let store = DiskFileBlobStore::open(dir.path(), config).unwrap();
+        let (store, _dir) = tmp_uncached_store();
         let (sidecar, _, _) = eip7594_single_blob_sidecar();
         let tx = TxHash::random();
         let cells = single_cell_sidecar();
         store.insert_cells(tx, cells.clone()).unwrap();
         let cell_mask = BlobCellMask::from_bits(1);
 
-        let blob_dir = store.inner.blob_dir.clone();
-        let read_only = fs::Permissions::from_mode(0o555);
-        fs::set_permissions(&blob_dir, read_only).unwrap();
+        // A directory at the staging path fails the write, even when run as root.
+        fs::create_dir(store.inner.blob_disk_file(tx).with_extension("tmp")).unwrap();
         let result = store.insert(tx, sidecar.into());
-        fs::set_permissions(&blob_dir, fs::Permissions::from_mode(0o755)).unwrap();
 
         let Err(BlobStoreError::Other(err)) = result else { panic!("expected a write error") };
         assert!(matches!(
