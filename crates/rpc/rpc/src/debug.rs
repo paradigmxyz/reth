@@ -1865,7 +1865,8 @@ fn geth_trace_weight_mib(
     max_trace_bytes: Option<usize>,
     max_response_size: Option<usize>,
 ) -> u64 {
-    let recorded = match &opts.tracer {
+    // An empty tracer name selects the struct logger, as `DebugInspector` does.
+    let recorded = match opts.tracer.as_ref().filter(|tracer| !tracer.as_str().is_empty()) {
         None => {
             let config = &opts.config;
             // Each call applies the step limit on its own.
@@ -2436,6 +2437,10 @@ mod tests {
 
         assert_eq!(weight(serde_json::json!({ "tracer": "callTracer" }), 10_000_000), 112);
         assert_eq!(weight(serde_json::json!({ "tracer": "noopTracer" }), 10_000_000), 16);
+        assert_eq!(
+            weight(serde_json::json!({ "tracer": "", "disableStorage": true }), 50_000_000),
+            496
+        );
         // The keccak256 preimage tracer records up to its own byte limit.
         assert_eq!(
             weight(serde_json::json!({ "tracer": "keccak256PreimageTracer" }), 30_000_000),
