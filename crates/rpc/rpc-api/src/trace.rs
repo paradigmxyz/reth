@@ -185,12 +185,14 @@ impl<'de> Deserialize<'de> for TraceFilterRequest {
         let mut members = deserializer.deserialize_map(UniqueKeysVisitor)?;
         let mut take_tag = |key: &str| {
             let index = members.iter().position(|(name, _)| name == key)?;
-            let tag = match members[index].1.get() {
-                r#""earliest""# => BlockNumberOrTag::Earliest,
-                r#""latest""# => BlockNumberOrTag::Latest,
-                r#""safe""# => BlockNumberOrTag::Safe,
-                r#""finalized""# => BlockNumberOrTag::Finalized,
-                r#""pending""# => BlockNumberOrTag::Pending,
+            // A string bound is decoded first, so an escaped spelling of a tag is a tag too.
+            let bound = serde_json::from_str::<String>(members[index].1.get()).ok()?;
+            let tag = match bound.as_str() {
+                "earliest" => BlockNumberOrTag::Earliest,
+                "latest" => BlockNumberOrTag::Latest,
+                "safe" => BlockNumberOrTag::Safe,
+                "finalized" => BlockNumberOrTag::Finalized,
+                "pending" => BlockNumberOrTag::Pending,
                 _ => return None,
             };
             members.remove(index);
@@ -213,6 +215,10 @@ impl<'de> Deserialize<'de> for TraceFilterRequest {
     }
 }
 
+/// The members of a [`TraceFilter`] object.
+const TRACE_FILTER_FIELDS: &[&str] =
+    &["fromBlock", "toBlock", "blockHash", "fromAddress", "toAddress", "mode", "after", "count"];
+
 /// Collects a JSON object's members as raw JSON, rejecting a repeated member as [`TraceFilter`]'s
 /// typed decoder does.
 struct UniqueKeysVisitor;
@@ -226,7 +232,13 @@ impl<'de> de::Visitor<'de> for UniqueKeysVisitor {
 
     fn visit_map<A: de::MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
         let mut members = Vec::<(String, Box<RawValue>)>::new();
-        while let Some((key, value)) = access.next_entry::<String, Box<RawValue>>()? {
+        while let Some(key) = access.next_key::<String>()? {
+            // Unknown members are rejected here, as TraceFilter rejects them, which also bounds the
+            // members collected and the duplicate check.
+            if !TRACE_FILTER_FIELDS.contains(&key.as_str()) {
+                return Err(de::Error::unknown_field(&key, TRACE_FILTER_FIELDS));
+            }
+            let value = access.next_value::<Box<RawValue>>()?;
             if members.iter().any(|(name, _)| *name == key) {
                 return Err(de::Error::custom(format_args!("duplicate field `{key}`")))
             }
@@ -295,5 +307,14 @@ mod tests {
         let json =
             r#"{"blockHash":{"$serde_json::private::RawValue":"null"},"fromBlock":"latest"}"#;
         assert!(serde_json::from_str::<TraceFilterRequest>(json).is_err());
+    }
+
+    #[test]
+    fn trace_filter_request_member_names() {
+        let request =
+            serde_json::from_str::<TraceFilterRequest>(r#"{"fromBlock":"latest"}"#).unwrap();
+        assert_eq!(request.from_tag, Some(BlockNumberOrTag::Latest));
+        let err = serde_json::from_str::<TraceFilterRequest>(r#"{"unknown":0}"#).unwrap_err();
+        assert!(err.to_string().starts_with("unknown field `unknown`"), "{err}");
     }
 }
