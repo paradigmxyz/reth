@@ -37,8 +37,9 @@ const SIMULATED_BLOCK_BYTES: u64 = MIB;
 /// Memory, in bytes, every executed call holds besides what its gas pays for.
 const CALL_BYTES: u64 = 64 * 1024;
 
-/// Memory, in bytes, an overridden account holds besides its code and storage.
-const ACCOUNT_OVERRIDE_BYTES: u64 = 256;
+/// Memory, in bytes, an overridden account holds besides its code and storage: its parsed override
+/// and the cached account it becomes.
+const ACCOUNT_OVERRIDE_BYTES: u64 = 1024;
 
 /// Memory, in bytes, an overridden storage slot holds in the request and in the state it is
 /// applied to.
@@ -342,7 +343,7 @@ mod tests {
             ..Default::default()
         };
         let overrides = StateOverride::from_iter([(Address::ZERO, account)]);
-        assert_eq!(state_override_bytes(&overrides), 256 + 1024 + 8 * 128);
+        assert_eq!(state_override_bytes(&overrides), 1024 + 1024 + 8 * 128);
         assert_eq!(proof_weight_mib(1, 1024), 13);
         assert_eq!(traced_calls_bytes(0), 0);
         assert_eq!(traced_calls_bytes(1), 16 * MIB);

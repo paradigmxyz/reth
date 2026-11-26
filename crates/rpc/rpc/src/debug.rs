@@ -1913,9 +1913,13 @@ fn geth_trace_weight_mib(
                     slots.saturating_mul(slots / 2).saturating_mul(STRUCT_LOG_STORAGE_SLOT_BYTES),
                 );
             }
+            // Memory expansion costs at least words^2 / 512 gas, and return data comes from a
+            // call's memory, so each step lists at most that much of either as hex.
+            let memory_hex_bytes = gas.saturating_mul(512).isqrt().saturating_mul(64);
             if config.enable_memory == Some(true) || config.disable_memory == Some(false) {
-                // Memory expansion costs at least words^2 / 512 gas.
-                let memory_hex_bytes = gas.saturating_mul(512).isqrt().saturating_mul(64);
+                bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
+            }
+            if config.enable_return_data == Some(true) {
                 bytes = bytes.saturating_add(steps.saturating_mul(memory_hex_bytes));
             }
             // Each call may record the trace byte limit, and all of them the response size.
@@ -2534,6 +2538,23 @@ mod tests {
                 max_response_size
             ),
             40
+        );
+        // Return data adds as much as memory does.
+        assert_eq!(
+            geth_trace_weight_mib(
+                &opts(serde_json::json!({ "disableStorage": true, "enableReturnData": true })),
+                10_000,
+                1,
+                None,
+                None
+            ),
+            geth_trace_weight_mib(
+                &opts(serde_json::json!({ "disableStorage": true, "enableMemory": true })),
+                10_000,
+                1,
+                None,
+                None
+            )
         );
         // Without limits, the estimate stands.
         assert_eq!(
