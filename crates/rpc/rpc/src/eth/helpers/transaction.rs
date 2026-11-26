@@ -234,6 +234,24 @@ mod tests {
             .build()
     }
 
+    fn proof_frame(sender: Address, witness: &[u8]) -> Frame {
+        let mut data = vec![0; 12];
+        data.extend_from_slice(sender.as_slice());
+        data.extend_from_slice(&[0; 32]);
+        data.extend_from_slice(witness);
+        Frame {
+            mode: FrameMode::Proof,
+            target: alloy_eips::eip8141::SECP256K1_VERIFIER.into(),
+            data: data.into(),
+            limits: FrameLimits { execution: 3100, state: 0 },
+            ..Default::default()
+        }
+    }
+
+    fn proof_request(sender: Address, witness: &[u8]) -> serde_json::Value {
+        serde_json::to_value(FrameRequest::from(proof_frame(sender, witness))).unwrap()
+    }
+
     fn raw_transfer_tx() -> Bytes {
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
         bytes!("02f871018303579880850555633d1b82520894eee27662c2b8eba3cd936a23f039f3189633e4c887ad591c62bdaeb180c080a07ea72c68abfb8fca1bd964f0f99132ed9280261bdca3e549546c0205e800f7d0a05b4ef3039e9c9b9babc179a1878fb825b5aaf5aed2fa8744854150157b08d6f3")
@@ -682,12 +700,12 @@ mod tests {
         assert_eq!(frame_tx.nonce_keys, Some(vec![]));
         assert_eq!(frame_tx.chain_id, 1);
         assert_eq!(frame_tx.frames[0].limits, limits);
-        assert!(frame_tx.signatures.is_empty());
+        assert_eq!(frame_tx.frames.len(), 1);
         assert_eq!(filled.tx.gas_limit(), frame_tx.calculate_gas_limit());
     }
 
     #[tokio::test]
-    async fn fill_frame_transaction_preserves_signature_placeholders() {
+    async fn fill_frame_transaction_preserves_proof_placeholders() {
         let address = Address::random();
         let nonce = 42u64;
         let limits = FrameLimits { execution: 45_000, state: 7_000 };
@@ -700,11 +718,10 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             transaction_type: Some(0x06),
-            signatures: Some(vec![alloy_eips::eip8141::FrameSignature {
-                scheme: alloy_eips::eip8141::SignatureScheme::Secp256k1,
-                ..Default::default()
-            }]),
-            frames: Some(vec![Frame { limits, ..Default::default() }.into()]),
+            frames: Some(vec![
+                proof_frame(address, &[]).into(),
+                Frame { limits, ..Default::default() }.into(),
+            ]),
             ..Default::default()
         };
 
@@ -715,16 +732,16 @@ mod tests {
         assert_eq!(frame_tx.nonce, nonce);
         assert_eq!(frame_tx.nonce_keys, Some(vec![]));
         assert_eq!(frame_tx.chain_id, 1);
-        assert_eq!(frame_tx.frames[0].limits, limits);
-        assert_eq!(frame_tx.signatures.len(), 1);
-        assert!(frame_tx.signatures[0].signature.is_empty());
+        assert_eq!(frame_tx.frames[1].limits, limits);
+        assert_eq!(frame_tx.frames.len(), 2);
+        assert!(frame_tx.frames[0].proof().unwrap().proof.is_empty());
         let mut completed = frame_tx.clone();
-        completed.signatures[0].signature = Bytes::from(vec![0; 65]);
+        completed.frames[0] = proof_frame(address, &[0; 65]);
         let fee_rate = U256::from(2_000_000_000u64) + frame_tx.fees.max_priority_fee_per_gas;
         assert!(frame_tx.fees.max_fee >= U256::from(completed.gas_limit()) * fee_rate);
         let json = serde_json::to_value(&filled).unwrap();
-        assert_eq!(json["tx"]["signatures"][0]["scheme"], "0x1");
-        assert!(json["tx"]["signatures"][0].get("signature").is_none());
+        assert!(json["tx"].get("signatures").is_none());
+        assert_eq!(frame_tx.frames[0].data.len(), 64);
         assert_eq!(filled.tx.gas_limit(), frame_tx.calculate_gas_limit());
     }
 
@@ -737,12 +754,12 @@ mod tests {
         )]);
         let api = mock_frame_eth_api(accounts);
         for state in [None, Some("0x0")] {
-            let mut frame = serde_json::json!({"mode":"0x1", "flags":"0x3"});
+            let mut frame = serde_json::json!({"mode":"0x1", "flags":"0x3", "data":"0x00"});
             if let Some(state) = state {
                 frame["stateGas"] = state.into();
             }
             let request: TransactionRequest = serde_json::from_value(serde_json::json!({
-                "type":"0x6", "from": address, "frames":[frame], "signatures":[{"scheme":"0x1"}]
+                "type":"0x6", "from": address, "frames":[proof_request(address, &[]), frame]
             }))
             .unwrap();
             let estimated = EthCall::estimate_gas_at(
@@ -759,10 +776,32 @@ mod tests {
                 .unwrap();
             let filled = api.fill_transaction(request).await.unwrap();
             let transaction = filled.tx.frame_transaction().unwrap();
-            assert!(transaction.frames[0].limits.execution > 0);
-            assert_eq!(transaction.frames[0].limits.state, 0);
-            assert!(transaction.frames[0].limits.execution < 100_000);
+            assert!(transaction.frames[1].limits.execution > 0);
+            assert_eq!(transaction.frames[1].limits.state, 0);
+            assert!(transaction.frames[1].limits.execution < 100_000);
         }
+    }
+
+    #[tokio::test]
+    async fn fill_frame_transaction_estimates_omitted_native_proof_gas() {
+        let sender = Address::repeat_byte(0x11);
+        let api = mock_frame_eth_api(AddressMap::from_iter([(
+            sender,
+            ExtendedAccount::new(0, U256::MAX),
+        )]));
+        let mut proof = proof_request(sender, &[]);
+        proof.as_object_mut().unwrap().remove("executionGas");
+        proof.as_object_mut().unwrap().remove("stateGas");
+        let request = serde_json::from_value(serde_json::json!({
+            "type":"0x6", "from":sender,
+            "frames":[proof, {"mode":"0x1", "flags":"0x3", "data":"0x00"}]
+        }))
+        .unwrap();
+        let filled = api.fill_transaction(request).await.unwrap();
+        let frames = &filled.tx.frame_transaction().unwrap().frames;
+        assert!((3100..4000).contains(&frames[0].limits.execution));
+        assert_eq!(frames[0].limits.state, 0);
+        assert!(frames[1].limits.execution > 0);
     }
 
     #[tokio::test]
@@ -816,16 +855,16 @@ mod tests {
         let request = serde_json::from_value(serde_json::json!({
             "type":"0x6", "from":sender,
             "frames":[
-                {"mode":"0x1", "flags":"0x3"},
+                proof_request(sender, &[]),
+                {"mode":"0x1", "flags":"0x3", "data":"0x00"},
                 {"mode":"0x2", "target":target},
                 {"mode":"0x2", "target":target, "data":"0x0000000000000000000000000000000000000000000000000000000000000001"}
-            ],
-            "signatures":[{"scheme":"0x1"}]
+            ]
         })).unwrap();
         let filled = api.fill_transaction(request).await.unwrap();
         let frames = &filled.tx.frame_transaction().unwrap().frames;
-        assert!(frames[1].limits.state > 0);
-        assert_eq!(frames[2].limits.state, 0);
+        assert!(frames[2].limits.state > 0);
+        assert_eq!(frames[3].limits.state, 0);
         assert!(frames[2].limits.execution > 0);
     }
 
@@ -928,15 +967,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fill_frame_transaction_rejects_missing_limits_with_supplied_signature() {
+    async fn fill_frame_transaction_rejects_missing_limits_with_supplied_proof() {
         let address = Address::random();
         let api = mock_frame_eth_api(AddressMap::from_iter([(
             address,
             ExtendedAccount::new(0, U256::MAX),
         )]));
         let request = serde_json::from_value(serde_json::json!({
-            "type":"0x6", "from":address, "frames":[{"mode":"0x1", "flags":"0x3"}],
-            "signatures":[{"scheme":"0x1", "signature": "0x01"}]
+            "type":"0x6", "from":address, "frames":[proof_request(address, &[1]), {"mode":"0x1", "flags":"0x3", "data":"0x00"}]
         }))
         .unwrap();
         assert_eq!(
@@ -955,8 +993,7 @@ mod tests {
         let request: TransactionRequest = serde_json::from_value(serde_json::json!({
             "type":"0x6", "from":address, "chainId":"0x1", "nonce":"0x0",
             "maxFee":"0x0", "maxPriorityFeePerGas":"0x0",
-            "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0xafc8", "stateGas":"0x0"}],
-            "signatures":[{"scheme":"0x1", "signature": Bytes::from(vec![1; 65])}]
+            "frames":[proof_request(address, &[1; 65]), {"mode":"0x1", "flags":"0x3", "data":"0x00", "executionGas":"0xafc8", "stateGas":"0x0"}]
         }))
         .unwrap();
         let error = api.fill_transaction(request.clone()).await.unwrap_err();
@@ -982,8 +1019,7 @@ mod tests {
             ExtendedAccount::new(0, U256::MAX),
         )]));
         let request = serde_json::from_value(serde_json::json!({
-            "type":"0x6", "from":address, "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0x0"}],
-            "signatures":[{"scheme":"0x1"}]
+            "type":"0x6", "from":address, "frames":[proof_request(address, &[]), {"mode":"0x1", "flags":"0x3", "data":"0x00", "executionGas":"0x0"}]
         })).unwrap();
         assert!(matches!(
             api.fill_transaction(request).await.unwrap_err(),
@@ -1031,7 +1067,6 @@ mod tests {
                 gas: None,
                 max_fee: Some(U256::MAX),
                 max_priority_fee_per_gas: Some(0),
-                signatures: Some(Vec::new()),
                 ..tx_req.clone()
             })
             .expect("frame request should convert")

@@ -557,7 +557,7 @@ where
         }
         tx.as_mut().chain_id.get_or_insert(chain_id);
         tx.as_mut().nonce_keys.get_or_insert_with(Vec::new);
-        tx.as_mut().signatures.get_or_insert_with(Vec::new);
+
         if tx.as_ref().eip8141_fees.is_none() {
             tx.as_mut().max_fee.get_or_insert(U256::ZERO);
             tx.as_mut().max_priority_fee_per_gas.get_or_insert(0);

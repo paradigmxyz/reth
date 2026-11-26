@@ -3,8 +3,8 @@
 use alloy_consensus::TxEip8141;
 use alloy_eips::{
     eip8141::{
-        Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme,
-        TransactionFees, ATOMIC_BATCH_FLAG, EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME,
+        Frame, FrameAddress, FrameLimits, FrameMode, TransactionFees, ATOMIC_BATCH_FLAG,
+        EXPIRY_VERIFIER, EXPIRY_VERIFIER_RUNTIME,
     },
     eip8250::{nonce_slot, NONCE_MANAGER, NONCE_MANAGER_CODE},
     Decodable2718,
@@ -60,6 +60,7 @@ fn self_verify_frame() -> Frame {
         mode: FrameMode::Verify,
         flags: 3,
         limits: FrameLimits { execution: VERIFY_GAS, state: 0 },
+        data: Bytes::from_static(&[0]),
         ..Default::default()
     }
 }
@@ -83,30 +84,32 @@ fn assertion_frame(target: Address) -> Frame {
 }
 
 /// Builds a signed EIP-8141 envelope.
-fn frame_tx(signer: &PrivateKeySigner, nonce: u64, frames: Vec<Frame>) -> Bytes {
+fn frame_tx(signer: &PrivateKeySigner, nonce: u64, mut frames: Vec<Frame>) -> Bytes {
+    let mut data = signer.address().into_word().to_vec();
+    data.extend_from_slice(&[0; 32 + 65]);
+    frames.insert(
+        0,
+        Frame {
+            mode: FrameMode::Proof,
+            target: alloy_eips::eip8141::SECP256K1_VERIFIER.into(),
+            limits: FrameLimits { execution: 3100, state: 0 },
+            data: data.into(),
+            ..Default::default()
+        },
+    );
     let mut tx = TxEip8141 {
         chain_id: 1,
         nonce,
         nonce_keys: Some(vec![]),
         sender: signer.address(),
         frames,
-        signatures: vec![FrameSignature {
-            scheme: SignatureScheme::Secp256k1,
-            signature: Bytes::from(vec![0; 65]),
-            ..Default::default()
-        }],
         fees: TransactionFees {
             max_priority_fee_per_gas: U256::from(MAX_PRIORITY_FEE_PER_GAS),
             max_fee: U256::from(MAX_FEE_PER_GAS) * U256::from(1_000_000),
         },
         ..Default::default()
     };
-    tx.signatures[0] = FrameSignature::from_secp256k1(
-        Default::default(),
-        Default::default(),
-        signer.sign_hash_sync(&tx.signature_hash()).unwrap(),
-    )
-    .unwrap();
+    sign_frame_proof(&mut tx, signer).unwrap();
 
     let mut raw = Vec::with_capacity(tx.eip2718_encoded_length());
     tx.eip2718_encode(&mut raw);
@@ -294,9 +297,11 @@ async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
             .await?;
         assert_eq!(response["error"]["code"], -32602, "{response}");
     }
+    let mut claim = signer.address().into_word().to_vec();
+    claim.extend_from_slice(&[0; 32]);
     let request = json!({"type":"0x6", "from":signer.address(), "nonceKeys":["0x1", "0x2"],
-        "frames":[{"mode":"0x1", "flags":"0x3", "executionGas":"0x2710", "stateGas":"0x2fd00"}],
-        "signatures":[]});
+        "frames":[{"mode":"0x4", "target":alloy_eips::eip8141::SECP256K1_VERIFIER, "executionGas":"0xc1c", "stateGas":"0x0", "data":Bytes::from(claim)},
+        {"mode":"0x1", "flags":"0x3", "executionGas":"0x2710", "stateGas":"0x2fd00", "data":"0x00"}]});
     let filled = rpc("eth_fillTransaction", json!([request.clone()])).await?;
     assert_eq!(filled["tx"]["nonceKeys"], json!(["0x1", "0x2"]));
     assert_eq!(filled["tx"]["nonce"], "0x0");
@@ -309,11 +314,7 @@ async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
         vec![verify, sender_frame(recipient())],
     ))?;
     tx.nonce_keys = Some(vec![U256::from(1), U256::from(2)]);
-    tx.signatures[0] = FrameSignature::from_secp256k1(
-        Default::default(),
-        Default::default(),
-        signer.sign_hash_sync(&tx.signature_hash())?,
-    )?;
+    sign_frame_proof(&mut tx, &signer)?;
     let mut raw = Vec::new();
     tx.eip2718_encode(&mut raw);
     let hash = node.rpc.inject_tx(raw.into()).await?;
@@ -336,11 +337,7 @@ async fn keyed_nonce_rpc_and_pool_roundtrip() -> eyre::Result<()> {
     );
     let mut disjoint = tx.clone();
     disjoint.nonce_keys = Some(vec![U256::from(3)]);
-    disjoint.signatures[0] = FrameSignature::from_secp256k1(
-        Default::default(),
-        Default::default(),
-        signer.sign_hash_sync(&disjoint.signature_hash())?,
-    )?;
+    sign_frame_proof(&mut disjoint, &signer)?;
     let mut other_raw = Vec::new();
     disjoint.eip2718_encode(&mut other_raw);
     assert_eq!(
@@ -424,5 +421,16 @@ async fn keyed_nonce_query_requires_activation() -> eyre::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Updates an existing fixed-length proof after changing a transaction's signed fields.
+fn sign_frame_proof(tx: &mut TxEip8141, signer: &PrivateKeySigner) -> eyre::Result<()> {
+    let signature = signer.sign_hash_sync(&tx.signature_hash())?;
+    let mut data = tx.frames[0].data.to_vec();
+    data[64] = u8::from(signature.v());
+    data[65..97].copy_from_slice(&signature.r().to_be_bytes::<32>());
+    data[97..129].copy_from_slice(&signature.s().to_be_bytes::<32>());
+    tx.frames[0].data = data.into();
     Ok(())
 }

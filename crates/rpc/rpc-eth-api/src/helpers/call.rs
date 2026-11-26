@@ -41,7 +41,7 @@ use reth_rpc_eth_types::{
         self, EthSimulateError, FrameSimulationFrameResult, FrameSimulationPrefixShape,
         FrameSimulationResult, SimulatedState,
     },
-    transaction::{has_frame_signatures, resolve_frame_nonce},
+    transaction::{has_frame_proofs, resolve_frame_nonce},
     utils::CallManyBudget,
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
 };
@@ -335,8 +335,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     ),
                 ));
             }
-            let policy = match FrameValidationPolicy::new(frame, frame.signature_verification_gas())
-            {
+            let policy = match FrameValidationPolicy::new(frame) {
                 Ok(policy) => policy,
                 Err(reason) => return Ok(FrameSimulationResult::invalid(max_cost, None, reason)),
             };
@@ -1149,7 +1148,7 @@ pub trait Call:
             Into::<evm2::SpecId>::into(evm_env.spec_id()).enables(evm2::SpecId::BOGOTA) &&
             request.as_ref().nonce_keys.is_none()
         {
-            if has_frame_signatures(request.as_ref()) {
+            if has_frame_proofs(request.as_ref()) {
                 return Err(EthApiError::InvalidParams(
                     "signed frame transactions must include nonceKeys".into(),
                 )
@@ -1203,10 +1202,7 @@ pub trait Call:
         // track whether the request has a gas limit set
         let requested_gas = request.as_ref().gas_limit();
         let is_frame = request.as_ref().minimal_tx_type().is_eip8141();
-        evm_env
-            .version_mut()
-            .features
-            .set(evm2::EvmFeatures::FRAME_SIGNATURE_PLACEHOLDERS, is_frame);
+        evm_env.version_mut().features.set(evm2::EvmFeatures::FRAME_PROOF_PLACEHOLDERS, is_frame);
 
         // Disable block gas limit check to allow executing transactions with higher gas limit (call
         // gas limit): https://github.com/paradigmxyz/reth/issues/18577
