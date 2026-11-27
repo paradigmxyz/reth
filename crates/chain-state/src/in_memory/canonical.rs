@@ -87,6 +87,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().contains(hash)
     }
 
+    /// Returns whether both handles read the same tracked blocks.
+    pub fn shares_blocks_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
     /// Runs `f` and returns its result with a snapshot of the blocks that were tracked during the
     /// whole time `f` ran.
     ///

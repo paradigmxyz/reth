@@ -50,7 +50,7 @@ where
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T> + WaitForCaches,
+    V: EngineValidator<T> + WaitForCaches<N>,
 {
     /// When the Consensus layer receives a new block via the consensus gossip protocol,
     /// the transactions in the block are sent to the execution layer in the form of a
@@ -513,7 +513,7 @@ where
         }
         self.state
             .tree_state
-            .overlay_manager
+            .overlay_context
             .precompute_child_execution_overlays(executed.recovered_block().hash());
 
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);

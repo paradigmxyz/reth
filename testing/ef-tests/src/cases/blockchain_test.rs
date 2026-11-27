@@ -36,7 +36,7 @@ use reth_provider::{
     StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     StorageSettingsCache, TrieWriter,
 };
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::Runtime;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
@@ -659,7 +659,7 @@ fn create_test_provider_factory(
             .build()
             .expect("static file provider"),
         shared_rocksdb(),
-        OverlayManager::default(),
+        OverlayContext::default(),
         Runtime::test(),
     )
     .expect("failed to create test provider factory");

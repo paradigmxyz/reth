@@ -15,7 +15,7 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_types::{HeaderTy, NodeTypesWithDBAdapter};
 use reth_primitives_traits::{Account, SealedHeader, StorageEntry};
 use reth_storage_api::StorageSettingsCache;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
@@ -63,7 +63,7 @@ pub fn create_test_provider_factory_with_chain_spec(
     create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
         chain_spec,
         genesis_block_number,
-        OverlayManager::default(),
+        OverlayContext::default(),
     )
 }
 
@@ -77,7 +77,7 @@ pub fn create_test_provider_factory_with_in_memory_state_writer(
         create_test_provider_factory_with_node_types_and_genesis::<MockNodeTypes>(
             chain_spec,
             genesis_block_number,
-            OverlayManager::new(in_memory_state),
+            OverlayContext::new(in_memory_state),
         ),
         in_memory_state_writer,
     )
@@ -100,14 +100,14 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     create_test_provider_factory_with_node_types_and_genesis(
         chain_spec,
         0,
-        OverlayManager::default(),
+        OverlayContext::default(),
     )
 }
 
 fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
     genesis_block_number: u64,
-    overlay_manager: OverlayManager<N::Primitives>,
+    overlay_context: OverlayContext<N::Primitives>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     // Create a single temp directory that contains all data dirs (db, static_files, rocksdb).
     // TempDatabase will clean up the entire directory on drop.
@@ -133,7 +133,7 @@ fn create_test_provider_factory_with_node_types_and_genesis<N: NodeTypesForProvi
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
-        overlay_manager,
+        overlay_context,
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")
@@ -166,7 +166,7 @@ pub fn create_test_provider_factory_with_chain_spec_and_db_args(
             .with_default_tables()
             .build()
             .expect("failed to create test RocksDB provider"),
-        OverlayManager::default(),
+        OverlayContext::default(),
         reth_tasks::Runtime::test(),
     )
     .expect("failed to create test provider factory")

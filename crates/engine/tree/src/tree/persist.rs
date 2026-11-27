@@ -42,7 +42,7 @@ where
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T> + WaitForCaches,
+    V: EngineValidator<T> + WaitForCaches<N>,
 {
     /// How many canonical blocks are retained in memory. A large count means persistence is
     /// falling behind execution.
@@ -209,7 +209,7 @@ where
             eviction_threshold,
             "Evicting changesets below threshold"
         );
-        self.state.tree_state.overlay_manager.evict_cached_changesets(eviction_threshold);
+        self.state.tree_state.overlay_context.evict_cached_changesets(eviction_threshold);
 
         self.on_new_persisted_block()?;
 
@@ -406,8 +406,9 @@ where
         finalized?;
         // Persistence changes the overlay anchor. Prepare the remaining canonical range before
         // the next payload needs to read execution state against the new durable frontier.
-        self.state.tree_state.overlay_manager.precompute_execution_overlay(
-            self.state.tree_state.canonical_block_hash(),
+        let tree_state = &self.state.tree_state;
+        tree_state.overlay_context.precompute_execution_overlay(
+            tree_state.canonical_block_hash(),
             in_memory_persisted_block.hash,
         );
         self.state.set_pending_sparse_trie_prune(self.should_prune_sparse_trie());

@@ -13,9 +13,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
-use reth_chain_state::{
-    BlockState, CanonicalInMemoryState, ExecutedBlock, InMemoryStateSnapshot, Snapshotted,
-};
+use reth_chain_state::{BlockState, CanonicalInMemoryState, ExecutedBlock, InMemoryStateSnapshot};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
@@ -30,8 +28,10 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StateProviderBox,
     StorageChangeSetReader,
 };
-use reth_storage_errors::provider::ProviderResult;
-use reth_storage_overlay::{OverlayBuilder, OverlayManager, OverlayStateProvider, OwnedProvider};
+use reth_storage_errors::provider::{ConsistentViewError, ProviderResult};
+use reth_storage_overlay::{
+    OverlayStateProvider, OverlayStateProviderMode, OverlayView, OwnedProvider,
+};
 use reth_trie::bundle_state::PlainStorageRevert;
 use std::{
     ops::{Add, Bound, RangeBounds, RangeInclusive, Sub},
@@ -49,9 +49,7 @@ use std::{
 #[doc(hidden)] // triggers ICE for `cargo docs`
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider, with the in-memory blocks tracked while its transaction opened.
-    storage_provider: Snapshotted<DatabaseProviderRO<N::DB, N>, N::Primitives>,
-    /// Manager of the overlays built over this view.
-    overlay_manager: OverlayManager<N::Primitives>,
+    storage_provider: OverlayView<DatabaseProviderRO<N::DB, N>, N::Primitives>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
     canonical_in_memory_state: CanonicalInMemoryState<N::Primitives>,
 }
@@ -62,6 +60,8 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// Underneath it opens [`ProviderFactory::provider`] and takes the
     /// in-memory head from the blocks tracked while its transaction opened, effectively maintaining
     /// one single snapshotted view of memory and database.
+    ///
+    /// Returns an error if the factory and the canonical state do not share the same blocks.
     pub fn new(
         storage_provider_factory: ProviderFactory<N>,
         state: CanonicalInMemoryState<N::Primitives>,
@@ -90,12 +90,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // Blocks leave memory only after their persistence committed, so every block is either in
         // the snapshot's in-memory chain or visible to the transaction, and there are no gaps in
         // the range.
-        let storage_provider = state
-            .in_memory_state()
+        let overlay_context = storage_provider_factory.overlay_context();
+        if !overlay_context.in_memory_state().shares_blocks_with(state.in_memory_state()) {
+            return Err(ConsistentViewError::MismatchedInMemoryState.into())
+        }
+        let storage_provider = overlay_context
             .snapshot_during(|| storage_provider_factory.provider().map(&configure))
             .transpose()?;
-        let overlay_manager = storage_provider_factory.overlay_manager().clone();
-        Ok(Self { storage_provider, overlay_manager, canonical_in_memory_state: state })
+        Ok(Self { storage_provider, canonical_in_memory_state: state })
     }
 
     /// Returns the in-memory canonical head when this view was created.
@@ -136,11 +138,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             return Err(ProviderError::StateUnavailableDuringSync)
         }
 
-        let mut overlay_builder = self.overlay_manager.overlay_builder(block_hash);
-        if !cache_trie_reverts {
-            overlay_builder = overlay_builder.without_trie_revert_caching();
-        }
-        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
+        let mode = if cache_trie_reverts {
+            OverlayStateProviderMode::Cached
+        } else {
+            OverlayStateProviderMode::UncachedReverts
+        };
+        Ok(Box::new(self.into_overlay_provider(block_hash, mode)))
     }
 
     /// Returns the state after `parent_hash` with `block`, a block built on it that is not tracked,
@@ -150,12 +153,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         parent_hash: B256,
         block: ExecutedBlock<N::Primitives>,
     ) -> ProviderResult<StateProviderBox> {
-        let overlay_builder = match self.in_memory().state_by_hash(parent_hash) {
-            Some(parent) => self.overlay_manager.overlay_builder_for_state(parent),
-            None => self.overlay_manager.overlay_builder(parent_hash),
-        }
-        .with_appended_block(block);
-        Ok(Box::new(self.into_overlay_provider(overlay_builder)))
+        Ok(Box::new(
+            self.into_overlay_provider(parent_hash, OverlayStateProviderMode::AppendBlock(block)),
+        ))
     }
 
     /// Returns `true` if this view's state tables have advanced past its finished block, as they
@@ -172,18 +172,22 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     /// blocks against this view's in-memory blocks.
     pub(crate) fn into_overlay_provider(
         self,
-        overlay_builder: OverlayBuilder<N::Primitives>,
+        parent_hash: B256,
+        mode: OverlayStateProviderMode<N::Primitives>,
     ) -> OverlayStateProvider<OwnedProvider<DatabaseProviderRO<N::DB, N>>, N::Primitives> {
-        overlay_builder.into_provider(self.storage_provider)
+        OverlayStateProvider::new(self.storage_provider, parent_hash, mode)
     }
 
-    /// Returns an overlay state provider borrowing this view's database provider, resolving
-    /// in-memory blocks against this view's in-memory blocks.
+    /// Returns an overlay state provider borrowing the database transaction and block snapshot.
     pub(crate) fn overlay_provider(
         &self,
-        overlay_builder: OverlayBuilder<N::Primitives>,
+        parent_hash: B256,
     ) -> OverlayStateProvider<&DatabaseProviderRO<N::DB, N>, N::Primitives> {
-        overlay_builder.into_provider_ref(&self.storage_provider)
+        OverlayStateProvider::new_ref(
+            &self.storage_provider,
+            parent_hash,
+            OverlayStateProviderMode::Cached,
+        )
     }
 
     // Helper function to convert range bounds
@@ -1500,7 +1504,8 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{
         test_utils::{test_canonical_in_memory_state_writer, TestBlockBuilder},
-        CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryState, NewCanonicalChain,
+        CanonicalInMemoryStateWriter, ChainInfoHeaders, ExecutedBlock, InMemoryState,
+        NewCanonicalChain,
     };
     use reth_chainspec::MAINNET;
     use reth_db_api::{
@@ -2231,7 +2236,8 @@ mod tests {
 
     #[test]
     fn partially_pruned_genesis_changesets_are_unavailable() -> eyre::Result<()> {
-        let factory = create_test_provider_factory();
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         factory.set_storage_settings_cache(StorageSettings::v1());
         let provider_rw = factory.provider_rw()?;
         let partial_genesis =
@@ -2240,7 +2246,7 @@ mod tests {
         provider_rw.commit()?;
 
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::new().1);
+            test_canonical_in_memory_state_writer(in_memory_state_writer);
         canonical_in_memory_state_writer.update_chain(NewCanonicalChain::Commit {
             new: vec![TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO)],
         });
@@ -2300,12 +2306,15 @@ mod tests {
         assert!(db
             .account_changesets_range((Bound::Excluded(u64::MAX), Bound::Unbounded))?
             .is_empty());
-        let provider = ConsistentProvider::new(
-            factory,
-            test_canonical_in_memory_state_writer(InMemoryState::new().1)
-                .canonical_in_memory_state()
-                .clone(),
-        )?;
+        let canonical = CanonicalInMemoryState::without_writer(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::default(),
+                safe: None,
+                finalized: None,
+            },
+            factory.in_memory_state().clone(),
+        );
+        let provider = ConsistentProvider::new(factory, canonical)?;
         assert_eq!(provider.account_changesets_range(u64::MAX..=u64::MAX)?, [(u64::MAX, account)]);
         assert_eq!(
             provider.storage_changesets_range(u64::MAX..)?,
@@ -2347,12 +2356,15 @@ mod tests {
         }
         static_files.initialize_index()?;
 
-        let provider = ConsistentProvider::new(
-            factory.clone(),
-            test_canonical_in_memory_state_writer(InMemoryState::new().1)
-                .canonical_in_memory_state()
-                .clone(),
-        )?;
+        let canonical = CanonicalInMemoryState::without_writer(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::default(),
+                safe: None,
+                finalized: None,
+            },
+            factory.in_memory_state().clone(),
+        );
+        let provider = ConsistentProvider::new(factory.clone(), canonical)?;
         assert_eq!(
             provider.account_changesets_range(first..)?,
             [(first, account.clone()), (last, account)]
@@ -2370,10 +2382,29 @@ mod tests {
     }
 
     #[test]
-    fn find_block_by_hash_reads_tree_blocks_of_the_supplied_state() -> eyre::Result<()> {
+    fn rejects_canonical_state_from_another_factory() {
         let factory = create_test_provider_factory();
+        let canonical = CanonicalInMemoryState::without_writer(
+            ChainInfoHeaders {
+                canonical_head: SealedHeader::default(),
+                safe: None,
+                finalized: None,
+            },
+            InMemoryState::read_only(),
+        );
+        assert!(matches!(
+            ConsistentProvider::new(factory, canonical).unwrap_err(),
+            ProviderError::ConsistentView(error)
+                if *error == ConsistentViewError::MismatchedInMemoryState
+        ));
+    }
+
+    #[test]
+    fn find_block_by_hash_reads_tree_blocks_of_the_supplied_state() -> eyre::Result<()> {
+        let (factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut canonical_in_memory_state_writer =
-            test_canonical_in_memory_state_writer(InMemoryState::new().1);
+            test_canonical_in_memory_state_writer(in_memory_state_writer);
         let block = TestBlockBuilder::eth().get_executed_block_with_number(1, B256::ZERO);
         let recovered = Arc::clone(&block.recovered_block);
         canonical_in_memory_state_writer.insert_executed(block);

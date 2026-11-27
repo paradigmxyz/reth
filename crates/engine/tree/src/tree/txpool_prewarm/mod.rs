@@ -246,7 +246,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::OverlayContext;
     use reth_tasks::Runtime;
 
     type TestHandle = Handle<EthPrimitives, MockEthProvider, EthEvmConfig>;
@@ -264,7 +264,8 @@ mod tests {
     fn start(handle: &TestHandle, parent: &SealedHeader) {
         let state_provider_factory = OverlayStateProviderFactory::new(
             MockEthProvider::default(),
-            OverlayManager::default().overlay_builder(parent.hash()),
+            parent.hash(),
+            OverlayContext::default(),
         );
         handle.start(parent, Default::default(), state_provider_factory);
     }

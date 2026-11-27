@@ -9,7 +9,7 @@ use reth_db::{
     open_db_read_only, DatabaseEnv,
 };
 use reth_node_types::NodeTypesWithDBAdapter;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use std::{
     marker::PhantomData,
     path::{Path, PathBuf},
@@ -115,7 +115,7 @@ impl<N> ProviderFactoryBuilder<N> {
             chainspec,
             static_file_provider,
             rocksdb_provider,
-            OverlayManager::default(),
+            OverlayContext::default(),
             runtime,
         )?
         .with_read_only_sync(watch);

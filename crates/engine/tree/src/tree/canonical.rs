@@ -41,7 +41,7 @@ where
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T> + WaitForCaches,
+    V: EngineValidator<T> + WaitForCaches<N>,
 {
     /// Returns the new chain for the given head.
     ///
@@ -382,12 +382,11 @@ where
             number = ?block.number(),
             "computing block trie updates",
         );
-        let db_provider = self.provider.database_provider_ro()?;
         let trie_updates = self
             .state
             .tree_state
-            .overlay_manager
-            .compute_block_trie_updates(&db_provider, block.number())?;
+            .overlay_context
+            .compute_block_trie_updates(&self.provider, block.number())?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);

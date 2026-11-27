@@ -1429,7 +1429,7 @@ mod tests {
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory, RocksDBProviderFactory,
     };
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::OverlayContext;
     use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
@@ -2162,7 +2162,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
-                OverlayManager::default(),
+                OverlayContext::default(),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),
@@ -2190,7 +2190,7 @@ mod tests {
                 MAINNET.clone(),
                 static_file_provider,
                 rocksdb_provider,
-                OverlayManager::default(),
+                OverlayContext::default(),
                 reth_tasks::Runtime::test(),
             )
             .unwrap(),

@@ -1,13 +1,15 @@
 use crate::{
-    database_state_frontiers, multiproof_calculator::OverlayMultiProofCalculator, ExecutionOverlay,
-    OverlayBuilder, StateTrieOverlay,
+    builder::{OverlayBuildMode, OverlaySnapshot},
+    database_state_frontiers,
+    manager_metrics::OverlayStateProviderFactoryMetrics,
+    multiproof_calculator::OverlayMultiProofCalculator,
+    ExecutionOverlay, OverlayBuilder, OverlayContext, OverlayView, StateTrieOverlay,
 };
 use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
-use metrics::{Counter, Histogram};
+use reth_chain_state::ExecutedBlock;
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_metrics::Metrics;
 use reth_primitives_traits::{
     dashmap::{self, DashMap},
     Account, NodePrimitives,
@@ -15,10 +17,9 @@ use reth_primitives_traits::{
 use reth_prune_types::PruneSegment;
 use reth_storage_api::{
     AccountReader, BlockHashReader, BlockNumReader, BytecodeReader, ChangeSetReader, DBProvider,
-    DatabaseProviderFactory, DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider,
-    HistoryInfo, HistoryReader, PruneCheckpointReader, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateRootProvider, StorageChangeSetReader, StorageRootProvider,
-    StorageSettingsCache,
+    DatabaseProviderROFactory, DbTxProvider, HashedPostStateProvider, HistoryInfo, HistoryReader,
+    PruneCheckpointReader, StageCheckpointReader, StateProofProvider, StateProvider,
+    StateRootProvider, StorageChangeSetReader, StorageRootProvider, StorageSettingsCache,
 };
 use reth_trie::{
     hashed_cursor::{
@@ -62,41 +63,29 @@ use tracing::instrument;
 pub struct OverlayStateProviderFactory<F, N: NodePrimitives = EthPrimitives> {
     /// The underlying database provider factory
     factory: F,
-    /// Overlay builder containing the configuration and overlay calculation logic.
-    overlay_builder: OverlayBuilder<N>,
-    /// A cache mapping `(state_trie_tip, finish_tip, trie_changesets)` to [`StateTrieOverlay`].
-    ///
-    /// Under partial persistence the overlay depends on both durable frontiers, so both hashes are
-    /// part of the cache key.
-    state_trie_overlay_cache: StateTrieOverlayCache,
-    /// Metrics for provider factory operations.
-    metrics: OverlayStateProviderFactoryMetrics,
-    /// Cursor metric handles shared by the multiproof calculators of every provider.
-    proof_cursor_metrics: ProofCursorMetrics,
-    /// Revealed storage roots from the reused sparse trie, shared across proof workers.
-    known_storage_roots: Arc<B256Map<B256>>,
+    /// Block whose post-state is opened by each provider.
+    parent_hash: B256,
+    /// Pairs each transaction with the in-memory blocks and their shared caches.
+    overlay_context: OverlayContext<N>,
+    /// Proof-worker configuration and overlay cache shared by clones of this factory.
+    overlay: Arc<FactoryOverlay>,
 }
 
 impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
-    /// Create a new overlay state provider factory.
+    /// Creates a factory for reading the state at `parent_hash`.
     ///
-    /// `factory` opens each database provider inside
-    /// [`InMemoryState::snapshot_during`](reth_chain_state::InMemoryState::snapshot_during), whose
-    /// last attempt holds the in-memory read lock, so its `database_provider_ro` must not read the
-    /// overlay manager's in-memory state.
-    pub fn new(factory: F, overlay_builder: OverlayBuilder<N>) -> Self {
-        let manager = overlay_builder.overlay_manager();
-        Self {
-            factory,
-            metrics: manager.provider_metrics().clone(),
-            proof_cursor_metrics: manager.proof_cursor_metrics().clone(),
-            overlay_builder,
-            state_trie_overlay_cache: Default::default(),
-            known_storage_roots: Default::default(),
-        }
+    /// The database factory must not acquire the context's in-memory state lock when it opens a
+    /// transaction: [`OverlayContext::snapshot_during`] can hold that lock while calling it.
+    pub fn new(factory: F, parent_hash: B256, overlay_context: OverlayContext<N>) -> Self {
+        Self { factory, parent_hash, overlay_context, overlay: Arc::default() }
     }
 
-    /// Skips managed overlay construction when this factory is used by a task that reused a sparse
+    /// Returns the context that pairs new database transactions with their in-memory block views.
+    pub const fn overlay_context(&self) -> &OverlayContext<N> {
+        &self.overlay_context
+    }
+
+    /// Skips overlay construction when this factory is used by a task that reused a sparse
     /// trie covering both durable frontiers through the parent.
     ///
     /// Trie and hashed cursors then read durable database state only. V2 account proofs use the
@@ -108,15 +97,20 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
     ///
     /// `known_storage_roots` must contain the revealed storage roots at this factory's parent,
     /// keyed by hashed account address. Account proofs reuse them to avoid root calculation.
-    pub fn with_skip_overlay_for_reused_sparse_trie(
+    pub fn for_reused_sparse_trie(
         mut self,
         anchor_hash: B256,
         known_storage_roots: B256Map<B256>,
     ) -> Self {
-        self.overlay_builder =
-            self.overlay_builder.with_skip_overlay_for_reused_sparse_trie(anchor_hash);
-        self.state_trie_overlay_cache = Default::default();
-        self.known_storage_roots = Arc::new(known_storage_roots);
+        // The provider cache is specific to the sparse-trie configuration. Existing factory
+        // clones and their providers retain the previous cache.
+        self.overlay = Arc::new(FactoryOverlay {
+            cache: DashMap::default(),
+            reused_sparse_trie: Some(ReusedSparseTrie {
+                anchor_hash,
+                known_storage_roots: Arc::new(known_storage_roots),
+            }),
+        });
         self
     }
 }
@@ -124,8 +118,9 @@ impl<F, N: NodePrimitives> OverlayStateProviderFactory<F, N> {
 impl<F, N> DatabaseProviderROFactory for OverlayStateProviderFactory<F, N>
 where
     N: NodePrimitives,
-    F: DatabaseProviderFactory,
-    F::Provider: StageCheckpointReader
+    F: DatabaseProviderROFactory,
+    F::Provider: DBProvider
+        + StageCheckpointReader
         + PruneCheckpointReader
         + BlockNumReader
         + ChangeSetReader
@@ -141,29 +136,28 @@ where
     ) -> ProviderResult<OverlayStateProvider<OwnedProvider<F::Provider>, N>> {
         let overall_start = Instant::now();
 
-        // Get a read-only provider, with the in-memory blocks tracked while its transaction opened,
-        // which the builder resolves in-memory blocks against.
+        let metrics = self.overlay_context.manager().provider_metrics();
         let start = Instant::now();
-        let (provider, in_memory) = self
-            .overlay_builder
-            .overlay_manager()
-            .in_memory_state()
+        let view = self
+            .overlay_context
             .snapshot_during(|| self.factory.database_provider_ro())
-            .transpose()?
-            .into_parts();
-        self.metrics.create_provider_duration.record(start.elapsed());
+            .transpose()?;
+        metrics.create_provider_duration.record(start.elapsed());
 
-        let is_v2 = provider.cached_storage_settings().is_v2();
-        self.metrics.database_provider_ro_duration.record(overall_start.elapsed());
-        Ok(OverlayStateProvider::from_parts(
+        let mode = match &self.overlay.reused_sparse_trie {
+            Some(trie) => OverlayBuildMode::ReusedSparseTrie { anchor_hash: trie.anchor_hash },
+            None => OverlayBuildMode::Provider(OverlayStateProviderMode::Cached),
+        };
+        let (provider, snapshot) = OverlaySnapshot::split(view);
+        let provider = OverlayStateProvider::from_snapshot_parts(
             OwnedProvider(provider),
-            Some(self.overlay_builder.pinned(in_memory)),
-            Some(Arc::clone(&self.state_trie_overlay_cache)),
-            self.metrics.clone(),
-            self.proof_cursor_metrics.clone(),
-            self.known_storage_roots.clone(),
-            is_v2,
-        ))
+            self.parent_hash,
+            snapshot,
+            mode,
+            Some(Arc::clone(&self.overlay)),
+        );
+        metrics.database_provider_ro_duration.record(overall_start.elapsed());
+        Ok(provider)
     }
 }
 
@@ -183,11 +177,9 @@ where
     provider: Pin<Box<(Provider, PhantomPinned)>>,
     overlay_builder: Option<OverlayBuilder<N>>,
     /// Overlay cache shared with the factory that created this provider, if any.
-    state_trie_overlay_cache: Option<StateTrieOverlayCache>,
+    factory_overlay: Option<Arc<FactoryOverlay>>,
     metrics: OverlayStateProviderFactoryMetrics,
     proof_cursor_metrics: ProofCursorMetrics,
-    /// Revealed storage roots from the reused sparse trie, shared across proof workers.
-    known_storage_roots: Arc<B256Map<B256>>,
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
@@ -195,26 +187,26 @@ where
 }
 
 impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider<Provider>, N> {
-    /// Creates an overlay state provider over an already-open database provider.
+    /// Opens the state at `parent_hash` over an owned transaction and its paired in-memory view.
     ///
-    /// The builder must resolve in-memory blocks against blocks that belong to `provider`'s
-    /// database view, see [`OverlayBuilder::into_provider`].
-    pub(crate) fn new(provider: Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    /// # Panics
+    ///
+    /// Panics if an appended block does not extend `parent_hash`.
+    pub fn new(
+        view: OverlayView<Provider, N>,
+        parent_hash: B256,
+        mode: OverlayStateProviderMode<N>,
+    ) -> Self
     where
         Provider: StorageSettingsCache,
     {
-        let is_v2 = provider.cached_storage_settings().is_v2();
-        let manager = overlay_builder.overlay_manager();
-        let metrics = manager.provider_metrics().clone();
-        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
-        Self::from_parts(
+        let (provider, snapshot) = OverlaySnapshot::split(view);
+        Self::from_snapshot_parts(
             OwnedProvider(provider),
-            Some(overlay_builder),
+            parent_hash,
+            snapshot,
+            OverlayBuildMode::Provider(mode),
             None,
-            metrics,
-            proof_cursor_metrics,
-            Default::default(),
-            is_v2,
         )
     }
 
@@ -230,7 +222,6 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
             None,
             Default::default(),
             Default::default(),
-            Default::default(),
             is_v2,
         );
         provider.execution_overlay = OnceCell::from(CachedExecutionOverlay {
@@ -242,23 +233,25 @@ impl<Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<OwnedProvider
 }
 
 impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provider, N> {
-    /// Creates an overlay state provider over a borrowed database provider.
-    pub(crate) fn new_ref(provider: &'a Provider, overlay_builder: OverlayBuilder<N>) -> Self
+    /// Opens the state at `parent_hash` over a borrowed transaction and its paired in-memory view.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an appended block does not extend `parent_hash`.
+    pub fn new_ref(
+        view: &'a OverlayView<Provider, N>,
+        parent_hash: B256,
+        mode: OverlayStateProviderMode<N>,
+    ) -> Self
     where
         Provider: StorageSettingsCache,
     {
-        let is_v2 = provider.cached_storage_settings().is_v2();
-        let manager = overlay_builder.overlay_manager();
-        let metrics = manager.provider_metrics().clone();
-        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
-        Self::from_parts(
-            provider,
-            Some(overlay_builder),
+        Self::from_snapshot_parts(
+            &**view,
+            parent_hash,
+            OverlaySnapshot::from_view(view),
+            OverlayBuildMode::Provider(mode),
             None,
-            metrics,
-            proof_cursor_metrics,
-            Default::default(),
-            is_v2,
         )
     }
 
@@ -267,15 +260,8 @@ impl<'a, Provider: DBProvider, N: NodePrimitives> OverlayStateProvider<&'a Provi
         state_trie_overlay: StateTrieOverlay,
         is_v2: bool,
     ) -> Self {
-        let mut provider = Self::from_parts(
-            provider,
-            None,
-            None,
-            Default::default(),
-            Default::default(),
-            Default::default(),
-            is_v2,
-        );
+        let mut provider =
+            Self::from_parts(provider, None, None, Default::default(), Default::default(), is_v2);
         provider.state_trie_overlay = OnceCell::from(state_trie_overlay.clone());
         provider.state_trie_overlay_with_trie_changesets = OnceCell::from(state_trie_overlay);
         provider
@@ -287,25 +273,47 @@ where
     Provider: Deref,
     Provider::Target: DBProvider,
 {
+    fn from_snapshot_parts(
+        provider: Provider,
+        parent_hash: B256,
+        snapshot: OverlaySnapshot<N>,
+        mode: OverlayBuildMode<N>,
+        factory_overlay: Option<Arc<FactoryOverlay>>,
+    ) -> Self
+    where
+        Provider::Target: StorageSettingsCache,
+    {
+        let is_v2 = provider.cached_storage_settings().is_v2();
+        let manager = snapshot.context().manager();
+        let metrics = manager.provider_metrics().clone();
+        let proof_cursor_metrics = manager.proof_cursor_metrics().clone();
+        Self::from_parts(
+            provider,
+            Some(OverlayBuilder::new(parent_hash, snapshot, mode)),
+            factory_overlay,
+            metrics,
+            proof_cursor_metrics,
+            is_v2,
+        )
+    }
+
     /// Creates a provider whose overlays resolve lazily and that has no cached multiproof
     /// calculator.
     fn from_parts(
         provider: Provider,
         overlay_builder: Option<OverlayBuilder<N>>,
-        state_trie_overlay_cache: Option<StateTrieOverlayCache>,
+        factory_overlay: Option<Arc<FactoryOverlay>>,
         metrics: OverlayStateProviderFactoryMetrics,
         proof_cursor_metrics: ProofCursorMetrics,
-        known_storage_roots: Arc<B256Map<B256>>,
         is_v2: bool,
     ) -> Self {
         Self {
             multiproof_calculator: RefCell::new(None),
             provider: Box::pin((provider, PhantomPinned)),
             overlay_builder,
-            state_trie_overlay_cache,
+            factory_overlay,
             metrics,
             proof_cursor_metrics,
-            known_storage_roots,
             state_trie_overlay: OnceCell::new(),
             state_trie_overlay_with_trie_changesets: OnceCell::new(),
             execution_overlay: OnceCell::new(),
@@ -336,7 +344,7 @@ where
         let build = || {
             self.overlay_builder
                 .as_ref()
-                .expect("state trie overlay must be initialized or lazily resolvable")
+                .ok_or(ProviderError::UnsupportedProvider)?
                 .build_state_trie_overlay_at_frontiers(
                     self.provider(),
                     state_trie_tip_block,
@@ -344,8 +352,8 @@ where
                     trie_changesets,
                 )
         };
-        let overlay = match &self.state_trie_overlay_cache {
-            Some(cache) => match cache.entry((
+        let overlay = match &self.factory_overlay {
+            Some(factory) => match factory.cache.entry((
                 state_trie_tip_block.hash,
                 finish_tip_block.hash,
                 trie_changesets,
@@ -427,7 +435,7 @@ where
         let (overlay, fallback_block_number) = self
             .overlay_builder
             .as_ref()
-            .expect("execution overlay must be initialized or lazily resolvable")
+            .ok_or(ProviderError::UnsupportedProvider)?
             .execution_overlay_at_frontiers(
                 self.provider(),
                 state_trie_tip_block,
@@ -814,7 +822,11 @@ where
                         input,
                         self.is_v2,
                         self.proof_cursor_metrics.clone(),
-                        self.known_storage_roots.clone(),
+                        self.factory_overlay
+                            .as_ref()
+                            .and_then(|factory| factory.reused_sparse_trie.as_ref())
+                            .map(|trie| Arc::clone(&trie.known_storage_roots))
+                            .unwrap_or_default(),
                     )
                 };
                 slot.insert(CachedMultiProofCalculator { requires_masks, calculator })
@@ -1076,19 +1088,32 @@ where
     }
 }
 
-/// Metrics for overlay state provider factory operations.
-#[derive(Clone, Metrics)]
-#[metrics(scope = "storage.providers.overlay")]
-pub(crate) struct OverlayStateProviderFactoryMetrics {
-    /// Duration of creating the database provider transaction.
-    create_provider_duration: Histogram,
-    /// Overall duration of the [`OverlayStateProviderFactory::database_provider_ro`] call.
-    database_provider_ro_duration: Histogram,
-    /// Number of cache misses when fetching state trie overlays.
-    state_trie_overlay_cache_misses: Counter,
+/// Describes how an overlay provider resolves the requested state.
+#[derive(Debug)]
+pub enum OverlayStateProviderMode<N: NodePrimitives = EthPrimitives> {
+    /// Retain trie revert ranges for a node-chosen block.
+    Cached,
+    /// Read any existing trie revert ranges, but do not retain new ranges. Use this mode for
+    /// blocks chosen by peers or RPC callers.
+    UncachedReverts,
+    /// Resolve the post-state of an untracked block that extends the specified parent. The
+    /// underlying trie reverts may be retained, but not the appended block's overlays.
+    AppendBlock(ExecutedBlock<N>),
 }
 
-type StateTrieOverlayCache = Arc<DashMap<(BlockHash, BlockHash, bool), StateTrieOverlay>>;
+#[derive(Debug, Default)]
+struct FactoryOverlay {
+    /// Keys include both durable frontiers because partial persistence can move them separately.
+    cache: DashMap<(BlockHash, BlockHash, bool), StateTrieOverlay>,
+    reused_sparse_trie: Option<ReusedSparseTrie>,
+}
+
+#[derive(Debug)]
+struct ReusedSparseTrie {
+    anchor_hash: B256,
+    /// Revealed storage roots at the factory's parent, keyed by hashed account address.
+    known_storage_roots: Arc<B256Map<B256>>,
+}
 
 #[derive(Clone, Debug)]
 struct CachedExecutionOverlay {
@@ -1141,14 +1166,14 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        test_utils::{assert_same_overlay, overlay_manager_with_writer},
-        ExecutionOverlay, OverlayManager,
+    use crate::test_utils::{
+        account_keys, account_node_paths, assert_same_overlay, overlay_context_with_writer,
+        setup_frontiers,
     };
     use alloy_eips::BlockNumHash;
     use alloy_primitives::{Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
-    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
+    use reth_chain_state::NewCanonicalChain;
     use reth_db_api::{
         models::{
             storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress, ShardedKey,
@@ -1159,95 +1184,22 @@ mod tests {
     };
     use reth_primitives_traits::{Account, StorageEntry};
     use reth_provider::{
-        test_utils::{create_test_provider_factory, MockNodeTypesWithDB},
-        BlockWriter, ProviderFactory, StaticFileProviderFactory, StaticFileSegment,
-        StaticFileWriter, StorageSettings,
+        StaticFileProviderFactory, StaticFileSegment, StaticFileWriter, StorageSettings,
     };
     use reth_prune_types::{PruneCheckpoint, PruneMode};
     use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
     use reth_storage_api::{PruneCheckpointWriter, StageCheckpointWriter};
-    use reth_trie::{
-        updates::TrieUpdatesSorted, BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
-        SortedTrieData,
-    };
-
-    fn with_unique_trie_data(
-        block: &ExecutedBlock<EthPrimitives>,
-        id: u8,
-    ) -> ExecutedBlock<EthPrimitives> {
-        let hashed_address = B256::with_last_byte(id);
-        let hashed_slot = B256::with_last_byte(id.saturating_add(32));
-        let hashed_state = HashedPostState::default()
-            .with_accounts([(hashed_address, Some(Account::default()))])
-            .with_storages([(
-                hashed_address,
-                HashedStorage::from_iter([(hashed_slot, U256::from(id))]),
-            )])
-            .into_sorted();
-        let trie_updates = TrieUpdatesSorted::new(
-            vec![(
-                Nibbles::from_nibbles([id]),
-                Some(BranchNodeCompact::new(0, 0, 0, vec![], None)),
-            )],
-            Default::default(),
-        );
-
-        ExecutedBlock::new(
-            Arc::clone(&block.recovered_block),
-            Arc::clone(&block.execution_output),
-            SortedTrieData::new(Arc::new(hashed_state), Arc::new(trie_updates)),
-        )
-    }
-
-    fn test_blocks() -> Vec<ExecutedBlock<EthPrimitives>> {
-        TestBlockBuilder::eth()
-            .get_executed_blocks(0..5)
-            .enumerate()
-            .map(|(index, block)| with_unique_trie_data(&block, index as u8 + 1))
-            .collect()
-    }
-
-    fn setup_frontiers(
-        state_trie_tip_index: usize,
-        finish_tip_index: usize,
-    ) -> (ProviderFactory<MockNodeTypesWithDB>, Vec<ExecutedBlock<EthPrimitives>>) {
-        let factory = create_test_provider_factory();
-        let blocks = test_blocks();
-        let provider_rw = factory.provider_rw().unwrap();
-        for block in &blocks[..=finish_tip_index] {
-            provider_rw.insert_block(block.recovered_block()).unwrap();
-        }
-        provider_rw
-            .save_stage_checkpoint(
-                StageId::Finish,
-                StageCheckpoint::new(blocks[finish_tip_index].block_number())
-                    .with_finish_stage_checkpoint(FinishCheckpoint {
-                        partial_state_trie: Some(blocks[state_trie_tip_index].block_number()),
-                    }),
-            )
-            .unwrap();
-        provider_rw.commit().unwrap();
-
-        (factory, blocks)
-    }
-
-    fn account_keys(overlay: &StateTrieOverlay) -> Vec<B256> {
-        overlay.input().state.accounts.iter().map(|(key, _)| *key).collect()
-    }
-
-    fn account_node_paths(overlay: &StateTrieOverlay) -> Vec<Nibbles> {
-        overlay.input().nodes.account_nodes_ref().iter().map(|(path, _)| *path).collect()
-    }
+    use reth_trie::Nibbles;
 
     #[reth_concurrency::test]
     fn provider_keeps_the_blocks_tracked_when_it_opened() {
         // The engine removes the chain from Finish down to the state trie tip after the provider
         // opened, before the overlay is built.
         let (factory, blocks) = setup_frontiers(1, 3);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         let parent_hash = blocks[1].recovered_block().hash();
         let state_provider_factory =
-            OverlayStateProviderFactory::new(factory, manager.overlay_builder(parent_hash));
+            OverlayStateProviderFactory::new(factory.clone(), parent_hash, context);
         in_memory_state_writer
             .update_chain(NewCanonicalChain::Commit { new: blocks[2..=4].to_vec() });
         let expected = state_provider_factory
@@ -1256,10 +1208,15 @@ mod tests {
             .state_trie_overlay(false)
             .unwrap()
             .clone();
-        state_provider_factory.state_trie_overlay_cache.clear();
+        state_provider_factory.overlay.cache.clear();
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
         let persisted = blocks[3].recovered_block().num_hash();
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(persisted.number))
+            .unwrap();
+        provider_rw.commit().unwrap();
         in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);
 
         assert_same_overlay(provider.state_trie_overlay(false).unwrap(), &expected);
@@ -1268,13 +1225,14 @@ mod tests {
     #[reth_concurrency::test]
     fn overlay_cache_is_keyed_by_both_durable_frontiers() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         for block in &blocks[2..=3] {
             in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory.clone(),
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            blocks[3].recovered_block().hash(),
+            context,
         );
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
@@ -1297,53 +1255,49 @@ mod tests {
         let second = provider.state_trie_overlay(false).unwrap().clone();
         assert_eq!(account_keys(&second), vec![B256::with_last_byte(4)]);
         assert_eq!(account_node_paths(&second), vec![Nibbles::from_nibbles([4])]);
-        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
+        assert_eq!(state_provider_factory.overlay.cache.len(), 2);
     }
 
     #[reth_concurrency::test]
     fn overlays_are_computed_lazily() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         for block in &blocks[2..=3] {
             in_memory_state_writer.insert_executed(block.clone());
         }
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
-        );
+        let state_provider_factory =
+            OverlayStateProviderFactory::new(factory, blocks[3].recovered_block().hash(), context);
 
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_none());
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(state_provider_factory.overlay.cache.is_empty());
 
         provider.basic_account(&Address::ZERO).unwrap();
         assert!(provider.state_trie_overlay.get().is_none());
         assert!(provider.execution_overlay.get().is_some());
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(state_provider_factory.overlay.cache.is_empty());
 
         provider.account_trie_cursor().unwrap();
-        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 1);
+        assert_eq!(state_provider_factory.overlay.cache.len(), 1);
     }
 
     #[reth_concurrency::test]
     fn state_trie_overlay_cache_is_keyed_by_trie_changesets() {
         let (factory, blocks) = setup_frontiers(1, 3);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         for block in &blocks[2..=3] {
             in_memory_state_writer.insert_executed(block.clone());
         }
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
-        );
+        let state_provider_factory =
+            OverlayStateProviderFactory::new(factory, blocks[3].recovered_block().hash(), context);
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
         provider.state_trie_overlay(false).unwrap();
         provider.state_trie_overlay(true).unwrap();
 
-        assert_eq!(state_provider_factory.state_trie_overlay_cache.len(), 2);
+        assert_eq!(state_provider_factory.overlay.cache.len(), 2);
     }
 
     #[reth_concurrency::test]
@@ -1361,22 +1315,23 @@ mod tests {
     }
 
     #[reth_concurrency::test]
-    fn lazy_overlays_survive_manager_block_removal() {
+    fn lazy_overlays_survive_live_block_removal() {
         let (factory, blocks) = setup_frontiers(1, 1);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         for block in &blocks[2..=3] {
             in_memory_state_writer.insert_executed(block.clone());
         }
         let state_provider_factory = OverlayStateProviderFactory::new(
             factory,
-            manager.overlay_builder(blocks[3].recovered_block().hash()),
+            blocks[3].recovered_block().hash(),
+            context.clone(),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
         in_memory_state_writer.clear_state();
         for block in &blocks[2..=3] {
             let hash = block.recovered_block().hash();
-            assert!(manager.in_memory_state().state_by_hash(hash).is_none());
+            assert!(context.in_memory_state().state_by_hash(hash).is_none());
         }
 
         let (execution_overlay, _) = provider.execution_overlay().unwrap();
@@ -1393,23 +1348,26 @@ mod tests {
     #[reth_concurrency::test]
     fn skipped_state_trie_overlay_is_not_cached_or_used_for_state_roots() {
         let (factory, blocks) = setup_frontiers(3, 3);
-        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let (context, mut in_memory_state_writer) = overlay_context_with_writer();
         in_memory_state_writer.insert_executed(blocks[4].clone());
-        let state_provider_factory = OverlayStateProviderFactory::new(
-            factory,
-            manager
-                .overlay_builder(blocks[4].recovered_block().hash())
-                .with_skip_overlay_for_reused_sparse_trie(blocks[3].recovered_block().hash()),
-        );
+        let state_provider_factory =
+            OverlayStateProviderFactory::new(factory, blocks[4].recovered_block().hash(), context);
+        let original = state_provider_factory.database_provider_ro().unwrap();
+        assert!(!original.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
+        assert_eq!(state_provider_factory.overlay.cache.len(), 1);
 
-        let provider = state_provider_factory.database_provider_ro().unwrap();
+        let reused = state_provider_factory
+            .clone()
+            .for_reused_sparse_trie(blocks[3].recovered_block().hash(), Default::default());
+        let provider = reused.database_provider_ro().unwrap();
         assert!(provider.state_trie_overlay(false).unwrap().skipped_for_reused_sparse_trie());
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(reused.overlay.cache.is_empty());
         assert!(matches!(
             provider.state_root(HashedPostState::default()),
             Err(ProviderError::UnsupportedProvider)
         ));
-        assert!(state_provider_factory.state_trie_overlay_cache.is_empty());
+        assert!(reused.overlay.cache.is_empty());
+        assert_eq!(state_provider_factory.overlay.cache.len(), 1);
     }
 
     #[reth_concurrency::test]
@@ -1507,7 +1465,8 @@ mod tests {
 
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory,
-            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+            blocks[1].recovered_block().hash(),
+            OverlayContext::default(),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
 
@@ -1558,7 +1517,8 @@ mod tests {
 
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory.clone(),
-            OverlayManager::default().overlay_builder(blocks[2].recovered_block().hash()),
+            blocks[2].recovered_block().hash(),
+            OverlayContext::default(),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
         assert_eq!(provider.basic_account(&address).unwrap(), Some(account));
@@ -1567,7 +1527,8 @@ mod tests {
         // Reverting to block 1 needs the changesets of block 2, which were never stored.
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory,
-            OverlayManager::default().overlay_builder(blocks[1].recovered_block().hash()),
+            blocks[1].recovered_block().hash(),
+            OverlayContext::default(),
         );
         let provider = state_provider_factory.database_provider_ro().unwrap();
         assert!(matches!(
@@ -1609,7 +1570,8 @@ mod tests {
 
         let state_provider_factory = OverlayStateProviderFactory::<_, EthPrimitives>::new(
             factory,
-            OverlayManager::default().overlay_builder(blocks[0].recovered_block().hash()),
+            blocks[0].recovered_block().hash(),
+            OverlayContext::default(),
         );
         let provider = state_provider_factory.database_provider_ro()?;
         assert_eq!(provider.basic_account(&address)?.map(|account| account.balance), Some(balance));

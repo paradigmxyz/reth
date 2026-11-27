@@ -721,11 +721,9 @@ mod tests {
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec);
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_storage_overlay::OverlayManager::<
-                reth_ethereum_primitives::EthPrimitives,
-            >::default()
-            .overlay_builder(anchor_hash),
+            provider_factory.clone(),
+            anchor_hash,
+            provider_factory.overlay_context().clone(),
         );
         let ctx = test_ctx(factory.clone());
 
@@ -757,9 +755,9 @@ mod tests {
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            provider_factory.clone(),
+            anchor_hash,
+            provider_factory.overlay_context().clone(),
         );
         let ctx = test_ctx(factory);
 
@@ -842,9 +840,9 @@ mod tests {
             create_test_provider_factory_with_chain_spec(Arc::new(ChainSpec::default()));
         let anchor_hash = reth_db_common::init::init_genesis(&provider_factory).unwrap();
         let factory = reth_storage_overlay::OverlayStateProviderFactory::new(
-            provider_factory,
-            reth_storage_overlay::OverlayManager::<reth_ethereum_primitives::EthPrimitives>::default()
-                .overlay_builder(anchor_hash),
+            provider_factory.clone(),
+            anchor_hash,
+            provider_factory.overlay_context().clone(),
         );
         let runtime = reth_tasks::Runtime::test();
 

@@ -4162,7 +4162,6 @@ dependencies = [
  "reth-evm",
  "reth-primitives-traits",
  "reth-provider",
- "reth-storage-overlay",
  "reth-trie",
  "serde_json",
  "tokio",

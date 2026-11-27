@@ -1048,7 +1048,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::OverlayContext;
     use reth_tasks::WorkerPool;
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
@@ -1062,7 +1062,8 @@ mod tests {
             saved_cache: None,
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                B256::ZERO,
+                OverlayContext::default(),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics::default(),
@@ -1125,7 +1126,8 @@ mod tests {
                 saved_cache: None,
                 provider: OverlayStateProviderFactory::new(
                     provider.clone(),
-                    OverlayManager::default().overlay_builder(B256::ZERO),
+                    B256::ZERO,
+                    OverlayContext::default(),
                 ),
                 bal_prewarm_pool: None,
                 metrics: PrewarmMetrics::default(),
@@ -1165,10 +1167,8 @@ mod tests {
         provider.enable_database_provider();
         provider.add_header(B256::ZERO, Default::default());
         provider.add_stage_checkpoint(StageId::Finish, StageCheckpoint::new(0));
-        ctx.provider = OverlayStateProviderFactory::new(
-            provider,
-            OverlayManager::default().overlay_builder(B256::ZERO),
-        );
+        ctx.provider =
+            OverlayStateProviderFactory::new(provider, B256::ZERO, OverlayContext::default());
         assert!(ctx.evm_for_ctx().evm.is_some());
         let tx = Recovered::new_unchecked(
             TransactionSigned::new_unhashed(
@@ -1214,7 +1214,8 @@ mod tests {
             saved_cache: Some(saved_cache),
             provider: OverlayStateProviderFactory::new(
                 MockEthProvider::default(),
-                OverlayManager::default().overlay_builder(B256::ZERO),
+                B256::ZERO,
+                OverlayContext::default(),
             ),
             bal_prewarm_pool: None,
             metrics: PrewarmMetrics {

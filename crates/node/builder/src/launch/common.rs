@@ -85,7 +85,7 @@ use reth_stages::{
     MetricEvent, PipelineBuilder, PipelineTarget, StageId, StageSet,
 };
 use reth_static_file::{blocks_per_file_for_prune_distance, StaticFileProducer, StaticFileSegment};
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
 use reth_transaction_pool::TransactionPool;
@@ -472,33 +472,11 @@ where
     DB: Database + Clone + 'static,
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
-    /// Returns the [`ProviderFactory`] for the attached storage after executing a consistent check
-    /// between the database and static files. **It may execute a pipeline unwind if it fails this
-    /// check.**
-    pub async fn create_provider_factory<N, Evm>(
+    /// Opens the attached storage, then runs `recover` to finish interrupted writes before
+    /// checking consistency. May unwind the pipeline if the database and static files disagree.
+    async fn create_provider_factory<N, Evm>(
         &self,
-        overlay_manager: OverlayManager<N::Primitives>,
-        rocksdb_provider: Option<RocksDBProvider>,
-        disabled_stages: &[StageId],
-    ) -> eyre::Result<ProviderFactory<N>>
-    where
-        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    {
-        self.create_provider_factory_with_recovery::<N, Evm>(
-            overlay_manager,
-            rocksdb_provider,
-            disabled_stages,
-            |_| Ok(()),
-        )
-        .await
-    }
-
-    /// Like [`Self::create_provider_factory`], but first runs `recover` to finish writes an earlier
-    /// run left half-committed, before the consistency check.
-    pub async fn create_provider_factory_with_recovery<N, Evm>(
-        &self,
-        overlay_manager: OverlayManager<N::Primitives>,
+        overlay_context: OverlayContext<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
@@ -563,7 +541,7 @@ where
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
-            overlay_manager,
+            overlay_context,
             self.task_executor().clone(),
         )?
         .with_prune_modes(prune_config.segments)
@@ -713,31 +691,11 @@ where
         Ok(factory)
     }
 
-    /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
-    pub async fn with_provider_factory<N, Evm>(
-        self,
-        overlay_manager: OverlayManager<N::Primitives>,
-        rocksdb_provider: Option<RocksDBProvider>,
-        disabled_stages: &[StageId],
-    ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
-    where
-        N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
-        Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
-    {
-        self.with_provider_factory_and_recovery::<N, Evm>(
-            overlay_manager,
-            rocksdb_provider,
-            disabled_stages,
-            |_| Ok(()),
-        )
-        .await
-    }
-
-    /// Like [`Self::with_provider_factory`], but first runs `recover` to finish writes an earlier
-    /// run left half-committed, before the consistency check.
+    /// Creates a [`ProviderFactory`] with the supplied overlay context and attaches it
+    /// to the launch context. Runs `recover` before checking storage consistency.
     pub async fn with_provider_factory_and_recovery<N, Evm>(
         self,
-        overlay_manager: OverlayManager<N::Primitives>,
+        overlay_context: OverlayContext<N::Primitives>,
         rocksdb_provider: Option<RocksDBProvider>,
         disabled_stages: &[StageId],
         recover: impl FnOnce(&ProviderFactory<N>) -> eyre::Result<()>,
@@ -747,8 +705,8 @@ where
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let factory = self
-            .create_provider_factory_with_recovery::<N, Evm>(
-                overlay_manager,
+            .create_provider_factory::<N, Evm>(
+                overlay_context,
                 rocksdb_provider,
                 disabled_stages,
                 recover,

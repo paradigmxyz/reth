@@ -11,7 +11,6 @@ reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits.workspace = true
 reth-provider.workspace = true
-reth-storage-overlay.workspace = true
 reth-trie.workspace = true
 
 eyre.workspace = true

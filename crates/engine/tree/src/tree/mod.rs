@@ -28,7 +28,7 @@ use reth_provider::{
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
@@ -112,7 +112,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
-        overlay_manager: OverlayManager<N>,
+        overlay_context: OverlayContext<N>,
     ) -> Self {
         Self {
             invalid_headers: InvalidHeaderCache::new(
@@ -120,7 +120,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, overlay_manager),
+            tree_state: TreeState::new(canonical_block, overlay_context),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -359,9 +359,13 @@ where
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T> + WaitForCaches,
+    V: EngineValidator<T> + WaitForCaches<N>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
+    ///
+    /// # Panics
+    ///
+    /// Panics if the tree state and canonical state writer do not track the same blocks.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
@@ -378,6 +382,12 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
+        assert!(
+            state.tree_state.overlay_context.in_memory_state().shares_blocks_with(
+                canonical_in_memory_state_writer.canonical_in_memory_state().in_memory_state(),
+            ),
+            "tree state must read the blocks tracked by the canonical state writer"
+        );
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -411,6 +421,10 @@ where
     ///
     /// Returns the sender through which incoming requests can be sent to the task and the receiver
     /// end of a [`EngineApiEvent`] unbounded channel to receive events from the engine.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the overlay context and canonical state writer do not track the same blocks.
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
@@ -419,7 +433,7 @@ where
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
-        overlay_manager: OverlayManager<N>,
+        overlay_context: OverlayContext<N>,
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
@@ -441,7 +455,7 @@ where
             config.max_invalid_header_cache_length(),
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
-            overlay_manager,
+            overlay_context,
         );
 
         let task = Self::new(
@@ -714,7 +728,7 @@ where
                         }
                         self.state
                             .tree_state
-                            .overlay_manager
+                            .overlay_context
                             .precompute_child_execution_overlays(block_num_hash.hash);
                         self.metrics
                             .engine
@@ -856,8 +870,10 @@ where
                                     Duration::ZERO
                                 };
 
-                                let cache_wait = wait_for_caches
-                                    .then(|| self.payload_validator.wait_for_caches());
+                                let cache_wait = wait_for_caches.then(|| {
+                                    self.payload_validator
+                                        .wait_for_caches(&self.state.tree_state.overlay_context)
+                                });
 
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
@@ -1065,9 +1081,9 @@ pub struct CacheWaitDurations {
 ///
 /// Used by `reth_newPayload` to wait for cache updates before starting payload processing.
 /// Removed execution-cache allocations may still be destroyed concurrently after unlocking.
-pub trait WaitForCaches {
-    /// Waits for cache updates to complete.
+pub trait WaitForCaches<N: NodePrimitives> {
+    /// Waits for updates to the validator's execution cache and the overlay context's sparse trie.
     ///
     /// Returns the time spent waiting for each cache separately.
-    fn wait_for_caches(&self) -> CacheWaitDurations;
+    fn wait_for_caches(&self, overlay_context: &OverlayContext<N>) -> CacheWaitDurations;
 }

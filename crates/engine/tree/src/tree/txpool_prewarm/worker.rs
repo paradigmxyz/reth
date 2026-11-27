@@ -362,6 +362,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
+    use reth_storage_overlay::OverlayContext;
     use std::{
         collections::{HashMap, VecDeque},
         sync::atomic::{AtomicUsize, Ordering},
@@ -428,7 +429,8 @@ mod tests {
                 evm_env,
                 state_provider_factory: OverlayStateProviderFactory::new(
                     provider,
-                    reth_storage_overlay::OverlayManager::default().overlay_builder(parent_hash),
+                    parent_hash,
+                    OverlayContext::default(),
                 ),
                 results,
             };

@@ -53,7 +53,7 @@ use reth_rpc_api::EngineApiServer;
 use reth_rpc_engine_api::{EngineApi, EngineCapabilities};
 use reth_stages_api::Pipeline;
 use reth_static_file::StaticFileProducer;
-use reth_storage_overlay::OverlayManager;
+use reth_storage_overlay::OverlayContext;
 use reth_tasks::Runtime;
 use reth_transaction_pool::noop::NoopTransactionPool;
 use serde_json::{json, Value};
@@ -368,7 +368,7 @@ impl Engine {
             .build()
             .map_err(|err| Error::engine("failed to set up the engine", err))?;
         let (in_memory_state, in_memory_state_writer) = InMemoryState::new();
-        let overlay_manager = OverlayManager::with_worker_pool(
+        let overlay_context = OverlayContext::with_worker_pool(
             in_memory_state,
             runtime.state_trie_overlay_worker_pool(),
         );
@@ -378,7 +378,7 @@ impl Engine {
             StaticFileProvider::read_write(datadir.join("static_files"))
                 .map_err(|err| Error::engine("failed to set up the engine", err))?,
             rocksdb.clone(),
-            overlay_manager.clone(),
+            overlay_context,
             runtime.clone(),
         )
         .map_err(|err| Error::engine("failed to set up the engine", err))?;
@@ -404,7 +404,6 @@ impl Engine {
             EthereumEngineValidator::new(chain_spec.clone()),
             tree_config.clone(),
             Box::new(NoopInvalidBlockHook::default()),
-            overlay_manager.clone(),
             runtime.clone(),
         );
         let payload_builder = PayloadBuilderHandle::<EthEngineTypes>::noop();
@@ -429,7 +428,6 @@ impl Engine {
             pruner: PrunerBuilder::default().build_with_provider_factory(factory),
             payload_builder: payload_builder.clone(),
             payload_validator: validator,
-            overlay_manager,
             tree_config: tree_config.clone(),
             sync_metrics_tx,
             evm_config,

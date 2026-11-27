@@ -40,7 +40,7 @@ where
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T> + WaitForCaches,
+    V: EngineValidator<T> + WaitForCaches<N>,
 {
     /// If validation fails, the response MUST contain the latest valid hash:
     ///

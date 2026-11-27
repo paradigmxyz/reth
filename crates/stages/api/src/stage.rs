@@ -340,7 +340,7 @@ mod tests {
         StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileSegment,
     };
     use reth_stages_types::StageCheckpoint;
-    use reth_storage_overlay::OverlayManager;
+    use reth_storage_overlay::OverlayContext;
     use reth_testing_utils::generators::{self, random_signed_tx};
 
     use crate::ExecInput;
@@ -356,7 +356,7 @@ mod tests {
                 .build()
                 .unwrap(),
             RocksDBProvider::builder(create_test_rocksdb_dir().0.keep()).build().unwrap(),
-            OverlayManager::default(),
+            OverlayContext::default(),
             reth_tasks::Runtime::test(),
         )
         .unwrap();
