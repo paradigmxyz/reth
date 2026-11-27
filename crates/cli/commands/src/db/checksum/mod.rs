@@ -264,8 +264,7 @@ fn partial_transaction_rows(
     if segment.is_receipts() {
         // Padded pre-Bedrock OVM receipt files can extend past their blocks' transaction bounds.
         eyre::ensure!(
-            body(blocks.start())?.first_tx_num() <= txs.start() &&
-                txs.end() < body(blocks.end())?.next_tx_num(),
+            body(blocks.start())?.first_tx_num() <= txs.start(),
             "{segment} transaction range {txs} does not fit blocks {blocks}"
         );
     }
@@ -276,6 +275,11 @@ fn partial_transaction_rows(
         offset(body(selected.start())?.first_tx_num())
     };
     let to = if selected.end() == blocks.end() {
+        // The file can extend past the last indexed block. Only check its end when using it.
+        eyre::ensure!(
+            !segment.is_receipts() || txs.end() < body(blocks.end())?.next_tx_num(),
+            "{segment} transaction range {txs} does not fit blocks {blocks}"
+        );
         txs.len()
     } else {
         offset(body(selected.end())?.next_tx_num())
@@ -661,11 +665,11 @@ mod tests {
         let mut expected = checksum_hasher();
         expected.write(&receipt(4).compress());
         assert_eq!(block(4).unwrap(), (expected.finish(), 1));
-        for (start, end) in [(2, 3), (5, 6)] {
+        for (start, end, selected_block) in [(2, 3, 4), (5, 6, 5)] {
             writer.user_header_mut().set_tx_range(start, end);
             writer.commit().unwrap();
             assert_eq!(
-                block(4).unwrap_err().to_string(),
+                block(selected_block).unwrap_err().to_string(),
                 format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
@@ -673,7 +677,7 @@ mod tests {
     }
 
     #[test]
-    fn checksum_receipts_after_unindexed_prefix() {
+    fn checksum_receipts_with_unindexed_prefix_and_tail() {
         let dir = tempfile::tempdir().unwrap();
         let files = test_files(&dir, 10);
         let db = create_test_rw_db();
@@ -684,6 +688,8 @@ mod tests {
         writer.increment_block(5).unwrap();
         let receipt = EthereumReceipt { cumulative_gas_used: 42, ..Default::default() };
         writer.append_receipt(0, &receipt).unwrap();
+        writer.increment_block(6).unwrap();
+        writer.append_receipt(1, &Default::default()).unwrap();
         writer.commit().unwrap();
         drop(writer);
         db.update(|tx| {
@@ -695,13 +701,16 @@ mod tests {
         .unwrap()
         .unwrap();
 
-        let checksum = |start, end| {
-            checksum_static_file(&files, &db, segment, Some(start), Some(end), None).unwrap()
-        };
-        assert_eq!(checksum(4, 4), (checksum_hasher().finish(), 0));
+        let checksum =
+            |start, end| checksum_static_file(&files, &db, segment, Some(start), Some(end), None);
         let mut expected = checksum_hasher();
         expected.write(&receipt.compress());
-        assert_eq!(checksum(5, 5), (expected.finish(), 1));
-        assert_eq!(checksum(4, 5), (expected.finish(), 1));
+        assert_eq!(checksum(5, 5).unwrap(), (expected.finish(), 1));
+        assert_eq!(checksum(4, 4).unwrap(), (checksum_hasher().finish(), 0));
+        assert_eq!(checksum(4, 5).unwrap(), (expected.finish(), 1));
+        assert!(matches!(
+            checksum(5, 6).unwrap_err().downcast_ref::<ProviderError>(),
+            Some(ProviderError::BlockBodyIndicesNotFound(6))
+        ));
     }
 }
