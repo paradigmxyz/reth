@@ -4346,7 +4346,9 @@ mod tests {
         let expired_ip: IpAddr = [2, 2, 2, 2].into();
         let expired_peer_ip: IpAddr = [3, 3, 3, 3].into();
         let active_ip: IpAddr = [4, 4, 4, 4].into();
+        let active_peer_ip: IpAddr = [5, 5, 5, 5].into();
         let expired_peer = PeerId::random();
+        let active_peer = PeerId::random();
 
         let config = Discv4Config::builder().ban_list(BanList::new([], [permanent_ip])).build();
         let (discv4, mut service) = create_discv4_with_config(config).await;
@@ -4355,7 +4357,9 @@ mod tests {
         discv4.ban_ip_until(permanent_ip, expired);
         discv4.ban_ip_until(expired_ip, expired);
         discv4.ban_until(expired_peer, expired_peer_ip, expired);
-        discv4.ban_ip_until(active_ip, Instant::now() + Duration::from_secs(3600));
+        let active = Instant::now() + Duration::from_secs(3600);
+        discv4.ban_ip_until(active_ip, active);
+        discv4.ban_until(active_peer, active_peer_ip, active);
 
         // Drains the commands, then waits for the first expire interval tick to evict.
         tokio::time::timeout(
@@ -4375,6 +4379,8 @@ mod tests {
         let bans = &service.config.ban_list;
         assert!(bans.is_banned_ip(&permanent_ip));
         assert!(bans.is_banned_ip(&active_ip));
+        assert!(bans.is_banned_ip(&active_peer_ip));
+        assert!(bans.is_banned_peer(&active_peer));
         assert!(!bans.is_banned_ip(&expired_ip));
         assert!(!bans.is_banned_ip(&expired_peer_ip));
         assert!(!bans.is_banned_peer(&expired_peer));
