@@ -8400,6 +8400,7 @@ dependencies = [
  "eyre",
  "reth-chainspec",
  "reth-codecs",
+ "reth-concurrency",
  "reth-config",
  "reth-db",
  "reth-db-api",
