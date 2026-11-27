@@ -998,6 +998,10 @@ impl Discv4Service {
     fn remove_key(&mut self, node_id: PeerId, key: discv5::Key<NodeKey>) -> bool {
         let removed = self.kbuckets.remove(&key);
         if removed {
+            // A ping sent for the removed entry must not stand in for the proof ping of a later
+            // entry of the same node, which its reason doesn't cover.
+            self.pending_pings.remove(&node_id);
+            self.queued_pings.retain(|(node, _)| node.id != node_id);
             trace!(target: "discv4", ?node_id, "removed node");
             self.notify(DiscoveryUpdate::Removed(node_id));
         }
@@ -1354,7 +1358,9 @@ impl Discv4Service {
         if self.pending_pings.contains_key(&node.id) ||
             self.pending_find_nodes.contains_key(&node.id)
         {
-            if matches!(reason, PingReason::EstablishBond) &&
+            // The initial ping is the only one that proves a newly inserted entry, so it is queued
+            // as well instead of dropped.
+            if matches!(reason, PingReason::EstablishBond | PingReason::InitialInsert) &&
                 self.queued_pings.len() < MAX_QUEUED_PINGS
             {
                 self.queued_pings.push_back((node, reason));
@@ -4316,5 +4322,75 @@ mod tests {
         let mapped = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 1).to_ipv6_mapped(), 40404));
         handler.handle_packet(&packet, mapped).await;
         assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
+    }
+
+    #[tokio::test]
+    async fn test_node_reinserted_during_find_node_is_proven() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("10.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let pong = |service: &Discv4Service, echo| Pong {
+            to: service.local_node_record.into(),
+            echo,
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        let ping = |service: &Discv4Service| Ping {
+            from: record.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        assert!(service.add_node(record));
+        let echo = service.pending_pings[&record.id].echo_hash;
+        service.on_pong(pong(&service, echo), record.udp_addr(), record.id);
+
+        // the node is removed while a lookup's FindNode to it is in flight
+        service.lookup(PeerId::random());
+        assert!(service.pending_find_nodes.contains_key(&record.id));
+        assert!(service.remove_node(record.id));
+
+        // its next ping inserts it again, and the ping that proves the new entry must not be lost
+        service.on_ping(ping(&service), record.udp_addr(), record.id, B256::random());
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(false));
+        service.evict_expired_requests(Instant::now() + Duration::from_secs(21));
+        service.ping_buffered();
+        let echo = service.pending_pings[&record.id].echo_hash;
+        service.on_pong(pong(&service, echo), record.udp_addr(), record.id);
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_node_readded_during_reping_is_proven() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("10.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let pong = |service: &Discv4Service, echo| Pong {
+            to: service.local_node_record.into(),
+            echo,
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        assert!(service.add_node(record));
+        let echo = service.pending_pings[&record.id].echo_hash;
+        service.on_pong(pong(&service, echo), record.udp_addr(), record.id);
+
+        // the node pings from another address that never answers our bond ping, so the stored
+        // endpoint is revalidated
+        let other = NodeRecord::new("10.0.0.3:30303".parse().unwrap(), record.id);
+        let ping = Ping {
+            from: other.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, other.udp_addr(), other.id, B256::random());
+        service.evict_expired_requests(Instant::now() + Duration::from_secs(21));
+        assert!(matches!(service.pending_pings[&record.id].reason, PingReason::RePing));
+
+        // the node is removed and added again while the revalidation ping is pending
+        assert!(service.remove_node(record.id));
+        assert!(service.add_node(record));
+        let echo = service.pending_pings[&record.id].echo_hash;
+        service.on_pong(pong(&service, echo), record.udp_addr(), record.id);
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(true));
     }
 }
