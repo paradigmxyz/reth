@@ -600,13 +600,7 @@ where
     ///
     /// This should be invoked when the pool drifted and accounts are updated manually
     pub fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
-        if accounts.is_empty() {
-            return;
-        }
         let changed_senders = self.changed_senders(accounts.into_iter());
-        if changed_senders.is_empty() {
-            return;
-        }
         let UpdateOutcome { promoted, discarded } =
             self.pool.write().update_accounts(changed_senders);
 
