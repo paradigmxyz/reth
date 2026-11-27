@@ -22,7 +22,20 @@ impl SenderIdentifiers {
         self.sender_to_address.get(id)
     }
 
+    /// Returns the number of tracked senders.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.address_to_id.len()
+    }
+
+    /// Returns `true` if no senders are tracked.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.address_to_id.is_empty()
+    }
+
     /// Returns the [`SenderId`] that belongs to the given address, if it exists
+    #[inline]
     pub fn sender_id(&self, addr: &Address) -> Option<SenderId> {
         self.address_to_id.get(addr).copied()
     }

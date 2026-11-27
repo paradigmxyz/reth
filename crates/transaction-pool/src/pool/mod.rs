@@ -102,7 +102,6 @@ use alloy_eips::{
     Typed2718,
 };
 use reth_primitives_traits::Recovered;
-use rustc_hash::FxHashMap;
 use std::{
     fmt,
     sync::{
@@ -252,15 +251,19 @@ where
     fn changed_senders(
         &self,
         accs: impl Iterator<Item = ChangedAccount>,
-    ) -> FxHashMap<SenderId, SenderInfo> {
+    ) -> Vec<(SenderId, SenderInfo)> {
         let identifiers = self.identifiers.read();
-        accs.into_iter()
-            .filter_map(|acc| {
-                let ChangedAccount { address, nonce, balance } = acc;
-                let sender_id = identifiers.sender_id(&address)?;
-                Some((sender_id, SenderInfo { state_nonce: nonce, balance }))
-            })
-            .collect()
+        if identifiers.is_empty() {
+            return Vec::new();
+        }
+        let (lower, _) = accs.size_hint();
+        let mut changed = Vec::with_capacity(lower.min(identifiers.len()));
+        for ChangedAccount { address, nonce, balance } in accs {
+            if let Some(sender_id) = identifiers.sender_id(&address) {
+                changed.push((sender_id, SenderInfo { state_nonce: nonce, balance }));
+            }
+        }
+        changed
     }
 
     /// Get the config the pool was configured with.
@@ -597,7 +600,13 @@ where
     ///
     /// This should be invoked when the pool drifted and accounts are updated manually
     pub fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
+        if accounts.is_empty() {
+            return;
+        }
         let changed_senders = self.changed_senders(accounts.into_iter());
+        if changed_senders.is_empty() {
+            return;
+        }
         let UpdateOutcome { promoted, discarded } =
             self.pool.write().update_accounts(changed_senders);
 
