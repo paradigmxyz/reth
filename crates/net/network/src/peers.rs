@@ -2768,19 +2768,20 @@ mod tests {
         // await for the ban to expire
         tokio::time::sleep(peers.backoff_durations.medium).await;
 
-        match event!(peers) {
-            PeerAction::UnBanPeer { peer_id } => {
-                assert_eq!(peer_id, peer);
+        // the redial is gated by the ban deadline and the unban by the eviction sweep, so they
+        // can arrive in either order
+        loop {
+            match event!(peers) {
+                PeerAction::UnBanPeer { peer_id } => {
+                    assert_eq!(peer_id, peer);
+                }
+                PeerAction::Connect { peer_id, remote_addr } => {
+                    assert_eq!(peer_id, peer);
+                    assert_eq!(remote_addr, socket_addr);
+                    break
+                }
+                err => unreachable!("{err:?}"),
             }
-            err => unreachable!("{err:?}"),
-        }
-
-        match event!(peers) {
-            PeerAction::Connect { peer_id, remote_addr } => {
-                assert_eq!(peer_id, peer);
-                assert_eq!(remote_addr, socket_addr);
-            }
-            err => unreachable!("{err:?}"),
         }
     }
 
