@@ -9726,6 +9726,7 @@ dependencies = [
  "dirs-next",
  "eyre",
  "futures",
+ "log",
  "proptest",
  "rand 0.9.5",
  "reth-chainspec",

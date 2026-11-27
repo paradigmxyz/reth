@@ -87,6 +87,11 @@ impl<N: NodePrimitives> InMemoryState<N> {
         self.inner.blocks.read().contains(hash)
     }
 
+    /// Returns a snapshot of the currently tracked blocks for lookup after releasing the read lock.
+    pub fn snapshot(&self) -> InMemoryStateSnapshot<N> {
+        self.inner.blocks.read().snapshot()
+    }
+
     /// Runs `f` and returns its result with a snapshot of the blocks that were tracked during the
     /// whole time `f` ran.
     ///
@@ -1128,7 +1133,7 @@ mod tests {
         let fork_hash = fork.recovered_block().hash();
         in_memory_state_writer.update_chain(NewCanonicalChain::Commit { new: blocks.clone() });
         in_memory_state_writer.insert_executed(fork);
-        let snapshot = in_memory_state.snapshot_during(|| ()).into_parts().1;
+        let snapshot = in_memory_state.snapshot();
 
         let persisted = blocks[1].recovered_block().num_hash();
         in_memory_state_writer.on_blocks_persisted(persisted, persisted, None);

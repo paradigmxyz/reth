@@ -101,7 +101,7 @@ use reth_execution_types::ChangedAccount;
 
 use alloy_eips::{
     eip2718::Encodable2718,
-    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarVariant},
 };
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
@@ -527,19 +527,12 @@ where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         if transaction.is_blob_transaction() {
-            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            let hash = *transaction.hash();
             let sidecar = match encoding {
-                BlobSidecarEncoding::WithBlobs => sidecar,
+                BlobSidecarEncoding::WithBlobs => self.blob_store.get(hash).ok()??,
+                // This also serves transactions stored only as cells, without rebuilding blobs.
                 BlobSidecarEncoding::WithoutBlobs => {
-                    let sidecar = sidecar.as_eip7594()?;
-                    Arc::new(
-                        BlobTransactionSidecarEip7594::new(
-                            Vec::new(),
-                            sidecar.commitments.clone(),
-                            sidecar.cell_proofs.clone(),
-                        )
-                        .into(),
-                    )
+                    Arc::new(self.blob_store.get_without_blobs(hash).ok()??.into())
                 }
             };
             transaction.transaction.clone().try_into_pooled_blob(sidecar)
@@ -1988,7 +1981,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use super::*;
     use crate::{
-        blobstore::{BlobStore, InMemoryBlobStore, PooledBlobSidecar},
+        blobstore::{BlobStore, BlobTxCellSidecar, InMemoryBlobStore, PooledBlobSidecar},
         error::InvalidPoolTransactionError,
         identifier::{SenderId, TransactionId},
         test_utils::{
@@ -2005,8 +1998,8 @@ mod tests {
         eip2718::Encodable2718,
         eip4844::{Blob, BlobTransactionSidecar, Bytes48, BYTES_PER_BLOB},
         eip7594::{
-            BlobSidecarEncoding, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant,
-            CELLS_PER_EXT_BLOB,
+            BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarEip7594,
+            BlobTransactionSidecarVariant, Cell, CELLS_PER_EXT_BLOB,
         },
         eip8141::{Frame, TransactionFees},
     };
@@ -2886,6 +2879,27 @@ mod tests {
         for transaction in &mut expected {
             transaction.clear_eip7594_blobs();
         }
+
+        // Keeping too few cells to rebuild the blob still serves the body without blobs.
+        let blob_store = test_pool.blob_store();
+        blob_store.delete(hashes[1]).unwrap();
+        let mask = BlobCellMask::from_bits(0b11);
+        let cells = BlobTxCellSidecar::new(
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3); CELLS_PER_EXT_BLOB],
+            vec![Cell::repeat_byte(4); mask.count()],
+            mask,
+        )
+        .unwrap();
+        blob_store.insert_cells(hashes[1], cells).unwrap();
+        assert_eq!(
+            test_pool.get_pooled_transaction_elements(
+                hashes.clone(),
+                GetPooledTransactionLimit::None,
+                BlobSidecarEncoding::WithBlobs
+            ),
+            [full[0].clone(), full[2].clone()]
+        );
 
         // The limit counts the transactions as served, so both fit without their blobs.
         let limit = GetPooledTransactionLimit::ResponseSizeSoftLimit(

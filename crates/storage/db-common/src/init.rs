@@ -2303,7 +2303,7 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn genesis_preserves_invalid_delegation_markers() {
         let mut delegation = vec![0; 23];
         delegation[..3].copy_from_slice(&[0xef, 0x01, 0]);
