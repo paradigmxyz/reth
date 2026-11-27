@@ -368,7 +368,7 @@ where
                     jsonrpsee::RpcModule::new(DependencyAdmission::new(ctx.node.pool().clone()));
                 module.register_async_method(
                     "eth_sendDependencyWrapper",
-                    |params, context, _| async move {
+                    |params, context| async move {
                         let raw: alloy_primitives::Bytes = params.one()?;
                         context.submit(raw).await.map_err(|error| {
                             jsonrpsee::types::ErrorObjectOwned::owned(
