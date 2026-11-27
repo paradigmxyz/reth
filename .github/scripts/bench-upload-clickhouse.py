@@ -22,7 +22,6 @@ import json
 import os
 import re
 import sys
-import urllib.parse
 import urllib.request
 import urllib.error
 
@@ -136,9 +135,9 @@ def main():
     if not host.startswith("http"):
         host = f"https://{host}:8443"
 
-    url = f"{host}/?" + urllib.parse.urlencode({"database": ch_database, "query": query})
+    url = f"{host}/?database={ch_database}"
 
-    req = urllib.request.Request(url, data=payload.encode("utf-8"), method="POST")
+    req = urllib.request.Request(url, data=f"{query}\n{payload}".encode("utf-8"), method="POST")
     req.add_header("Content-Type", "application/x-ndjson")
     req.add_header("X-ClickHouse-User", ch_user)
     req.add_header("X-ClickHouse-Key", ch_password)
