@@ -263,21 +263,7 @@ impl PrefixSet {
         Self::new(true, Vec::new())
     }
 
-    /// Returns `true` if any of the keys in the set has the given prefix
-    ///
-    /// # Note on Mutability
-    ///
-    /// This method requires `&mut self` (unlike typical `contains` methods) because it maintains an
-    /// internal position tracker (`self.index`) between calls. This enables significant performance
-    /// optimization for sequential lookups in sorted order, which is common during trie traversal.
-    ///
-    /// The `index` field allows subsequent searches to start where previous ones left off,
-    /// avoiding repeated full scans of the prefix array when keys are accessed in nearby ranges.
-    ///
-    /// This optimization was inspired by Silkworm's implementation and significantly improves
-    /// incremental state root calculation performance
-    /// ([see PR #2417](https://github.com/paradigmxyz/reth/pull/2417)).
-    /// Advances or rewinds `self.index` to the first key `>= target` (i.e. `partition_point`),
+    /// Advances or rewinds `index` to the first key `>= target` (i.e. `partition_point`),
     /// using a short linear probe for sequential walks before falling back to binary search.
     #[inline]
     fn lower_bound(index: &mut usize, keys: &[Nibbles], target: &Nibbles) -> usize {
@@ -304,6 +290,19 @@ impl PrefixSet {
     }
 
     /// Returns `true` if any of the keys in the set has the given prefix.
+    ///
+    /// # Note on Mutability
+    ///
+    /// This method requires `&mut self` (unlike typical `contains` methods) because it maintains an
+    /// internal position tracker (`self.index`) between calls. This enables significant performance
+    /// optimization for sequential lookups in sorted order, which is common during trie traversal.
+    ///
+    /// The `index` field allows subsequent searches to start where previous ones left off,
+    /// avoiding repeated full scans of the prefix array when keys are accessed in nearby ranges.
+    ///
+    /// This optimization was inspired by Silkworm's implementation and significantly improves
+    /// incremental state root calculation performance
+    /// ([see PR #2417](https://github.com/paradigmxyz/reth/pull/2417)).
     #[inline]
     pub fn contains(&mut self, prefix: &Nibbles) -> bool {
         if self.all {
