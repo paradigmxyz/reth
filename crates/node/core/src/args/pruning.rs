@@ -71,11 +71,13 @@ impl Default for DefaultPruningValues {
             full_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,
-                receipts: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
-                // EIP-8252: a full node must retain enough account/storage history to reconstruct
-                // the post-state of any canonical block within the reorg retention window
-                // (262_144 blocks from head). This is decoupled from the much smaller
-                // `MINIMUM_UNWIND_SAFE_DISTANCE` reorg-safety margin used for other segments.
+                // EIP-8252: a full node must retain enough history to reconstruct the post-state of
+                // any canonical block within the reorg retention window (262_144 blocks from head).
+                // Receipts share the window because unwinding to a block inside it removes receipts
+                // above that block, which would otherwise fail against the pruned receipts anchor.
+                // This is decoupled from the much smaller `MINIMUM_UNWIND_SAFE_DISTANCE`
+                // reorg-safety margin used for other segments.
+                receipts: Some(PruneMode::Distance(REORG_RETENTION_WINDOW)),
                 account_history: Some(PruneMode::Distance(REORG_RETENTION_WINDOW)),
                 storage_history: Some(PruneMode::Distance(REORG_RETENTION_WINDOW)),
                 // This field is ignored when full_bodies_history_use_pre_merge is true
@@ -493,14 +495,18 @@ mod tests {
 
         // EIP-8252: a full node must be able to reconstruct the post-state of any canonical block
         // within REORG_RETENTION_WINDOW blocks of head, i.e. retain at least that much
-        // account/storage history by default.
-        assert_eq!(REORG_RETENTION_WINDOW, 8192 * 32);
+        // account/storage history by default. Receipts share the window so an unwind into it does
+        // not fail against the pruned receipts anchor.
         assert_eq!(
             full_config.segments.account_history,
             Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
         );
         assert_eq!(
             full_config.segments.storage_history,
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
+        );
+        assert_eq!(
+            full_config.segments.receipts,
             Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
         );
 
