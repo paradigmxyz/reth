@@ -311,10 +311,14 @@ not (
     test(=eth::helpers::transaction::tests::test_fill_transaction_fills_chain_id) or
     test(=eth::helpers::transaction::tests::test_fill_transaction_fills_nonce) or
     test(=eth::helpers::transaction::tests::test_fill_transaction_non_blob_tx_no_blob_fee) or
+    test(=eth::pubsub::tests::canceled_subscription_startup_answers_in_process_request) or
+    test(=eth::pubsub::tests::canceled_subscriptions_cannot_send_blocked_ack) or
     test(=eth::pubsub::tests::lagging_subscriber_skips_oldest_notifications) or
     test(=eth::pubsub::tests::new_producer_misses_nothing_published_before_it_runs) or
+    test(=eth::pubsub::tests::producer_yields_while_its_source_stays_ready) or
     test(=eth::pubsub::tests::shared_feed_runs_only_while_subscribed) or
     test(=eth::pubsub::tests::shared_notifications_match_serialized_notifications) or
+    test(=eth::pubsub::tests::subscriptions_receive_the_first_block_after_acknowledgement) or
     test(=eth::pubsub::tests::unsubscribing_while_a_send_waits_stops_the_feed) or
     test(=eth::sim_bundle::tests::sim_bundle_caps_gas_at_call_gas_limit) or
     test(=eth::sim_bundle::tests::sim_bundle_charges_payout_per_refund_config) or
