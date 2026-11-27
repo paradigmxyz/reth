@@ -60,7 +60,7 @@ use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion, GetCells,
+    encode_cell_mask, BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion, GetCells,
     GetPooledTransactions, LazyEncoded, LazyEncodedTransaction, NetworkPrimitives,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     NewPooledTransactionHashes72, PooledTransactions, Transactions,
@@ -2175,9 +2175,7 @@ impl PooledTransactionsHashesBuilder {
                 let Some(size) = eth72_size else { return };
                 // The mask only describes blob transactions, so others join any announcement.
                 let cell_mask = (ty == EIP4844_TX_TYPE_ID).then(|| {
-                    cell_mask.map_or(NewPooledTransactionHashes72::ALL_CELLS_MASK, |mask| {
-                        B128::from(mask.bits().to_le_bytes())
-                    })
+                    cell_mask.map_or(NewPooledTransactionHashes72::ALL_CELLS_MASK, encode_cell_mask)
                 });
                 let index = messages
                     .iter()
@@ -3427,10 +3425,7 @@ mod tests {
             assert_eq!(
                 announced,
                 [
-                    (
-                        vec![*sampler.hash(), *plain.hash()],
-                        Some(B128::from(custody.bits().to_le_bytes()))
-                    ),
+                    (vec![*sampler.hash(), *plain.hash()], Some(encode_cell_mask(custody))),
                     (vec![*provider.hash()], Some(NewPooledTransactionHashes72::ALL_CELLS_MASK)),
                 ]
             );

@@ -240,9 +240,7 @@ pub struct GetCells {
 impl GetCells {
     /// Returns the requested indices at a transaction position, interpreting the wire bitvector.
     pub fn cell_mask(&self, index: usize) -> Option<BlobCellMask> {
-        self.cell_mask
-            .mask_at(index)
-            .map(|mask| BlobCellMask::from_bits(u128::from_le_bytes(mask.into())))
+        self.cell_mask.mask_at(index).map(decode_cell_mask)
     }
 
     /// Builds an adaptive request from one mask per hash, choosing shared for uniform masks.
@@ -388,8 +386,8 @@ impl Cells {
                 .cell_mask
                 .mask_at(request_index)
                 .ok_or(Error::Custom("invalid cell mask identifier"))?;
-            let bits = u128::from_le_bytes(mask.into());
-            if bits & !u128::from_le_bytes(requested.into()) != 0 {
+            let bits = decode_cell_mask(mask).bits();
+            if bits & !decode_cell_mask(requested).bits() != 0 {
                 return Err(Error::Custom("unrequested cell index"))
             }
             let count = bits.count_ones() as usize;
@@ -455,6 +453,16 @@ fn decode_bounded_list<T: Decodable>(buf: &mut &[u8], max: usize) -> alloy_rlp::
         values.push(T::decode(&mut payload)?);
     }
     Ok(values)
+}
+
+/// Converts a wire cells bitmap, where bit `i` is cell `i` in little-endian byte order, to a mask.
+pub fn decode_cell_mask(mask: B128) -> BlobCellMask {
+    BlobCellMask::from_bits(u128::from_le_bytes(mask.into()))
+}
+
+/// Converts a mask to its wire cells bitmap, the inverse of [`decode_cell_mask`].
+pub fn encode_cell_mask(mask: BlobCellMask) -> B128 {
+    B128::from(mask.bits().to_le_bytes())
 }
 
 #[cfg(test)]
