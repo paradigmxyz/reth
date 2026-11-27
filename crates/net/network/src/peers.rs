@@ -1206,6 +1206,8 @@ impl PeersManager {
         let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
+                // trusted peers stay in the set after a fatal error but are banned for a while
+                !self.ban_list.is_banned_peer(peer_id) &&
                 peer.state.is_unconnected() &&
                 (!(self.trusted_nodes_only || trusted_only) ||
                     peer.is_trusted() ||
@@ -2764,6 +2766,13 @@ mod tests {
 
         // await for the ban to expire
         tokio::time::sleep(peers.backoff_durations.medium).await;
+
+        match event!(peers) {
+            PeerAction::UnBanPeer { peer_id } => {
+                assert_eq!(peer_id, peer);
+            }
+            err => unreachable!("{err:?}"),
+        }
 
         match event!(peers) {
             PeerAction::Connect { peer_id, remote_addr } => {
@@ -4837,5 +4846,36 @@ mod tests {
         let peers = PeersManager::new(config);
         assert!(peers.peers.is_empty());
         assert!(peers.peers.capacity() < rows);
+    }
+
+    #[tokio::test]
+    async fn test_trusted_peer_not_redialed_while_banned() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        let mut peers = PeersManager::new(PeersConfig::test());
+        peers.add_trusted_peer(peer, PeerAddr::from_tcp(socket_addr));
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, .. } => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        peers.on_active_outgoing_established(peer);
+
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &peer,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::UselessPeer,
+            )),
+        );
+        match poll_now(&mut peers) {
+            Poll::Ready(PeerAction::BanPeer { peer_id }) => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        assert!(peers.peers.contains_key(&peer));
+        assert!(poll_now(&mut peers).is_pending());
     }
 }
