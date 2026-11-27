@@ -1,4 +1,4 @@
-use alloy_consensus::{constants::ETH_TO_WEI, BlockHeader as _};
+use alloy_consensus::BlockHeader as _;
 use alloy_eips::{BlockId, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -14,6 +14,7 @@ use alloy_rpc_types_trace::{
     parity::*,
     tracerequest::TraceCallRequest,
 };
+use evm2::block::ethereum::execution::{base_block_reward, block_reward, ommer_reward};
 use evm2_inspectors::{
     opcode::OpcodeGasInspector,
     storage::StorageInspector,
@@ -21,7 +22,7 @@ use evm2_inspectors::{
 };
 use futures::{FutureExt, StreamExt};
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_rpc_api::{TraceAddressIndex, TraceApiServer};
@@ -335,7 +336,7 @@ where
             return None
         }
 
-        base_block_reward(self.provider().chain_spec(), header.number())
+        base_block_reward(&self.provider().chain_spec(), header.number())
     }
 
     /// Extracts the reward traces for the given block:
@@ -881,35 +882,6 @@ struct TraceApiInner<Eth> {
     blocking_task_guard: BlockingTaskGuard,
     // eth config settings
     eth_config: EthConfig,
-}
-
-pub(super) fn base_block_reward(spec: impl EthereumHardforks, block_number: u64) -> Option<u128> {
-    if spec.is_paris_active_at_block(block_number) {
-        return None
-    }
-    Some(base_block_reward_pre_merge(spec, block_number))
-}
-
-fn base_block_reward_pre_merge(spec: impl EthereumHardforks, block_number: u64) -> u128 {
-    if spec.is_constantinople_active_at_block(block_number) {
-        ETH_TO_WEI * 2
-    } else if spec.is_byzantium_active_at_block(block_number) {
-        ETH_TO_WEI * 3
-    } else {
-        ETH_TO_WEI * 5
-    }
-}
-
-pub(super) const fn block_reward(base_block_reward: u128, ommers: usize) -> u128 {
-    base_block_reward + (base_block_reward >> 5) * ommers as u128
-}
-
-pub(super) const fn ommer_reward(
-    base_block_reward: u128,
-    block_number: u64,
-    ommer_block_number: u64,
-) -> u128 {
-    ((8 + ommer_block_number - block_number) as u128 * base_block_reward) >> 3
 }
 
 /// Response type for storage tracing that contains all accessed storage slots
