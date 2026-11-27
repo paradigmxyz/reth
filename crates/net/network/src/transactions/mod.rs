@@ -2108,9 +2108,11 @@ impl FullTransactionsBuilder {
 /// session with the peer
 #[derive(Debug, Clone)]
 enum PooledTransactionsHashesBuilder {
+    // Hashes only, for eth/66 and eth/67 peers.
     Eth66(NewPooledTransactionHashes66),
+    // Hashes with types and sizes, for eth/68 to eth/71 peers.
     Eth68(NewPooledTransactionHashes68),
-    // One announcement per cell mask, since an eth/72 announcement has a single mask.
+    // One announcement per cell mask for eth/72 and eth/73 peers, since each carries one mask.
     Eth72(SmallVec<[NewPooledTransactionHashes72; 1]>),
 }
 
