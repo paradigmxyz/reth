@@ -234,25 +234,12 @@ impl BlobStore for InMemoryBlobStore {
         &self,
         tx: B256,
     ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
-        let cells = {
-            // Held across both lookups, so a move from cells to full is not missed.
-            let store = self.inner.store.read();
-            if let Some(sidecar) = store.get(&tx) {
-                return Ok(sidecar.as_eip7594().map(without_blobs))
-            }
-            let Some(cells) = self.inner.cells.read().get(&tx).cloned() else { return Ok(None) };
-            cells
-        };
-        // Proofs of cells not kept are unchecked, so cells that rebuild the blobs serve rebuilt
-        // ones.
-        if cells.is_recoverable() {
-            return Ok(self
-                .inner
-                .rebuilt
-                .get_or_rebuild(tx, &cells)
-                .and_then(|sidecar| sidecar.as_eip7594().map(without_blobs)))
+        // Held across both lookups, so a move from cells to full is not missed.
+        let store = self.inner.store.read();
+        if let Some(sidecar) = store.get(&tx) {
+            return Ok(sidecar.as_eip7594().map(without_blobs))
         }
-        Ok(Some(cells.without_blobs()))
+        Ok(self.inner.cells.read().get(&tx).map(|cells| cells.without_blobs()))
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {

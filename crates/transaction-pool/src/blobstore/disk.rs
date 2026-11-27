@@ -346,13 +346,11 @@ impl BlobStore for DiskFileBlobStore {
             }
         }
         Ok(self.inner.read_one(tx)?.and_then(|stored| match stored {
-            // Proofs of cells not kept are unchecked, so cells that rebuild the blobs serve
-            // rebuilt ones.
-            StoredSidecar::Cells(cells) if !cells.is_recoverable() => Some(cells.without_blobs()),
+            StoredSidecar::Cells(cells) => Some(cells.without_blobs()),
             // Caches full sidecars like `get`, so repeated requests don't hit the disk.
-            stored => self
+            full => self
                 .inner
-                .full_sidecar(tx, stored)
+                .full_sidecar(tx, full)
                 .and_then(|sidecar| sidecar.as_eip7594().map(without_blobs)),
         }))
     }
