@@ -11,7 +11,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{
     eip2718::Encodable2718,
-    eip4844::VERSIONED_HASH_VERSION_KZG,
+    eip4844::{env_settings::EnvKzgSettings, Blob},
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
 };
 use alloy_primitives::{Address, B128, B256, U256};
@@ -35,7 +35,7 @@ use reth_network_p2p::error::RequestError;
 use reth_network_peers::pk2id;
 use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{blobstore::BlobTxCellSidecar, TransactionPool};
 use std::time::Duration;
 use test_case::test_case;
 use tokio::net::TcpStream;
@@ -59,9 +59,9 @@ async fn next_message(stream: &mut RawEthStream) -> EthMessage<EthNetworkPrimiti
 
 /// A signed EIP-4844 pooled transaction in the eth/72 shape: the sidecar keeps commitments and
 /// cell proof metadata while the blob payloads are elided (fetched separately via `GetCells`).
-fn blob_tx_without_blobs() -> PooledTransactionVariant {
-    let mut versioned_hash = B256::random();
-    versioned_hash.0[0] = VERSIONED_HASH_VERSION_KZG;
+fn blob_tx_without_blobs() -> (PooledTransactionVariant, BlobTxCellSidecar) {
+    let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default()]).unwrap();
+    let cells = BlobTxCellSidecar::from_full(&full, EnvKzgSettings::Default.get()).unwrap();
 
     let tx = TxEip4844 {
         chain_id: 1,
@@ -72,37 +72,39 @@ fn blob_tx_without_blobs() -> PooledTransactionVariant {
         to: Address::random(),
         value: U256::ZERO,
         access_list: Default::default(),
-        blob_versioned_hashes: vec![versioned_hash],
+        blob_versioned_hashes: cells.versioned_hashes().collect(),
         max_fee_per_blob_gas: 20_000_000_000,
         input: Default::default(),
     };
 
     let signature = sign_message(B256::random(), tx.signature_hash()).unwrap();
-    let sidecar = BlobTransactionSidecarVariant::Eip7594(BlobTransactionSidecarEip7594 {
-        blobs: vec![],
-        commitments: vec![Default::default()],
-        cell_proofs: vec![],
-    });
-
-    PooledTransactionVariant::Eip4844(
-        TxEip4844WithSidecar::from_tx_and_sidecar(tx, sidecar).into_signed(signature),
+    let sidecar = BlobTransactionSidecarVariant::Eip7594(cells.without_blobs());
+    (
+        PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar::from_tx_and_sidecar(tx, sidecar).into_signed(signature),
+        ),
+        cells,
     )
 }
 
-#[test_case(EthVersion::Eth72; "eth72")]
-#[test_case(EthVersion::Eth73; "eth73")]
+#[test_case(EthVersion::Eth72, false; "eth72_body_first")]
+#[test_case(EthVersion::Eth72, true; "eth72_cells_first")]
+#[test_case(EthVersion::Eth73, false; "eth73_body_first")]
 #[tokio::test(flavor = "multi_thread")]
-async fn test_eth72_blob_announcements_and_elided_pooled_response(eth_version: EthVersion) {
+async fn test_eth72_blob_announcements_and_elided_pooled_response(
+    eth_version: EthVersion,
+    cells_first: bool,
+) {
     reth_tracing::init_test_tracing();
 
     let provider = MockEthProvider::default().with_genesis_block();
 
-    // A recent tip so the pool validator activates the blob fork checks; the network status
-    // itself stays at the genesis head.
+    // A tip after Osaka so the pool accepts EIP-7594 sidecars; the network status itself stays at
+    // the genesis head.
     let tip = Header {
         number: 1,
         parent_hash: MAINNET.genesis_hash(),
-        timestamp: 1_750_000_000,
+        timestamp: 1_780_000_000,
         gas_limit: 30_000_000,
         base_fee_per_gas: Some(7),
         excess_blob_gas: Some(0),
@@ -163,40 +165,64 @@ async fn test_eth72_blob_announcements_and_elided_pooled_response(eth_version: E
     assert_eq!(announcement.cell_mask, None);
 
     // 2) raw peer -> node: a geth style blob announcement carrying the custody mask
-    let pooled = blob_tx_without_blobs();
+    let (pooled, cells) = blob_tx_without_blobs();
     let blob_tx_hash = *pooled.tx_hash();
     let sender = pooled.recover_signer().unwrap();
     provider.add_account(sender, ExtendedAccount::new(0, U256::from(10u128.pow(19))));
+    let mut without_blobs = pooled.clone();
+    without_blobs.clear_eip7594_blobs();
 
     let announcement = NewPooledTransactionHashes72 {
         types: vec![EIP4844_TX_TYPE_ID],
-        sizes: vec![pooled.encode_2718_len()],
+        sizes: vec![without_blobs.encode_2718_len()],
         hashes: vec![blob_tx_hash],
         cell_mask: Some(NewPooledTransactionHashes72::ALL_CELLS_MASK),
     };
+    let mut added = node_pool.new_transactions_listener();
     eth_stream.send(EthMessage::NewPooledTransactionHashes72(announcement)).await.unwrap();
 
-    // the node must fetch the announced blob transaction
-    let request = match next_message(&mut eth_stream).await {
-        EthMessage::GetPooledTransactions(request) => request,
-        message => panic!("unexpected message {message:?}"),
-    };
-    assert_eq!(request.message.0, vec![blob_tx_hash]);
+    // The node fetches the body and, independently, the cells of the announced transaction.
+    let mut body_request = None;
+    let mut cell_request = None;
+    for _ in 0..2 {
+        match next_message(&mut eth_stream).await {
+            EthMessage::GetPooledTransactions(request) => body_request = Some(request),
+            EthMessage::GetCells(request) => cell_request = Some(request),
+            message => panic!("unexpected message {message:?}"),
+        }
+    }
+    let body_request = body_request.expect("node must request the body");
+    assert_eq!(body_request.message.0, vec![blob_tx_hash]);
+    let cell_request = cell_request.expect("node must request the cells");
+    assert_eq!(cell_request.message.hashes, vec![blob_tx_hash]);
+    // Without custody columns the node fetches the 64 cells needed to rebuild the blob.
+    let mask = cell_request.message.cell_mask(0).unwrap();
+    assert_eq!(mask.count(), 64);
 
-    // 3) raw peer -> node: the eth/72 response elides the blob payloads
-    eth_stream
-        .send(EthMessage::PooledTransactions(RequestPair {
-            request_id: request.request_id,
-            message: PooledTransactions(vec![pooled]),
-        }))
+    // 3) raw peer -> node: the eth/72 body without blobs and the cells, in either order
+    let body = EthMessage::PooledTransactions(RequestPair {
+        request_id: body_request.request_id,
+        message: PooledTransactions(vec![pooled]),
+    });
+    let cells = EthMessage::Cells(RequestPair {
+        request_id: cell_request.request_id,
+        message: Cells {
+            hashes: vec![blob_tx_hash],
+            cells: vec![cells.get_cells(mask).unwrap()],
+            cell_mask: cell_request.message.cell_mask,
+        },
+    });
+    let (first, second) = if cells_first { (cells, body) } else { (body, cells) };
+    eth_stream.send(first).await.unwrap();
+    eth_stream.send(second).await.unwrap();
+
+    let event = tokio::time::timeout(Duration::from_secs(10), added.recv())
         .await
+        .expect("verified body and cells must be admitted")
         .unwrap();
-
-    // The blob-elided body is dropped before the pool import (cell fetching is not implemented
-    // yet), and the eth/72 peer served a spec compliant response so it must not be penalized.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    assert!(!node_pool.contains(&blob_tx_hash));
+    assert_eq!(*event.transaction.hash(), blob_tx_hash);
+    // Half of the cells are enough to rebuild the blob.
+    assert!(node_pool.get_blob(blob_tx_hash).unwrap().is_some());
     let reputation = node.peer_handle().peer_by_id(raw_id).await.unwrap().reputation();
     assert_eq!(reputation, baseline_reputation);
     // the session survives serving the blob-elided response
