@@ -165,7 +165,7 @@ fn checksum_static_file<N: NodePrimitives>(
     );
 
     let mut reached_limit = false;
-    for StaticFileEntry { block_range, header, .. } in ranges {
+    for StaticFileEntry { file_range, block_range, header } in ranges {
         if reached_limit || block_range.start() > end_block {
             break;
         }
@@ -177,9 +177,8 @@ fn checksum_static_file<N: NodePrimitives>(
             continue;
         }
 
-        let fixed_block_range = static_file_provider.find_fixed_range(segment, block_range.start());
         let jar_provider = static_file_provider
-            .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
+            .get_segment_provider_for_range(segment, || Some(*file_range), None)?
             .ok_or_else(|| {
                 eyre::eyre!(
                     "Failed to get segment provider for segment {} at range {}",
@@ -230,7 +229,7 @@ fn checksum_static_file<N: NodePrimitives>(
 
         // Explicitly drop provider before removing from cache to avoid deadlock
         drop(jar_provider);
-        static_file_provider.remove_cached_provider(segment, fixed_block_range.end());
+        static_file_provider.remove_cached_provider(segment, file_range.end());
     }
 
     let (checksum, total) = checksummer.finish();
@@ -263,8 +262,15 @@ fn partial_transaction_rows(
     };
     if segment.is_receipts() {
         // Padded pre-Bedrock OVM receipt files can extend past their blocks' transaction bounds.
+        let first_tx = body(blocks.start())?.first_tx_num();
+        let end_fits = match body(blocks.end()) {
+            Ok(last) => txs.end() < last.next_tx_num(),
+            // Static files can be ahead of the database after an interrupted write.
+            Err(ProviderError::BlockBodyIndicesNotFound(block)) if selected.end() < block => true,
+            Err(err) => return Err(err.into()),
+        };
         eyre::ensure!(
-            body(blocks.start())?.first_tx_num() <= txs.start(),
+            first_tx <= txs.start() && end_fits,
             "{segment} transaction range {txs} does not fit blocks {blocks}"
         );
     }
@@ -275,11 +281,6 @@ fn partial_transaction_rows(
         offset(body(selected.start())?.first_tx_num())
     };
     let to = if selected.end() == blocks.end() {
-        // The file can extend past the last indexed block. Only check its end when using it.
-        eyre::ensure!(
-            !segment.is_receipts() || txs.end() < body(blocks.end())?.next_tx_num(),
-            "{segment} transaction range {txs} does not fit blocks {blocks}"
-        );
         txs.len()
     } else {
         offset(body(selected.end())?.next_tx_num())
@@ -665,11 +666,11 @@ mod tests {
         let mut expected = checksum_hasher();
         expected.write(&receipt(4).compress());
         assert_eq!(block(4).unwrap(), (expected.finish(), 1));
-        for (start, end, selected_block) in [(2, 3, 4), (5, 6, 5)] {
+        for (start, end) in [(2, 3), (5, 6)] {
             writer.user_header_mut().set_tx_range(start, end);
             writer.commit().unwrap();
             assert_eq!(
-                block(selected_block).unwrap_err().to_string(),
+                block(4).unwrap_err().to_string(),
                 format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
