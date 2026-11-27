@@ -92,6 +92,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
     /// use reth_trie_db::{DatabaseStateRoot, LegacyKeyAdapter};
     ///
+    /// # reth_concurrency::sync::Runtime::new().run(|| {
     /// // Initialize the database
     /// let db = create_test_rw_db();
     ///
@@ -108,6 +109,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///     reth_trie_db::DatabaseTrieCursorFactory<_, LegacyKeyAdapter>,
     ///     reth_trie_db::DatabaseHashedCursorFactory<_>,
     /// > as DatabaseStateRoot<_>>::overlay_root(&tx, &hashed_state.into_sorted());
+    /// # });
     /// ```
     ///
     /// # Returns

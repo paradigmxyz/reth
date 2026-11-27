@@ -9,8 +9,8 @@ use crate::{
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{TxHash, B256};
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_metrics::{metrics::Gauge, Metrics};
@@ -1164,7 +1164,7 @@ mod tests {
         assert!(snapshotted.snapshot().state_by_hash(block_hash).is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_state_removal_generation() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);
@@ -1226,7 +1226,7 @@ mod tests {
         assert_eq!(in_memory_state.state_by_hash(hash(3)), None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_on_backfill_finished_is_one_update() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);
@@ -1255,7 +1255,7 @@ mod tests {
         assert_eq!(in_memory_state.state_by_hash(hash(3)).unwrap().hash(), hash(3));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_on_backfill_finished_at_conflicting_block() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);
@@ -1289,7 +1289,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_on_blocks_persisted() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);
@@ -1352,7 +1352,7 @@ mod tests {
         assert!(in_memory_state.contains(&fork_hash(4)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_on_blocks_persisted_after_disk_removal() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);
@@ -1395,7 +1395,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_state_contains_and_block_counts() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);
@@ -1419,7 +1419,7 @@ mod tests {
         assert!(!in_memory_state.contains(&B256::random()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_writer_changes_blocks_of_canonical_state() {
         let mut canonical_in_memory_state_writer =
             test_canonical_in_memory_state_writer(InMemoryState::new().1);

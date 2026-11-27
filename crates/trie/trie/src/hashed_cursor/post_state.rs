@@ -394,7 +394,7 @@ mod tests {
     use super::*;
     use crate::hashed_cursor::mock::{MockHashedCursor, MockHashedCursorFactory};
     use alloy_primitives::map::B256Map;
-    use parking_lot::Mutex;
+    use reth_concurrency::sync::parking_lot::Mutex;
     use reth_trie_common::{HashedPostState, HashedStorage};
     use std::{collections::BTreeMap, sync::Arc};
 

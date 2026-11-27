@@ -1,5 +1,9 @@
 //! Task utility functions.
 
+use reth_concurrency::sync::thread;
+
+#[doc(hidden)]
+pub use reth_concurrency::sync::Once;
 pub use thread_priority::{self, *};
 
 /// Runs the given closure exactly once per call site.
@@ -10,7 +14,7 @@ pub use thread_priority::{self, *};
 #[macro_export]
 macro_rules! once {
     ($e:expr) => {{
-        static ONCE: std::sync::Once = std::sync::Once::new();
+        static ONCE: $crate::utils::Once = $crate::utils::Once::new();
         ONCE.call_once($e);
     }};
 }
@@ -21,7 +25,7 @@ macro_rules! once {
 /// falls back to a moderate bump via [`ThreadPriority::Crossplatform`] (~5 nice points
 /// on unix). Failures are logged at `debug` level.
 pub fn increase_thread_priority() {
-    let thread_name = std::thread::current().name().unwrap_or("unnamed").to_string();
+    let thread_name = thread::current().name().unwrap_or("unnamed").to_string();
     if let Err(err) = ThreadPriority::Max.set_for_current() {
         tracing::debug!(%thread_name, ?err, "failed to set max thread priority, trying moderate bump; grant CAP_SYS_NICE to the process to enable this");
         // Crossplatform value 62/99 ≈ nice -5 on unix.

@@ -8,7 +8,7 @@
 
 use alloy_eips::Encodable2718;
 use alloy_primitives::{map::HashMap, Bloom, B256};
-use crossbeam_channel::Receiver;
+use reth_concurrency::sync::channel::Receiver;
 use reth_primitives_traits::Receipt;
 use reth_trie_common::ordered_root::OrderedTrieRootEncodedBuilder;
 use tokio::sync::oneshot;
@@ -60,8 +60,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
     /// and builds the trie incrementally. When all receipts have been received
     /// (channel closed), it sends the result through the oneshot channel.
     ///
-    /// This is designed to be called inside a blocking task (e.g., via
-    /// `executor.spawn_blocking(move || handle.run(receipts_len))`).
+    /// Run this on a background worker, for example with
+    /// `runtime.spawn_blocking_named("receipt-root", move || handle.run(receipts_len))`.
     ///
     /// # Arguments
     ///
@@ -138,7 +138,7 @@ mod tests {
     use alloy_consensus::{proofs::calculate_receipt_root, ReceiptEnvelope, TxReceipt};
     use alloy_eips::eip8141::{FrameGasUsed, FrameReceipt, FrameReceiptPayload, FrameStatus};
     use alloy_primitives::{b256, Address, Bytes, Log};
-    use crossbeam_channel::bounded;
+    use reth_concurrency::sync::{channel::bounded, thread};
     use reth_ethereum_primitives::{Receipt, TxType};
 
     #[reth_concurrency::test]
@@ -148,7 +148,7 @@ mod tests {
         drop(_tx);
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        std::thread::spawn(move || handle.run(0)).join().unwrap();
+        thread::spawn(move || handle.run(0)).join().unwrap();
 
         let (root, bloom) = result_rx.try_recv().unwrap();
 
@@ -166,7 +166,7 @@ mod tests {
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+        let join_handle = thread::spawn(move || handle.run(receipts_len));
 
         for (i, receipt) in receipts.clone().into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
@@ -192,7 +192,7 @@ mod tests {
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+        let join_handle = thread::spawn(move || handle.run(receipts_len));
 
         for (i, receipt) in receipts.into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
@@ -255,7 +255,7 @@ mod tests {
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+        let join_handle = thread::spawn(move || handle.run(receipts_len));
 
         for (i, receipt) in receipts.into_iter().enumerate() {
             tx.send(IndexedReceipt::new(i, receipt)).unwrap();
@@ -282,7 +282,7 @@ mod tests {
         let receipts_len = receipts.len();
 
         let handle = ReceiptRootTaskHandle::new(rx, result_tx);
-        let join_handle = std::thread::spawn(move || handle.run(receipts_len));
+        let join_handle = thread::spawn(move || handle.run(receipts_len));
 
         // Send in reverse order to test out-of-order handling
         for (i, receipt) in receipts.into_iter().enumerate().rev() {

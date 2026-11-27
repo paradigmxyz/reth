@@ -1,8 +1,8 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use crate::TrieType;
 use alloy_primitives::B256;
+use reth_concurrency::sync::time::FastInstant as Instant;
 use reth_metrics::metrics::{self, Histogram};
-use reth_primitives_traits::FastInstant as Instant;
 use reth_storage_errors::db::DatabaseError;
 use std::time::Duration;
 

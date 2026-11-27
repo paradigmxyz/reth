@@ -1,9 +1,9 @@
 //! Explicit entry point for a blocking workload.
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use super::deterministic;
 
-/// Runs a workload using the backend selected by the `fuzz` feature.
+/// Runs a workload using the backend selected by the `fuzz` feature and `dst` cfg.
 ///
 /// Runtime construction exposes no scheduler configuration. Simulation runs one
 /// fixed round-robin execution; every spawned task must finish before returning.
@@ -39,11 +39,11 @@ impl Runtime {
         F: FnOnce() -> T + Send + 'static,
         T: Send + 'static,
     {
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         {
             work()
         }
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         {
             deterministic::run(work)
         }

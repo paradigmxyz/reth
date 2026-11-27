@@ -878,14 +878,12 @@ mod tests {
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::{
-        collections::BTreeMap,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::collections::BTreeMap;
 
     #[test]
     fn simulated_frame_outputs_preserve_payer_gas_logs_and_failures() {
