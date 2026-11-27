@@ -283,12 +283,11 @@ impl Methods {
                 };
                 let res = (cb)(id, params, MethodSink::new(tx.clone()), conn_state).await;
 
-                // This message is not used because it's used for metrics so we discard in other to
-                // not read once this is used for subscriptions.
-                //
-                // The same information is part of `res` above.
-                let _ =
-                    rx.recv().await.expect("Every call must at least produce one response; qed");
+                // Accept and reject also queue the response on the sink. Dropping a pending
+                // subscription returns an internal error only through the callback.
+                if res.is_subscription() {
+                    rx.recv().await;
+                }
 
                 res
             }
