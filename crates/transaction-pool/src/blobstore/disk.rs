@@ -337,7 +337,10 @@ impl BlobStore for DiskFileBlobStore {
         &self,
         tx: B256,
     ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
-        if let Some(sidecar) = self.inner.blob_cache.lock().get(&tx) {
+        // The blob cache can outlive a deleted sidecar, so cells stored since are read from disk.
+        if !self.inner.cell_sidecars.read().contains_key(&tx) &&
+            let Some(sidecar) = self.inner.blob_cache.lock().get(&tx)
+        {
             return Ok(sidecar.as_eip7594().map(without_blobs))
         }
         Ok(self.inner.read_one(tx)?.and_then(|stored| match stored {
@@ -1582,8 +1585,8 @@ mod tests {
     #[test]
     fn disk_cells_are_stored_over_a_deleted_cached_sidecar() {
         let (store, _dir) = tmp_store();
-        let (sidecar, _, _) = eip7594_single_blob_sidecar();
-        let tx = TxHash::random();
+        // A legacy sidecar, which has no body to serve without blobs.
+        let (tx, sidecar) = rng_blobs(1).pop().unwrap();
         store.insert(tx, sidecar.into()).unwrap();
         store.delete(tx).unwrap();
         store.cleanup();
@@ -1591,6 +1594,8 @@ mod tests {
 
         let cells = single_cell_sidecar();
         store.insert_cells(tx, cells.clone()).unwrap();
+        // The stale cache entry doesn't hide the cells.
+        assert_eq!(store.get_without_blobs(tx).unwrap(), Some(cells.without_blobs()));
         // The cells outlive the eviction of the deleted sidecar.
         store.clear_cache();
         let cell_mask = BlobCellMask::from_bits(1);
