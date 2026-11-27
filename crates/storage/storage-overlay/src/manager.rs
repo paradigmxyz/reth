@@ -536,8 +536,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         // A parent state from an in-memory snapshot can reach blocks the live state no longer
         // tracks. Such an overlay would only be pruned at the next removal, so it is not cached.
-        let snapshot = self.inner.in_memory_state.snapshot_during(|| ()).into_parts().1;
-        if !cache_config.write_to_cache || !key.is_reachable(&snapshot) {
+        let snapshot = cache_config
+            .write_to_cache
+            .then(|| self.inner.in_memory_state.snapshot_during(|| ()).into_parts().1)
+            .filter(|snapshot| key.is_reachable(snapshot));
+        let Some(snapshot) = snapshot else {
             let parent_input = blocks.first().and_then(|block| {
                 let parent_hash = block.recovered_block().parent_hash();
                 (parent_hash != anchor_hash)
@@ -552,7 +555,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 None => ComputeOverlayInput::MergeBlocks(blocks),
             };
             return Ok(Some(Arc::new(compute(compute_input, span))))
-        }
+        };
 
         enum CacheAction<T> {
             Ready(Arc<T>),
@@ -568,6 +571,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
                     .state_by_hash(sibling_key.tip_hash)
                     .is_none_or(|state| state.parent_hash() != parent_hash)
         });
+        // Release the snapshot before computing or waiting so persisted blocks can be freed.
+        drop(snapshot);
 
         let action = match cache.entries.entry(key) {
             Entry::Occupied(entry) => {
