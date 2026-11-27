@@ -139,7 +139,8 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 /// transaction.
 pub trait DatabaseHashedPostState: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
-    /// specified range and aggregates them into sorted hashed state.
+    /// specified range and aggregates them into sorted hashed state. An empty range returns
+    /// empty state without reading from the provider.
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader),
         range: RangeInclusive<BlockNumber>,
@@ -273,6 +274,10 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
         provider: &(impl ChangeSetReader + StorageChangeSetReader),
         range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, ProviderError> {
+        if range.is_empty() {
+            return Ok(Self::default())
+        }
+
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
         provider.for_each_account_changeset(
@@ -341,10 +346,12 @@ mod tests {
         StaticFileWriter,
     };
     use reth_storage_api::StorageSettingsCache;
+    use reth_storage_errors::provider::ProviderResult;
     use reth_trie::{
         HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher, StateRoot,
     };
     use reth_trie_common::bundle_state::BundleState;
+    use std::ops::RangeBounds;
 
     fn overlay_root_for_provider<TX: reth_db_api::transaction::DbTx>(
         provider: &impl StorageSettingsCache,
@@ -726,5 +733,61 @@ mod tests {
         assert_eq!(storage2.storage_slots.len(), 1);
         assert_eq!(storage2.storage_slots[0].0, expected_hashed_slot1);
         assert_eq!(storage2.storage_slots[0].1, U256::from(300));
+    }
+
+    #[test]
+    fn from_reverts_skips_reads_for_empty_range() {
+        let sorted =
+            HashedPostStateSorted::from_reverts(&UnexpectedRead, RangeInclusive::new(1, 0))
+                .unwrap();
+        assert_eq!(sorted, HashedPostStateSorted::default());
+    }
+
+    struct UnexpectedRead;
+
+    impl ChangeSetReader for UnexpectedRead {
+        fn account_block_changeset(&self, _: BlockNumber) -> ProviderResult<Vec<AccountBeforeTx>> {
+            panic!("unexpected account read")
+        }
+
+        fn get_account_before_block(
+            &self,
+            _: BlockNumber,
+            _: Address,
+        ) -> ProviderResult<Option<AccountBeforeTx>> {
+            panic!("unexpected account read")
+        }
+
+        fn account_changesets_range(
+            &self,
+            _: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+            panic!("unexpected account read")
+        }
+    }
+
+    impl StorageChangeSetReader for UnexpectedRead {
+        fn storage_changeset(
+            &self,
+            _: BlockNumber,
+        ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+            panic!("unexpected storage read")
+        }
+
+        fn get_storage_before_block(
+            &self,
+            _: BlockNumber,
+            _: Address,
+            _: B256,
+        ) -> ProviderResult<Option<StorageEntry>> {
+            panic!("unexpected storage read")
+        }
+
+        fn storage_changesets_range(
+            &self,
+            _: impl RangeBounds<BlockNumber>,
+        ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+            panic!("unexpected storage read")
+        }
     }
 }
