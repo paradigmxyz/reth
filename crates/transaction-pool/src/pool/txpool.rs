@@ -748,9 +748,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         }
         self.all_transactions.update_buffer = updates;
         // update the metrics after the update
-        if has_updates {
-            self.update_size_metrics();
-        }
+        self.update_size_metrics();
         outcome
     }
 
