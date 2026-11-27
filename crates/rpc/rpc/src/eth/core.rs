@@ -534,7 +534,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_consensus::{constants::GWEI_TO_WEI, Block, BlockBody, Header, TxEip1559};
     use alloy_eips::{
         eip4844::DATA_GAS_PER_BLOB, eip7702::Authorization, BlockId, BlockNumberOrTag,
     };
@@ -2338,5 +2338,58 @@ mod tests {
             .unwrap()
             .is_some());
         }
+    }
+
+    /// Adds a chain to `provider` with one block per entry of `tips`, oldest first, numbered from
+    /// 1. A block with `Some(tip)` holds one transaction that pays that tip; `None` is empty.
+    fn add_tip_chain(provider: &MockEthProvider, tips: &[Option<u128>]) {
+        const BASE_FEE: u64 = 7;
+        let mut parent_hash = B256::ZERO;
+        for (number, tip) in (1..).zip(tips) {
+            let header = Header {
+                number,
+                parent_hash,
+                gas_limit: 30_000_000,
+                base_fee_per_gas: Some(BASE_FEE),
+                ..Default::default()
+            };
+            parent_hash = header.hash_slow();
+            let transactions = tip
+                .map(|tip| {
+                    let tx = TxEip1559 {
+                        max_priority_fee_per_gas: tip,
+                        max_fee_per_gas: tip + BASE_FEE as u128,
+                        ..Default::default()
+                    };
+                    TransactionSigned::new_unhashed(tx.into(), Signature::test_signature())
+                })
+                .into_iter()
+                .collect();
+            provider.add_block(
+                parent_hash,
+                Block { header, body: BlockBody { transactions, ..Default::default() } },
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn gas_oracle_skips_empty_blocks() {
+        const TIP: u128 = 10 * GWEI_TO_WEI as u128;
+        // one transaction every third block
+        let tips = [Some(TIP), None, None].repeat(20);
+        let provider = MockEthProvider::default();
+        add_tip_chain(&provider, &tips);
+        let api = build_test_eth_api(provider);
+
+        assert_eq!(api.gas_oracle().suggest_tip_cap().await.unwrap(), U256::from(TIP));
+    }
+
+    #[tokio::test]
+    async fn gas_oracle_uses_default_price_when_all_blocks_are_empty() {
+        let provider = MockEthProvider::default();
+        add_tip_chain(&provider, &[None; 50]);
+        let api = build_test_eth_api(provider);
+
+        assert_eq!(api.gas_oracle().suggest_tip_cap().await.unwrap(), U256::from(GWEI_TO_WEI));
     }
 }
