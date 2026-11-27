@@ -1367,27 +1367,29 @@ mod tests {
     async fn get_cells_request_limits_served_blobs() {
         let (_incoming_tx, incoming_rx) = mpsc::channel(1);
         let get_cells_calls = Arc::new(AtomicUsize::new(0));
-        let mask = B128::from(1u128.to_le_bytes());
+        let mask = B128::from(3u128.to_le_bytes());
+        let hashes =
+            (0..=MAX_CELL_BLOBS_SERVE).map(|i| B256::from(U256::from(i))).collect::<Vec<_>>();
+        // Each transaction has two blobs and the mask selects two cells of each, so counting
+        // transactions or cells instead of blobs serves a different number of transactions.
         let blob_store = CountingBlobStore {
             get_cells_calls: Arc::clone(&get_cells_calls),
-            expected_cell_mask: Some(BlobCellMask::new(mask)),
+            cell_responses: hashes
+                .iter()
+                .map(|&hash| (hash, BlobCellMask::new(mask), vec![Cell::ZERO; 4]))
+                .collect(),
             ..Default::default()
         };
         let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
             .with_blob_store(Box::new(blob_store));
         let (response, rx) = oneshot::channel();
-        // Each transaction has one blob, so its single cell keeps the response far below the
-        // size limit.
-        let request = GetCells {
-            hashes: (0..=MAX_CELL_BLOBS_SERVE).map(|i| B256::from(U256::from(i))).collect(),
-            cell_mask: mask.into(),
-        };
+        let request = GetCells { hashes, cell_mask: mask.into() };
 
         handler.on_cells_request(PeerId::default(), request, response);
 
         let cells = rx.await.unwrap().unwrap();
-        assert_eq!(cells.hashes.len(), MAX_CELL_BLOBS_SERVE);
-        assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELL_BLOBS_SERVE);
+        assert_eq!(cells.hashes.len(), MAX_CELL_BLOBS_SERVE / 2);
+        assert_eq!(get_cells_calls.load(Ordering::Relaxed), MAX_CELL_BLOBS_SERVE / 2);
     }
 
     #[test_case(0)]
