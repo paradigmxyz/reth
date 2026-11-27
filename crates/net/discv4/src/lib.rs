@@ -4317,4 +4317,45 @@ mod tests {
         handler.handle_packet(&packet, mapped).await;
         assert_matches::assert_matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty));
     }
+
+    #[tokio::test]
+    async fn test_mapped_ipv4_ping_completes_lookup() {
+        let (_discv4, mut service) = create_discv4().await;
+        let wire = SocketAddr::from((Ipv4Addr::new(10, 0, 0, 2).to_ipv6_mapped(), 30303));
+        let record = NodeRecord::new("10.0.0.2:30303".parse().unwrap(), PeerId::random());
+
+        // a node from a lookup response is inserted unproven and pinged for the lookup
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        let _ = service.kbuckets.insert_or_update(
+            &kad_key(record.id),
+            NodeEntry::new(record),
+            NodeStatus {
+                direction: ConnectionDirection::Outgoing,
+                state: ConnectionState::Disconnected,
+            },
+        );
+        service.try_ping(record, PingReason::Lookup(record, ctx));
+        let pong = Pong {
+            to: service.local_node_record.into(),
+            echo: service.pending_pings[&record.id].echo_hash,
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        // a dual-stack socket reports the IPv4 node as an IPv4-mapped address
+        service.on_pong(pong, wire, record.id);
+        assert!(service.pending_lookup.contains_key(&record.id));
+
+        let ping = Ping {
+            from: record.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, wire, record.id, B256::random());
+
+        // the node is bonded, so its ping completes the lookup instead of triggering a new ping
+        assert!(service.has_bond(record.id, record.address));
+        assert!(!service.pending_pings.contains_key(&record.id));
+        assert!(service.pending_find_nodes.contains_key(&record.id));
+    }
 }
