@@ -84,11 +84,13 @@ otlp = ["reth-tracing/otlp", "reth-tracing-otlp/otlp"]
 otlp-logs = ["reth-tracing/otlp-logs", "reth-tracing-otlp/otlp-logs"]
 tracy = ["reth-tracing/tracy"]
 
-min-error-logs = ["tracing/release_max_level_error", "log/release_max_level_error"]
-min-warn-logs = ["tracing/release_max_level_warn", "log/release_max_level_warn"]
-min-info-logs = ["tracing/release_max_level_info", "log/release_max_level_info"]
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+# Only `min-debug-logs` sets `log/release_max_level_debug` because `log` errors if multiple
+# `release_max_level_*` features are unified (e.g. `--all-features` or `default` + `min-debug-logs`).
 min-debug-logs = ["tracing/release_max_level_debug", "log/release_max_level_debug"]
-min-trace-logs = ["tracing/release_max_level_trace", "log/release_max_level_trace"]
+min-trace-logs = ["tracing/release_max_level_trace"]
 
 # Debug recording for sparse trie mutations
 trie-debug = ["reth-engine-primitives/trie-debug"]
