@@ -42,7 +42,7 @@ pub use crate::{
     hello::{HelloMessage, HelloMessageBuilder, HelloMessageWithProtocols},
     p2pstream::{
         DisconnectP2P, P2PMessage, P2PMessageID, P2PStream, UnauthedP2PStream, HANDSHAKE_TIMEOUT,
-        MAX_RESERVED_MESSAGE_ID,
+        MAX_PAYLOAD_SIZE, MAX_RESERVED_MESSAGE_ID,
     },
     Capability, ProtocolVersion,
 };

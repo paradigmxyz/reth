@@ -35,6 +35,7 @@ reth-metrics = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 alloy-sol-types.workspace = true
 reth-testing-utils.workspace = true
 reth-trie-common.workspace = true
@@ -44,6 +45,7 @@ alloy-genesis.workspace = true
 
 [features]
 gmp = ["evm2/gmp", "reth-evm/gmp"]
+bn254-mcl = ["evm2/bn254-mcl", "reth-evm/bn254-mcl"]
 default = ["std"]
 asm-keccak = [
     "evm2/asm-keccak",
@@ -74,6 +76,7 @@ p256-aws-lc-rs = [
     "reth-evm/p256-aws-lc-rs",
 ]
 std = [
+    "reth-concurrency/std",
     "dep:rayon",
     "alloy-consensus/std",
     "alloy-eips/std",
@@ -95,6 +98,7 @@ std = [
     "alloy-sol-types/std",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "std",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",

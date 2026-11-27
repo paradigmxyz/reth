@@ -200,6 +200,8 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         transaction: &Recovered<Self::Transaction>,
         mut inspector: I,
     ) -> Result<(I, evm2::TxResultWithState<T>), BlockExecutionError> {
+        // Borrow the inspector for this call instead of installing it and casting it back out:
+        // evm2 stores a `Box<dyn Inspector<T>>` as is, so the box it returns is not always an `I`.
         let result = evm2::Evm::transact_with_inspector(self, transaction, &mut inspector)
             .map(|executed| executed.detach())
             .map_err(map_handler_error);

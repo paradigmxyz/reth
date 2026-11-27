@@ -13,6 +13,8 @@ use reth_primitives_traits::{
 ///
 /// - Compares the receipts root in the block header to the block body
 /// - Compares the gas used in the block header to the actual gas usage after execution
+/// - Compares the blob gas used in the block header to the blob gas consumed by the executed
+///   transactions if Cancun is active
 /// - Compares the computed Block Access List Hash to the value in the header if Amsterdam is active
 ///
 /// If `receipt_root_bloom` is provided, the pre-computed receipt root and logs bloom are used
@@ -36,10 +38,19 @@ where
         receipt_root_bloom,
         block_access_list_hash,
         false,
+        false,
+        false,
     )
 }
 
-/// Validate a block with regard to execution results, optionally allowing pre-Amsterdam BAL hashes.
+/// Validate a block with regard to execution results, optionally allowing pre-Amsterdam BAL hashes
+/// and skipping the blob gas used and requests hash comparisons.
+///
+/// `skip_blob_gas_used_check` only skips the comparison of the header blob gas used against the
+/// executed blob gas, and `skip_requests_hash_check` only skips the comparison of the header
+/// requests hash against the executed requests; all other checks, including the block access list
+/// hash, still run.
+#[expect(clippy::too_many_arguments, reason = "each argument is an independent check input")]
 pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     block: &RecoveredBlock<B>,
     chain_spec: &ChainSpec,
@@ -47,6 +58,8 @@ pub(crate) fn validate_block_post_execution_with_bal_hashes<B, R, ChainSpec>(
     receipt_root_bloom: Option<(B256, Bloom)>,
     block_access_list_hash: Option<B256>,
     allow_bal_hashes: bool,
+    skip_blob_gas_used_check: bool,
+    skip_requests_hash_check: bool,
 ) -> Result<(), ConsensusError>
 where
     B: Block,
@@ -59,6 +72,22 @@ where
             gas: GotExpected { got: result.gas_used, expected: block.header().gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(&result.receipts),
         })
+    }
+
+    // Pipeline bodies classified as empty skip pre-execution validation, so this is the only blob
+    // gas used check for them.
+    if !skip_blob_gas_used_check &&
+        chain_spec.is_cancun_active_at_timestamp(block.header().timestamp())
+    {
+        let Some(header_blob_gas_used) = block.header().blob_gas_used() else {
+            return Err(ConsensusError::BlobGasUsedMissing)
+        };
+        if header_blob_gas_used != result.blob_gas_used {
+            return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: result.blob_gas_used,
+                expected: header_blob_gas_used,
+            }))
+        }
     }
 
     // Before Byzantium, receipts contained state root that would mean that expensive
@@ -98,7 +127,7 @@ where
             return Err(ConsensusError::RequestsHashMissing)
         };
         let requests_hash = result.requests.requests_hash();
-        if requests_hash != header_requests_hash {
+        if !skip_requests_hash_check && requests_hash != header_requests_hash {
             return Err(ConsensusError::BodyRequestsHashDiff(
                 GotExpected::new(requests_hash, header_requests_hash).into(),
             ))

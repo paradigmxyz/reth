@@ -1542,20 +1542,20 @@ mod tests {
         reused.outcomes
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn reuses_independent_transactions() {
         let txs = [tx(1, 0, sender(2), 1), tx(3, 0, Address::repeat_byte(0xaa), 1)];
         assert_eq!(reuse(&txs), [Ok(()), Ok(())]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rebases_unobserved_balances() {
         // The last transaction's caller and recipient were credited by earlier ones.
         let txs = [tx(1, 0, NOOP, 1), tx(1, 1, sender(2), 1), tx(2, 0, NOOP, 1)];
         assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn reuses_predicted_writes() {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, COUNTER, 1)];
         assert_eq!(reuse(&txs), [Ok(()), Ok(()), Ok(())]);
@@ -1563,13 +1563,13 @@ mod tests {
         assert_eq!(reuse_in(&txs, &[2, 1, 0], true), [Ok(()), Ok(()), Ok(())]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn refreshes_against_executed_writes() {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1), tx(1, 1, sender(3), 1)];
         assert_eq!(reuse_in(&txs, &[1, 2], true), [Err(ReuseMiss::Missing), Ok(()), Ok(())]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rebases_original_balances() {
         // The first transaction leaves the forwarder 5 wei more, and the second forwards 5 wei, so
         // its rebased balance equals its speculative balance before the second transaction.
@@ -1577,19 +1577,19 @@ mod tests {
         assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_stale_storage() {
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 1)];
         assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_stale_callers() {
         let txs = [tx(1, 0, sender(2), 1), tx(1, 1, sender(3), 1)];
         assert_eq!(reuse_in(&txs, &[1], false), [Err(ReuseMiss::Missing), Err(ReuseMiss::Stale)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_observed_balances() {
         let txs = [
             tx(1, 0, SELF_BALANCE_READER, 1),
@@ -1602,7 +1602,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_lower_sender_balances() {
         let txs = [tx(1, 0, FORWARDER, 0), tx(2, 0, FORWARDER, 0), tx(3, 0, FORWARDER, 0)];
         // The forwarder can send twice from its speculative balance, but not three times.
@@ -1612,7 +1612,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn reuses_pool_results() {
         // The last transaction's caller was credited by the first one.
         let txs = [tx(1, 0, sender(2), 1), tx(3, 0, COUNTER, 1), tx(2, 0, GAS_LIMIT_READER, 1)];
@@ -1624,7 +1624,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_stale_pool_results() {
         // Test transactions are hashed without their sender.
         let txs = [tx(1, 0, COUNTER, 1), tx(2, 0, COUNTER, 2)];
@@ -1634,14 +1634,14 @@ mod tests {
         assert_eq!(reuse_pool(&txs, &txs, missing), [Err(ReuseMiss::Stale), Err(ReuseMiss::Stale)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_zero_credit_to_empty_beneficiary() {
         // Executing the credit deletes the empty beneficiary, which detached state cannot express.
         let txs = [tx_with_gas_price(1, 0, COUNTER, 1, 100_000, 1)];
         assert_eq!(reuse_pool(&txs, &txs, EMPTY), [Err(ReuseMiss::Stale)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_pool_results_observing_block_env() {
         let txs = [
             tx(1, 0, TIMESTAMP_READER, 1),
@@ -1658,7 +1658,7 @@ mod tests {
         assert_eq!(reuse_pool_with(&txs, &txs, BENEFICIARY, differs), [Err(ReuseMiss::Missing)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn seeds_only_unexecuted_transactions() {
         let txs = [tx(1, 0, COUNTER, 1)];
         let differs = BlockEnvFields::default();
@@ -1667,7 +1667,7 @@ mod tests {
         assert!(Prewarm::new(&txs, &[0]).results.seed(0, txs[0].tx_hash(), &seeds).is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_pool_results_overflowing_the_beneficiary() {
         let txs = [tx(1, 0, COUNTER, 1)];
         assert_eq!(reuse_pool(&txs, &txs, SATURATED), [Err(ReuseMiss::Stale)]);
@@ -1697,7 +1697,7 @@ mod tests {
         results.store(hash, result, reads, &mut BalanceTracker::default(), speculative)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn bounds_pool_results() {
         let txs = [tx(1, 0, COUNTER, 1)];
         let results = pool_results(&txs);
@@ -1712,7 +1712,7 @@ mod tests {
         }));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_recorded_pool_hashes() {
         let txs = [tx(1, 0, COUNTER, 1)];
         let results = pool_results(&txs);
@@ -1720,7 +1720,7 @@ mod tests {
         assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_saturated_pool_beneficiaries() {
         let txs = [tx(1, 0, COUNTER, 1)];
         let results = pool_results(&txs);
@@ -1732,7 +1732,7 @@ mod tests {
         assert!(store_again(&results, &txs[0], B256::ZERO, |_, _| {}));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_pool_results_running_out_of_gas() {
         // Enough gas to read the balance of the warm beneficiary in the block, but not of the cold
         // one during speculation.
@@ -1740,7 +1740,7 @@ mod tests {
         assert_eq!(reuse_pool(&txs, &txs, BENEFICIARY), [Err(ReuseMiss::Missing)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_invalid_transactions() {
         assert_eq!(reusable(&[tx(1, 0, NOOP, 0)]), Ok(()));
         // The caller cannot pay for the value.
@@ -1769,7 +1769,7 @@ mod tests {
         assert_eq!(reusable(&[overflowing]), Err(ReuseMiss::Stale));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn keeps_stale_results_unchanged() {
         let txs = [tx(1, 0, NOOP, 0)];
         let prewarm = Prewarm::new(&txs, &[0]);
@@ -1797,7 +1797,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn keeps_results_on_database_errors() {
         let txs = [tx(1, 0, NOOP, 0)];
         let prewarm = Prewarm::new(&txs, &[0]);
@@ -1809,12 +1809,12 @@ mod tests {
         assert_eq!(prewarm.results.take_valid(0, &mut state).unwrap().map(drop), Ok(()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_unknown_code() {
         assert_eq!(reuse_in(&[tx(1, 0, UNKNOWN_CODE, 0)], &[0], false), [Err(ReuseMiss::Stale)]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_rebasing_unbounded_or_zero_balances() {
         let rebased = [tx(1, 0, sender(4), 1), tx(2, 0, sender(4), 1)];
         assert_eq!(reuse_in(&rebased, &[1], false), [Err(ReuseMiss::Missing), Ok(())]);
@@ -1831,7 +1831,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn preserves_account_lifecycle_and_rejects_rebasing_it() {
         let creation = Recovered::new_unchecked(
             TransactionSigned::new_unhashed(
@@ -1876,7 +1876,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_results_after_failed_observer_reads() {
         let reads = ReadSet {
             accounts: vec![AccountRead {

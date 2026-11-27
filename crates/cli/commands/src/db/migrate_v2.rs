@@ -1,7 +1,7 @@
 //! `reth db migrate-v2` command for migrating v1 storage layout to v2.
 
 use crate::common::CliNodeTypes;
-use alloy_primitives::Address;
+use alloy_primitives::{Address, BlockNumber};
 use clap::Parser;
 use reth_db::{
     mdbx::{self, ffi},
@@ -26,7 +26,7 @@ use reth_prune_types::PruneSegment;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::StageCheckpointReader;
-use tracing::{info, warn};
+use tracing::info;
 
 /// `reth db migrate-v2` command
 #[derive(Debug, Parser)]
@@ -120,6 +120,21 @@ impl Command {
         Ok(())
     }
 
+    /// The first block expected to have complete `segment` history: the block
+    /// after the prune checkpoint, and no earlier than the genesis block, which is not block 0 on
+    /// every chain.
+    fn history_start(
+        provider: &impl PruneCheckpointReader,
+        segment: PruneSegment,
+        genesis_block: BlockNumber,
+    ) -> eyre::Result<BlockNumber> {
+        Ok(provider
+            .get_prune_checkpoint(segment)?
+            .and_then(|cp| cp.block_number)
+            .map_or(0, |b| b.saturating_add(1))
+            .max(genesis_block))
+    }
+
     fn migrate_account_changesets<N: ProviderNodeTypes>(
         factory: &ProviderFactory<N>,
         tip: u64,
@@ -130,15 +145,25 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::AccountChangeSets>()?;
 
-        let first_block = provider
-            .get_prune_checkpoint(PruneSegment::AccountHistory)?
-            .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
+        let genesis_block = sf_provider.genesis_block_number();
+        // Preserve rows from older restores. The first surviving block may be incomplete,
+        // so its rows cannot establish a new prune checkpoint.
+        let first_row = cursor.first()?.map_or(tip, |(block, _)| block);
+        let first_block =
+            Self::history_start(&provider, PruneSegment::AccountHistory, genesis_block)?
+                .min(first_row.max(genesis_block));
 
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+        // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
+        // empty blocks from the start of its fixed range.
+        if writer.user_header().block_range().is_none() &&
+            writer.user_header().expected_block_range().contains(genesis_block)
+        {
+            writer.user_header_mut().set_expected_block_start(genesis_block);
+        }
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
-        let mut writer = sf_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
-        if first_block > 0 {
+        if writer.next_block_number() < first_block {
             writer.ensure_at_block(first_block - 1)?;
         }
 
@@ -180,15 +205,24 @@ impl Command {
 
         let mut cursor = provider.tx_ref().cursor_read::<tables::StorageChangeSets>()?;
 
-        let first_block = provider
-            .get_prune_checkpoint(PruneSegment::StorageHistory)?
-            .and_then(|cp| cp.block_number)
-            .map_or(0, |b| b + 1);
+        let genesis_block = sf_provider.genesis_block_number();
+        // Preserve surviving storage rows under the original read boundary, as for accounts.
+        let first_row = cursor.first()?.map_or(tip, |(key, _)| key.block_number());
+        let first_block =
+            Self::history_start(&provider, PruneSegment::StorageHistory, genesis_block)?
+                .min(first_row.max(genesis_block));
 
+        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
+        // Start an empty genesis file at genesis, as `init_genesis` does, instead of padding
+        // empty blocks from the start of its fixed range.
+        if writer.user_header().block_range().is_none() &&
+            writer.user_header().expected_block_range().contains(genesis_block)
+        {
+            writer.user_header_mut().set_expected_block_start(genesis_block);
+        }
         // The writer always starts at the fixed range boundary (e.g. 2500000) which may be
         // earlier than first_block (e.g. 2603897 from prune checkpoint).
-        let mut writer = sf_provider.latest_writer(StaticFileSegment::StorageChangeSets)?;
-        if first_block > 0 {
+        if writer.next_block_number() < first_block {
             writer.ensure_at_block(first_block - 1)?;
         }
 
@@ -364,28 +398,31 @@ impl Command {
                 .map(|(block, _)| block)
                 .ok_or_else(|| eyre::eyre!("no block body indices found"))?;
 
-            // If the first block body indices entry is not block 1, it means that the v1 database
-            // was likely initialized with dummy blocks coming from a dummy chain generated by
-            // `setup_without_evm`.
-            //
-            // In that case, sender recovery starts from the first block that has a corresponding
-            // block body indices entry.
-            if first_indices_entry > 1 {
-                provider_rw.save_stage_checkpoint(
-                    StageId::SenderRecovery,
-                    StageCheckpoint::new(first_indices_entry - 1),
-                )?;
-
-                // Make sure that senders static files segment is at the correct height.
-                let static_file_provider = provider_rw.static_file_provider();
+            let static_file_provider = provider_rw.static_file_provider();
+            let genesis_block = static_file_provider.genesis_block_number();
+            // Genesis has no senders. Record coverage through it so the checkpoint names a block
+            // the segment can cover even when genesis is on a file boundary. If body indices
+            // instead start after a gap (e.g. from `setup_without_evm`), resume at the first body.
+            let sender_checkpoint = if first_indices_entry == genesis_block {
+                genesis_block
+            } else {
+                first_indices_entry - 1
+            };
+            if sender_checkpoint > 0 {
                 let mut senders_writer =
                     static_file_provider.latest_writer(StaticFileSegment::TransactionSenders)?;
-                senders_writer.ensure_at_block(first_indices_entry - 1)?;
+                senders_writer.ensure_at_block(sender_checkpoint)?;
                 senders_writer.commit()?;
+                provider_rw.save_stage_checkpoint(
+                    StageId::SenderRecovery,
+                    StageCheckpoint::new(sender_checkpoint),
+                )?;
 
-                warn!(
+                info!(
                     target: "reth::cli",
-                    "Missing block body indices data for first {first_indices_entry} blocks, initializing sender recovery with the first block that has a corresponding block body indices entry"
+                    first_indices_entry,
+                    sender_checkpoint,
+                    "Initialized sender recovery checkpoint"
                 );
             }
         }
@@ -454,5 +491,97 @@ impl Command {
 
         info!(target: "reth::cli", "Database compaction swap complete");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{B256, U256};
+    use reth_db::models::AccountBeforeTx;
+    use reth_db_common::init::insert_genesis_header;
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{
+        providers::BlockchainProvider,
+        test_utils::create_test_provider_factory_with_genesis_block_number, ChainSpecProvider,
+        ChangeSetReader, ProviderError, StorageChangeSetReader, StorageSettingsCache,
+    };
+    use reth_prune_types::PruneCheckpoint;
+    use reth_storage_api::PruneCheckpointWriter;
+
+    /// A genesis at a block that is not the start of a static file range, as on chains that
+    /// start from carried-over state.
+    const UNALIGNED_GENESIS: u64 = 500_010;
+
+    #[test]
+    fn migrates_changesets_of_unaligned_genesis_chain() {
+        assert_migrates_changesets(UNALIGNED_GENESIS);
+    }
+
+    #[test]
+    fn migrates_changesets_of_aligned_genesis_chain() {
+        assert_migrates_changesets(reth_static_file_types::DEFAULT_BLOCKS_PER_STATIC_FILE);
+    }
+
+    fn assert_migrates_changesets(genesis: u64) {
+        let factory = create_test_provider_factory_with_genesis_block_number(genesis);
+        factory.set_storage_settings_cache(StorageSettings::v1());
+        let tip = genesis + 3;
+        let address = Address::with_last_byte(7);
+        let key = B256::with_last_byte(3);
+
+        // An older restore could leave MDBX rows below the prune checkpoints and a gap above
+        // those rows. Only storage has a readable row after its checkpoint.
+        let accounts =
+            [genesis, genesis + 1].map(|block| (block, AccountBeforeTx { address, info: None }));
+        let storage = [genesis, genesis + 1, tip]
+            .map(|block| ((block, address).into(), StorageEntry::new(key, U256::from(block))));
+        let provider_rw = factory.database_provider_rw().unwrap();
+        insert_genesis_header(&provider_rw, factory.chain_spec().as_ref()).unwrap();
+        provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(genesis)).unwrap();
+        for (segment, boundary) in
+            [(PruneSegment::AccountHistory, tip), (PruneSegment::StorageHistory, tip - 1)]
+        {
+            provider_rw
+                .save_prune_checkpoint(segment, PruneCheckpoint::pruned_through(boundary))
+                .unwrap();
+        }
+        for (block, row) in &accounts {
+            provider_rw.tx_ref().put::<tables::AccountChangeSets>(*block, row.clone()).unwrap();
+        }
+        for (key, row) in storage {
+            provider_rw.tx_ref().put::<tables::StorageChangeSets>(key, row).unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        Command::migrate_account_changesets(&factory, tip).unwrap();
+        Command::migrate_storage_changesets(&factory, tip).unwrap();
+
+        let static_files = factory.static_file_provider();
+        static_files.initialize_index().unwrap();
+        for segment in [StaticFileSegment::AccountChangeSets, StaticFileSegment::StorageChangeSets]
+        {
+            // The segment starts at genesis, as after a fresh v2 `init_genesis`.
+            assert_eq!(static_files.get_lowest_range_start(segment), Some(genesis), "{segment}");
+            assert_eq!(static_files.get_highest_static_file_block(segment), Some(tip), "{segment}");
+        }
+        assert_eq!(static_files.account_changesets_range(genesis..=tip).unwrap(), accounts);
+        assert_eq!(static_files.storage_changesets_range(genesis..=tip).unwrap(), storage);
+
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let assert_pruned = |error, block| {
+            assert!(matches!(error, ProviderError::StateAtBlockPruned(n) if n == block), "{error}");
+        };
+        for block in genesis..=tip {
+            assert_pruned(provider.account_block_changeset(block).unwrap_err(), block);
+        }
+        for block in genesis..tip {
+            assert_pruned(provider.storage_changeset(block).unwrap_err(), block);
+        }
+        assert_eq!(
+            provider.storage_changeset(tip).unwrap(),
+            static_files.storage_changeset(tip).unwrap()
+        );
     }
 }

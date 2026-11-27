@@ -1,5 +1,11 @@
 //! clap [`Args`] for RPC related arguments.
 
+// The clap `Args` derive builds every flag in one `augment_args` function, which needs about
+// 540 KB of stack in unoptimized builds. It runs once at startup on the main thread, and
+// splitting the struct would change field paths used by downstream nodes. Item-level lint
+// attributes on the struct do not reach the generated impl.
+#![allow(clippy::large_unopt_stack_frames)]
+
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
@@ -41,6 +47,14 @@ pub(crate) const RPC_DEFAULT_MAX_REQUEST_SIZE_MB: u32 = 15;
 ///
 /// This is only relevant for very large trace responses.
 pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
+
+/// Default trace byte limit per byte of the response limit.
+///
+/// `vmTrace` records about 1.5-5x its JSON size, since a 32-byte stack word serializes as short
+/// hex. Twice the response limit passes every mainnet block whose traces fit in the response, while
+/// keeping a block trace's memory bounded. The default struct logger records its JSON, so the
+/// response limit itself bounds it.
+const RPC_TRACE_BYTES_PER_RESPONSE_BYTE: u64 = 2;
 
 /// Default number of incoming connections.
 ///
@@ -86,10 +100,12 @@ pub struct DefaultRpcServerArgs {
     rpc_max_trace_filter_blocks: u64,
     rpc_max_blocks_per_filter: ZeroAsNoneU64,
     rpc_max_logs_per_response: ZeroAsNoneU64,
+    rpc_max_active_filters: ZeroAsNoneU64,
     rpc_gas_cap: u64,
     rpc_evm_memory_limit: u64,
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
+    rpc_max_trace_bytes: Option<usize>,
     rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
@@ -310,6 +326,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default max active filters
+    pub const fn with_rpc_max_active_filters(mut self, v: ZeroAsNoneU64) -> Self {
+        self.rpc_max_active_filters = v;
+        self
+    }
+
     /// Set the default gas cap
     pub const fn with_rpc_gas_cap(mut self, v: u64) -> Self {
         self.rpc_gas_cap = v;
@@ -331,6 +353,12 @@ impl DefaultRpcServerArgs {
     /// Set the default max simulate blocks
     pub const fn with_rpc_max_simulate_blocks(mut self, v: u64) -> Self {
         self.rpc_max_simulate_blocks = v;
+        self
+    }
+
+    /// Set the default maximum bytes a single trace may record
+    pub const fn with_rpc_max_trace_bytes(mut self, v: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = v;
         self
     }
 
@@ -425,10 +453,12 @@ impl Default for DefaultRpcServerArgs {
             rpc_max_trace_filter_blocks: constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
+            rpc_max_active_filters: (constants::DEFAULT_MAX_ACTIVE_FILTERS as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
-            rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_memory_limit: 100 * 1024 * 1024,
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_max_trace_bytes: None,
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
@@ -494,7 +524,15 @@ pub struct RpcServerArgs {
     pub http_decompression_algorithms: Option<Vec<String>>,
 
     /// Rpc Modules to be configured for the HTTP server
-    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "http.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().http_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
@@ -513,12 +551,24 @@ pub struct RpcServerArgs {
     #[arg(long = "ws.port", default_value_t = DefaultRpcServerArgs::get_global().ws_port)]
     pub ws_port: u16,
 
-    /// Origins from which to accept `WebSocket` requests
+    /// Allowed `WebSocket` origins. Defaults to HTTP(S) origins on `localhost`, `127.0.0.1`, or
+    /// `[::1]` at any port. Use `*` to allow any origin.
+    ///
+    /// When HTTP and `WebSocket` share a listener, either `--http.corsdomain` or `--ws.origins`
+    /// sets the allowed origins for both. If both flags are set, their values must match.
     #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_allowed_origins.as_ref().map(|v| v.to_string().into())))]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
-    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
+    #[arg(
+        long = "ws.api",
+        value_parser = DefaultValueParser {
+            inner: RpcModuleSelectionValueParser::default(),
+            default: &DefaultRpcServerArgs::get_global().ws_api,
+            to_default: RpcModuleSelection::to_string,
+        },
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())),
+    )]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC server
@@ -601,8 +651,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: |value: &str| JwtSecret::from_hex(value),
             default: &DefaultRpcServerArgs::get_global().rpc_jwtsecret,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_jwtsecret: Option<JwtSecret>,
@@ -659,6 +710,12 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.max-logs-per-response", alias = "rpc-max-logs-per-response", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_logs_per_response)]
     pub rpc_max_logs_per_response: ZeroAsNoneU64,
 
+    /// Maximum number of filters that can be installed at the same time, across all
+    /// `eth_newFilter`, `eth_newBlockFilter` and `eth_newPendingTransactionFilter` filters. (0 =
+    /// no limit)
+    #[arg(long = "rpc.max-active-filters", alias = "rpc-max-active-filters", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_max_active_filters)]
+    pub rpc_max_active_filters: ZeroAsNoneU64,
+
     /// Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
     ///
     /// The calls of an `eth_callMany`, `trace_callMany` or `debug_traceCallMany` request share it.
@@ -671,7 +728,7 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     #[arg(
         long = "rpc.evm-memory-limit",
         alias = "rpc-evm-memory-limit",
@@ -698,6 +755,17 @@ pub struct RpcServerArgs {
         default_value_t = DefaultRpcServerArgs::get_global().rpc_max_simulate_blocks
     )]
     pub rpc_max_simulate_blocks: u64,
+
+    /// Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+    ///
+    /// The default struct logs of a debug trace response are limited to `--rpc.max-response-size`
+    /// as well, whatever this value is.
+    #[arg(
+        long = "rpc.max-trace-bytes",
+        value_name = "BYTES",
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_max_trace_bytes.map(|v| v.to_string().into()))
+    )]
+    pub rpc_max_trace_bytes: Option<usize>,
 
     /// Compute state roots for `eth_simulateV1` responses.
     #[arg(
@@ -744,8 +812,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: Url::parse,
             default: &DefaultRpcServerArgs::get_global().rpc_forwarder,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_forwarder.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub rpc_forwarder: Option<Url>,
@@ -758,8 +827,9 @@ pub struct RpcServerArgs {
         value_parser = DefaultValueParser {
             inner: reth_cli_util::parsers::read_json_from_file::<AddressSet>,
             default: &DefaultRpcServerArgs::get_global().builder_disallow,
+            to_default: configured_default,
         },
-        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|_| "configured".into())),
+        default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| configured_default(v).into())),
         hide_default_value = true,
     )]
     pub builder_disallow: Option<AddressSet>,
@@ -953,7 +1023,25 @@ impl RpcServerArgs {
     ///
     /// If no explicit or instance-adjusted path is set, returns the global default.
     pub fn auth_ipc_path(&self) -> &str {
-        self.auth_ipc_path.as_deref().unwrap_or(&DefaultRpcServerArgs::get_global().auth_ipc_path)
+        self.auth_ipc_path
+            .as_deref()
+            .unwrap_or_else(|| &DefaultRpcServerArgs::get_global().auth_ipc_path)
+    }
+
+    /// Returns the trace byte limit, `None` when `--rpc.max-trace-bytes 0` disables it.
+    ///
+    /// By default, a trace may record up to twice the configured RPC response size limit.
+    pub fn max_trace_bytes(&self) -> Option<usize> {
+        match self.rpc_max_trace_bytes {
+            Some(0) => None,
+            Some(bytes) => Some(bytes),
+            None => Some(
+                (u64::from(self.rpc_max_response_size.get()) * 1024 * 1024)
+                    .saturating_mul(RPC_TRACE_BYTES_PER_RESPONSE_BYTE)
+                    .try_into()
+                    .unwrap_or(usize::MAX),
+            ),
+        }
     }
 }
 
@@ -993,10 +1081,12 @@ impl Default for RpcServerArgs {
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
+            rpc_max_active_filters,
             rpc_gas_cap,
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1042,10 +1132,12 @@ impl Default for RpcServerArgs {
             rpc_max_trace_filter_blocks,
             rpc_max_blocks_per_filter,
             rpc_max_logs_per_response,
+            rpc_max_active_filters,
             rpc_gas_cap,
             rpc_evm_memory_limit,
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
+            rpc_max_trace_bytes,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1078,15 +1170,20 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
     fn parse_ref(
         &self,
         _cmd: &Command,
-        _arg: Option<&Arg>,
+        arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
         let val =
             value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
-        // This will now accept any module name, creating Other(name) for unknowns
-        Ok(val
-            .parse::<RpcModuleSelection>()
-            .expect("RpcModuleSelection parsing cannot fail with Other variant"))
+        let arg = arg.map(ToString::to_string).unwrap_or_else(|| "...".to_owned());
+        // This accepts any module name, creating Other(name) for unknowns, but rejects the `all`
+        // and `none` keywords mixed with other modules.
+        val.parse::<RpcModuleSelection>().map_err(|_| {
+            clap::Error::raw(
+                clap::error::ErrorKind::ValueValidation,
+                format!("invalid value '{val}' for '{arg}': `all` and `none` cannot be combined with other modules\n"),
+            )
+        })
     }
 
     fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
@@ -1094,6 +1191,11 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
         let values = RethRpcModule::standard_variant_names().map(PossibleValue::new);
         Some(Box::new(values))
     }
+}
+
+/// Default value string for args whose typed default must not be serialized.
+fn configured_default<T>(_: &T) -> String {
+    "configured".to_string()
 }
 
 /// Uses a typed default without serializing secrets or treating address sets as file paths.
@@ -1104,6 +1206,9 @@ where
 {
     inner: P,
     default: &'static Option<P::Value>,
+    /// Formats `default` as the arg's `default_value`, so a different default set by an embedding
+    /// command, such as through `Command::mut_arg`, is parsed instead of replaced.
+    to_default: fn(&P::Value) -> String,
 }
 
 impl<P: TypedValueParser> TypedValueParser for DefaultValueParser<P>
@@ -1129,12 +1234,17 @@ where
         source: ValueSource,
     ) -> Result<Self::Value, clap::Error> {
         if source == ValueSource::DefaultValue &&
-            let Some(default) = self.default
+            let Some(default) = self.default &&
+            value == (self.to_default)(default).as_str()
         {
             Ok(default.clone())
         } else {
             self.inner.parse_ref_(cmd, arg, value, source)
         }
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = PossibleValue> + '_>> {
+        self.inner.possible_values()
     }
 }
 
@@ -1193,6 +1303,20 @@ mod tests {
         let apis = args.http_api.unwrap();
         let expected = RpcModuleSelection::Selection(Default::default());
         assert_eq!(apis, expected);
+    }
+
+    #[test]
+    fn test_rpc_server_args_parser_rejects_mixed_keywords() {
+        for flag in ["--http.api", "--ws.api"] {
+            for api in ["all,testing", "eth,all", "none,eth"] {
+                let Err(err) = CommandParser::<RpcServerArgs>::try_parse_from(["reth", flag, api])
+                else {
+                    panic!("{flag} {api} should be rejected")
+                };
+                assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation, "{flag} {api}");
+                assert!(err.to_string().contains(flag), "{err}");
+            }
+        }
     }
 
     #[test]
@@ -1314,6 +1438,26 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_max_trace_bytes() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.max_trace_bytes(), Some(320 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-response-size", "10"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(20 * 1024 * 1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "1024"])
+                .args;
+        assert_eq!(args.max_trace_bytes(), Some(1024));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.max-trace-bytes", "0"]).args;
+        assert_eq!(args.max_trace_bytes(), None);
+    }
+
+    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
@@ -1355,10 +1499,12 @@ mod tests {
             rpc_max_trace_filter_blocks: 4000,
             rpc_max_blocks_per_filter: 1000u64.into(),
             rpc_max_logs_per_response: 10000u64.into(),
+            rpc_max_active_filters: 500u64.into(),
             rpc_gas_cap: 50_000_000,
             rpc_evm_memory_limit: 256,
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
+            rpc_max_trace_bytes: Some(1 << 20),
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
@@ -1440,6 +1586,8 @@ mod tests {
             "1000",
             "--rpc.max-logs-per-response",
             "10000",
+            "--rpc.max-active-filters",
+            "500",
             "--rpc.gascap",
             "50000000",
             "--rpc.evm-memory-limit",
@@ -1448,6 +1596,8 @@ mod tests {
             "2.0",
             "--rpc.max-simulate-blocks",
             "256",
+            "--rpc.max-trace-bytes",
+            "1048576",
             "--rpc.eth-proof-window",
             "100000",
             "--rpc.proof-permits",

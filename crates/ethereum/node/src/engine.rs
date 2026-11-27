@@ -61,7 +61,7 @@ where
     fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+    ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError> {
         let proof = payload.payload.as_v5().map(|payload| payload.dependency_proof.clone());
         let block = self.inner.ensure_well_formed_payload(payload)?;
         if self.chain_spec().is_bogota_active_at_timestamp(block.timestamp) {
@@ -83,7 +83,7 @@ where
                 .insert(block.hash(), proof)
                 .map_err(|err| NewPayloadError::Unavailable(Box::new(err)))?;
         }
-        Ok(block)
+        Ok(Arc::new(block))
     }
 }
 

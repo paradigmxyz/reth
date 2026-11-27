@@ -21,6 +21,7 @@ assets = [
     ["../../LICENSE-APACHE", "usr/share/doc/reth/", "644"],
     ["../../LICENSE-MIT", "usr/share/doc/reth/", "644"],
     ["../../LICENSES/*", "usr/share/doc/reth/LICENSES/", "644"],
+    ["../../crates/rpc/jsonrpsee/LICENSE", "usr/share/doc/reth/LICENSES/jsonrpsee-MIT.txt", "644"],
 ]
 systemd-units = { enable = false, start = false, unit-name = "reth", unit-scripts = "../../pkg/reth/debian" }
 
@@ -42,7 +43,7 @@ reth-consensus-common.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc.workspace = true
 reth-rpc-convert.workspace = true
-reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-api.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-rpc-server-types.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
@@ -85,6 +86,9 @@ tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
 zstd.workspace = true
 
+[build-dependencies]
+reth-node-version-build.workspace = true
+
 [features]
 default = [
     "jemalloc",
@@ -106,6 +110,13 @@ jit = [
 gmp = [
     "reth-ethereum-cli/gmp",
     "reth-node-ethereum/gmp",
+]
+# Runs the BN254 precompiles on MCL instead of arkworks. On x86-64 CPUs with BMI2 and ADX, MCL's
+# static destructor frees its JIT code at process exit, so a BN254 call still running on another
+# thread then can crash the process.
+bn254-mcl = [
+    "reth-ethereum-cli/bn254-mcl",
+    "reth-node-ethereum/bn254-mcl",
 ]
 
 otlp = [

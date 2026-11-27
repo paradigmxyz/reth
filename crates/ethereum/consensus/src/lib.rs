@@ -114,7 +114,7 @@ pub struct EthBeaconConsensus<ChainSpec> {
     max_extra_data_size: usize,
     /// When true, skips the gas limit change validation between parent and child blocks.
     skip_gas_limit_ramp_check: bool,
-    /// When true, skips the blob gas used check in header validation.
+    /// When true, skips the blob gas used check in header and post-execution validation.
     skip_blob_gas_used_check: bool,
     /// When true, skips the requests hash check in post-execution validation.
     skip_requests_hash_check: bool,
@@ -162,7 +162,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
         self
     }
 
-    /// Disables the blob gas used check in header validation.
+    /// Disables the blob gas used check in header and post-execution validation.
     pub const fn with_skip_blob_gas_used_check(mut self, skip: bool) -> Self {
         self.skip_blob_gas_used_check = skip;
         self
@@ -198,22 +198,16 @@ where
         receipt_root_bloom: Option<ReceiptRootBloom>,
         block_access_list_hash: Option<B256>,
     ) -> Result<(), ConsensusError> {
-        let res = validation::validate_block_post_execution_with_bal_hashes(
+        validation::validate_block_post_execution_with_bal_hashes(
             block,
             &self.chain_spec,
             result,
             receipt_root_bloom,
             block_access_list_hash,
             self.allow_bal_hashes,
-        );
-
-        if self.skip_requests_hash_check &&
-            let Err(ConsensusError::BodyRequestsHashDiff(_)) = &res
-        {
-            return Ok(());
-        }
-
-        res
+            self.skip_blob_gas_used_check,
+            self.skip_requests_hash_check,
+        )
     }
 }
 
@@ -508,14 +502,14 @@ fn read_dependency_proof(
 mod tests {
     use super::*;
     use alloy_consensus::Header;
-    use alloy_eips::eip7685::EMPTY_REQUESTS_HASH;
+    use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7685::EMPTY_REQUESTS_HASH};
     use alloy_primitives::B256;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_consensus_common::validation::validate_against_parent_gas_limit;
     use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt};
     use reth_primitives_traits::{
         constants::{GAS_LIMIT_BOUND_DIVISOR, MINIMUM_GAS_LIMIT},
-        proofs,
+        proofs, GotExpected,
     };
 
     #[cfg(feature = "std")]
@@ -943,6 +937,85 @@ mod tests {
             )
             .unwrap_err(),
             ConsensusError::BlockAccessListHashMissing
+        ));
+    }
+
+    #[test]
+    fn skip_requests_hash_check_still_validates_block_access_list_hash() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build());
+        let mut header = valid_prague_header();
+        header.block_access_list_hash = Some(B256::ZERO);
+        header.requests_hash = Some(B256::with_last_byte(1));
+        let block =
+            RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new());
+        let result = BlockExecutionResult::<Receipt>::default();
+        let computed_bal_hash = B256::with_last_byte(2);
+
+        let consensus = EthBeaconConsensus::new(chain_spec).with_skip_requests_hash_check(true);
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus,
+                &block,
+                &result,
+                None,
+                Some(computed_bal_hash),
+            )
+            .unwrap_err(),
+            ConsensusError::BlockAccessListHashMismatch(_)
+        ));
+
+        // A requests hash mismatch alone is skipped.
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus,
+            &block,
+            &result,
+            None,
+            Some(B256::ZERO),
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn prague_post_execution_rejects_blob_gas_used_diff_for_empty_block() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let mut header = valid_prague_header();
+        header.blob_gas_used = Some(DATA_GAS_PER_BLOB);
+        let block =
+            RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new());
+        let result = BlockExecutionResult::<Receipt>::default();
+
+        let consensus = EthBeaconConsensus::new(chain_spec.clone());
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus, &block, &result, None, None,
+            )
+            .unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(GotExpected { got: 0, expected: DATA_GAS_PER_BLOB })
+        ));
+
+        let consensus = EthBeaconConsensus::new(chain_spec).with_skip_blob_gas_used_check(true);
+        assert!(FullConsensus::<EthPrimitives>::validate_block_post_execution(
+            &consensus, &block, &result, None, None,
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn prague_post_execution_requires_blob_gas_used() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().prague_activated().build());
+        let mut header = valid_prague_header();
+        header.blob_gas_used = None;
+        let block =
+            RecoveredBlock::new_unhashed(EthBlock { header, body: Default::default() }, Vec::new());
+        let result = BlockExecutionResult::<Receipt>::default();
+        let consensus = EthBeaconConsensus::new(chain_spec);
+
+        assert!(matches!(
+            FullConsensus::<EthPrimitives>::validate_block_post_execution(
+                &consensus, &block, &result, None, None,
+            )
+            .unwrap_err(),
+            ConsensusError::BlobGasUsedMissing
         ));
     }
 }

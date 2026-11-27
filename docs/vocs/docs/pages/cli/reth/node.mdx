@@ -375,7 +375,9 @@ RPC:
           [default: 8546]
 
       --ws.origins <ws.origins>
-          Origins from which to accept `WebSocket` requests
+          Allowed `WebSocket` origins. Defaults to HTTP(S) origins on `localhost`, `127.0.0.1`, or `[::1]` at any port. Use `*` to allow any origin.
+
+          When HTTP and `WebSocket` share a listener, either `--http.corsdomain` or `--ws.origins` sets the allowed origins for both. If both flags are set, their values must match.
 
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
@@ -492,6 +494,11 @@ RPC:
 
           [default: 20000]
 
+      --rpc.max-active-filters <COUNT>
+          Maximum number of filters that can be installed at the same time, across all `eth_newFilter`, `eth_newBlockFilter` and `eth_newPendingTransactionFilter` filters. (0 = no limit)
+
+          [default: 10000]
+
       --rpc.gascap <GAS_CAP>
           Maximum gas limit for `eth_call`, `eth_estimateGas`, and call tracing RPC methods.
 
@@ -500,9 +507,9 @@ RPC:
           [default: 50000000]
 
       --rpc.evm-memory-limit <MEMORY_LIMIT>
-          Maximum memory the EVM can allocate per RPC request
+          Maximum memory the EVM can allocate per call frame in an RPC request
 
-          [default: 4294967295]
+          [default: 104857600]
 
       --rpc.txfeecap <TX_FEE_CAP>
           Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
@@ -513,6 +520,11 @@ RPC:
           Maximum number of blocks for `eth_simulateV1` call
 
           [default: 256]
+
+      --rpc.max-trace-bytes <BYTES>
+          Max bytes a traced tx may record, defaults to 2x `--rpc.max-response-size`, 0 is unlimited.
+
+          The default struct logs of a debug trace response are limited to `--rpc.max-response-size` as well, whatever this value is.
 
       --rpc.compute-state-root-for-eth-simulate
           Compute state roots for `eth_simulateV1` responses
@@ -772,6 +784,10 @@ TxPool:
           Max execution gas of an EIP-8141 public-pool validation prefix, including signature verification. Values below the spec cap are raised to it
 
           [default: 300000]
+      --txpool.enforce-tracked-nonce
+          Reject transactions whose nonce is below the sender nonce tracked from canonical updates.
+
+          Closes the window in which a validation result that predates a block inserts an already mined nonce as pending. Assumes sender nonces only move forward, so this is meant for chains without reorgs and very low block times.
 
 Builder:
       --builder.extradata <EXTRA_DATA>
@@ -940,7 +956,7 @@ Dev testnet:
       --dev.block-time <BLOCK_TIME>
           Interval between blocks.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.block-time 12s
 
       --dev.finality-depth <FINALITY_DEPTH>
@@ -957,7 +973,7 @@ Dev testnet:
           local miner, giving the payload job time for multiple rebuild attempts with
           new transactions from the pool.
 
-          Parses strings using [`humantime::parse_duration`]
+          Accepts a duration such as `12s`, `450ms` or `1m 30s`, e.g.
           --dev.payload-wait-time 450ms
 
       --dev.mnemonic <MNEMONIC>
@@ -1063,9 +1079,13 @@ Engine:
           [default: 30]
 
       --engine.memory-block-buffer-target <MEMORY_BLOCK_BUFFER_TARGET>
-          Configure the target number of blocks to keep in memory.
+          Configure how many of the most recent canonical blocks persistence leaves in memory.
 
-          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target.
+          When more than `--engine.persistence-threshold` canonical blocks are held in memory, the engine writes the canonical chain to disk up to `head - memory-block-buffer-target`. The blocks above that height are kept only in memory, so a reorg of them does not unwind the database. With state masking enabled, the `--engine.num-state-masking-blocks` blocks below that height also stay in memory until a later cycle persists their state/trie updates.
+
+          This is also the in-memory buffer that `--engine.persistence-backpressure-threshold` is measured from.
+
+          If omitted, this defaults to the lesser of `--engine.persistence-threshold` and the configured default memory block buffer target. The value must not exceed `--engine.persistence-threshold`, and with state masking enabled, its sum with `--engine.num-state-masking-blocks` must be less than `--engine.persistence-threshold`.
 
       --engine.backfill-threshold <BACKFILL_RUN_THRESHOLD>
           Configure the largest gap, in blocks, between the local head and the forkchoice head that is closed by downloading the missing blocks directly. Larger gaps trigger a full pipeline (backfill) run instead.

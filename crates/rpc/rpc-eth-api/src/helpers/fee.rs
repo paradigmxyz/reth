@@ -132,10 +132,9 @@ pub trait EthFees:
 
             // need to add 1 to the end block to get the correct (inclusive) range
             let end_block_plus = end_block + 1;
-            // Ensure that we would not be querying outside of genesis
-            if end_block_plus < block_count {
-                block_count = end_block_plus;
-            }
+            // Ensure that we would not be querying below genesis, which is not always block 0
+            let genesis_block = self.provider().chain_spec().genesis_header().number();
+            block_count = block_count.min(end_block.saturating_sub(genesis_block) + 1);
 
             // Fetch the headers and ensure we got all of them
             //

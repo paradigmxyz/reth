@@ -1,15 +1,14 @@
 //! Support for maintaining the state of the transaction pool
 
 use crate::{
-    blobstore::{BlobSidecarConverter, BlobStoreCanonTracker, BlobStoreUpdates},
+    blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
-    AllPoolTransactions, BlobTransactionSidecarVariant, BlockInfo, DependencyEvidence,
-    PoolTransaction, PoolUpdateKind, TransactionOrigin,
+    BlockInfo, DependencyEvidence, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
-use alloy_eips::{merge::SLOT_DURATION_SECS, BlockNumberOrTag, Decodable2718};
+use alloy_eips::{BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{
     map::{AddressSet, B256Set, HashSet},
     Address, BlockHash, BlockNumber, Bytes,
@@ -179,6 +178,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
     // the future that reloads accounts from state
     let mut reload_accounts_fut = Fuse::terminated();
 
+    // set when a reload failed because historical state is unavailable during pipeline sync,
+    // retrying is pointless until the next canonical state event
+    let mut wait_for_next_event = false;
+
     // eviction interval for stale non local txs
     let mut stale_eviction_interval = time::interval(config.max_tx_lifetime);
 
@@ -205,7 +208,10 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
         }
 
         // if we have accounts that are out of sync with the pool, we reload them in chunks
-        if !dirty_addresses.is_empty() && reload_accounts_fut.is_terminated() {
+        if !dirty_addresses.is_empty() &&
+            reload_accounts_fut.is_terminated() &&
+            !wait_for_next_event
+        {
             let (tx, rx) = oneshot::channel();
             let c = client.clone();
             let at = pool_info.last_seen_block_hash;
@@ -273,6 +279,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     break;
                 }
                 event = ev;
+                // state may have advanced, so allow reloading dirty accounts again
+                wait_for_next_event = false;
                 // on receiving the first event on start up, mark the pool as drifted to explicitly
                 // trigger revalidation and clear out outdated txs.
                 if first_event {
@@ -317,6 +325,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 // Failed to load accounts from state
                 let (accs, err) = *res;
                 debug!(target: "txpool", %err, "failed to load accounts");
+                if matches!(err, ProviderError::StateUnavailableDuringSync) {
+                    wait_for_next_event = true;
+                }
                 dirty_addresses.extend(accs);
             }
             Some(Err(_)) => {
@@ -567,90 +578,6 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 
                 // keep track of mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&blocks);
-
-                // If Osaka activates in 2 slots we need to convert blobs to new format.
-                if !chain_spec.is_osaka_active_at_timestamp(tip.timestamp()) &&
-                    !chain_spec.is_osaka_active_at_timestamp(
-                        tip.timestamp().saturating_add(SLOT_DURATION_SECS),
-                    ) &&
-                    chain_spec.is_osaka_active_at_timestamp(
-                        tip.timestamp().saturating_add(2 * SLOT_DURATION_SECS),
-                    )
-                {
-                    let pool = pool.clone();
-                    let spawner = task_spawner.clone();
-                    let client = client.clone();
-                    task_spawner.spawn_task(async move {
-                        // Start converting not eaerlier than 4 seconds into current slot to ensure
-                        // that our pool only contains valid transactions for the next block (as
-                        // it's not Osaka yet).
-                        tokio::time::sleep(Duration::from_secs(4)).await;
-
-                        let mut interval = tokio::time::interval(Duration::from_secs(1));
-                        loop {
-                            // Loop and replace blob transactions until we reach Osaka transition
-                            // block after which no legacy blobs are going to be accepted.
-                            let last_iteration =
-                                client.latest_header().ok().flatten().is_none_or(|header| {
-                                    client
-                                        .chain_spec()
-                                        .is_osaka_active_at_timestamp(header.timestamp())
-                                });
-
-                            let AllPoolTransactions { pending, queued } = pool.all_transactions();
-                            for tx in pending.into_iter().chain(queued).filter(|tx| tx.is_eip4844())
-                            {
-                                let tx_hash = *tx.hash();
-
-                                // Fetch sidecar from the pool
-                                let Ok(Some(sidecar)) = pool.get_blob(tx_hash) else {
-                                    continue;
-                                };
-                                // Ensure it is a legacy blob
-                                if !sidecar.is_eip4844() {
-                                    continue;
-                                }
-                                // Remove transaction and sidecar from the pool, both are in memory
-                                // now
-                                let Some(tx) = pool.remove_transactions(vec![tx_hash]).pop() else {
-                                    continue;
-                                };
-                                pool.delete_blob(tx_hash);
-
-                                let BlobTransactionSidecarVariant::Eip4844(sidecar) =
-                                    Arc::unwrap_or_clone(sidecar)
-                                else {
-                                    continue;
-                                };
-
-                                let converter = BlobSidecarConverter::new();
-                                let pool = pool.clone();
-                                spawner.spawn_task(async move {
-                                    // Convert sidecar to EIP-7594 format
-                                    let Some(sidecar) = converter.convert(sidecar).await else {
-                                        return;
-                                    };
-
-                                    // Re-insert transaction with the new sidecar
-                                    let origin = tx.origin;
-                                    let Some(tx) = EthPoolTransaction::try_from_eip4844(
-                                        tx.to_consensus(),
-                                        sidecar.into(),
-                                    ) else {
-                                        return;
-                                    };
-                                    let _ = pool.add_transaction(origin, tx).await;
-                                });
-                            }
-
-                            if last_iteration {
-                                break;
-                            }
-
-                            interval.tick().await;
-                        }
-                    });
-                }
             }
         }
     }

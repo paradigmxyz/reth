@@ -1,6 +1,6 @@
 //! Transaction pool errors
 
-use crate::ProofError;
+use crate::{ProofError, TxEip8141ValidationError};
 use std::any::Any;
 
 use alloy_eips::eip4844::BlobTransactionValidationError;
@@ -251,7 +251,7 @@ pub enum Eip7702PoolTransactionError {
 pub enum Eip8141PoolTransactionError {
     /// The transaction violates a structural EIP-8141 constraint.
     #[error("invalid EIP-8141 transaction: {0}")]
-    InvalidTransaction(&'static str),
+    InvalidTransaction(#[source] TxEip8141ValidationError),
     /// Public admission requires EIP-8141 validation-frame simulation.
     #[error("public EIP-8141 mempool validation is unavailable")]
     PublicMempoolValidationUnavailable,
@@ -406,7 +406,10 @@ impl InvalidPoolTransactionError {
                 false
             }
             Self::ExceedsMaxInitCodeSize(_, _) => true,
-            Self::OversizedData { .. } => true,
+            Self::OversizedData { .. } => {
+                // local setting
+                false
+            }
             Self::Underpriced => {
                 // local setting
                 false
@@ -590,5 +593,13 @@ mod tests {
         );
 
         assert!(!err.is_bad_blob_sidecar());
+    }
+
+    #[test]
+    fn oversized_data_is_not_bad_transaction() {
+        let err = InvalidPoolTransactionError::OversizedData { size: 2048, limit: 1024 };
+        assert!(err.is_oversized());
+        assert!(!err.is_bad_transaction());
+        assert!(!PoolError::new(TxHash::ZERO, err).is_bad_transaction());
     }
 }

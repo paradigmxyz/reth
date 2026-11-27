@@ -34,7 +34,9 @@ pub use metric::MetricArgs;
 
 /// `PayloadBuilderArgs` struct for configuring the payload builder
 mod payload_builder;
-pub use payload_builder::{DefaultPayloadBuilderValues, PayloadBuilderArgs};
+pub use payload_builder::{
+    DefaultPayloadBuilderValues, PayloadBuilderArgs, PayloadBuilderDefaultsError,
+};
 
 /// Stage related arguments
 mod stage;

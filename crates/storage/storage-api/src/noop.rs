@@ -5,11 +5,11 @@ pub use crate::bal::NoopBalStore;
 use crate::{
     AccountReader, BalProvider, BalStoreHandle, BlockBodyIndicesProvider, BlockHashReader,
     BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader,
-    ChangeSetReader, HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider,
-    PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader,
-    StateProofProvider, StateProvider, StateProviderBox, StateProviderFactory,
-    StateRangeProviderFactory, StateRangeView, StateReader, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    ChangeSetReader, DurableBlockReader, HashedPostStateProvider, HeaderProvider,
+    NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider, ReceiptProviderIdExt,
+    StageCheckpointReader, StateProofProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateRangeProviderFactory, StateRangeView, StateReader,
+    StateRootProvider, StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -708,6 +708,8 @@ impl<C: Send + Sync, N: NodePrimitives> PersistedBlockSubscriptions for NoopProv
         PersistedBlockNotifications(rx)
     }
 }
+
+impl<C: Send + Sync, N: NodePrimitives> DurableBlockReader for NoopProvider<C, N> {}
 
 impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C, N> {
     fn get_stage_checkpoint(&self, _id: StageId) -> ProviderResult<Option<StageCheckpoint>> {

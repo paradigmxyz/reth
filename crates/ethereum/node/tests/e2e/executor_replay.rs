@@ -13,7 +13,6 @@ use alloy_rpc_types_trace::{
     parity::{Delta, TraceResultsWithTransactionHash},
 };
 use evm2::BaseEvmTypes;
-use jsonrpsee::core::client::ClientT;
 use reth_chainspec::{ChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::E2ETestSetupExt;
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt, TransactionSigned};
@@ -125,7 +124,7 @@ async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
     }
 
     let roots =
-        client.request::<Vec<B256>, _>("debug_intermediateRoots", (block_hash, None::<()>)).await?;
+        client.request::<_, Vec<B256>>("debug_intermediateRoots", (block_hash, None::<()>)).await?;
     assert_eq!(roots.len(), 2);
     assert_eq!(roots.last(), Some(&state_root));
 

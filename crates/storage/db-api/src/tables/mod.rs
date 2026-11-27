@@ -557,8 +557,8 @@ tables! {
 
 /// Packed-encoding view of the [`AccountsTrie`] table.
 ///
-/// Uses [`PackedStoredNibbles`] (33-byte) keys instead of [`StoredNibbles`] (65-byte).
-/// Shares the same underlying MDBX table — this is a type-level view for storage v2.
+/// Uses 33-byte [`PackedStoredNibbles`] keys. Legacy [`StoredNibbles`] keys use one byte per
+/// nibble. Shares the same underlying MDBX table — this is a type-level view for storage v2.
 #[derive(Debug)]
 pub struct PackedAccountsTrie;
 

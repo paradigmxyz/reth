@@ -2,8 +2,9 @@
 
 use crate::{
     BalProvider, BlockReader, BlockReaderIdExt, ChainSpecProvider, ChangeSetReader,
-    DatabaseProviderFactory, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
-    StateProviderFactory, StateRangeProviderFactory, StateReader, StaticFileProviderFactory,
+    DatabaseProviderFactory, DurableBlockReader, PruneCheckpointReader, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderFactory, StateRangeProviderFactory, StateReader,
+    StaticFileProviderFactory,
 };
 use reth_chain_state::{
     CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
@@ -45,6 +46,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
     + PersistedBlockSubscriptions
     + StageCheckpointReader
+    + DurableBlockReader
     + PruneCheckpointReader
     + Clone
     + Unpin
@@ -83,6 +85,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
         + PersistedBlockSubscriptions
         + StageCheckpointReader
+        + DurableBlockReader
         + PruneCheckpointReader
         + Clone
         + Unpin

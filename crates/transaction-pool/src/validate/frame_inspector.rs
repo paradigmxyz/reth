@@ -325,7 +325,7 @@ impl<T: EvmTypes> Inspector<T> for FrameValidationInspector {
             {
                 self.reject("expiry verifier runtime does not match canonical code");
             } else {
-                match <[u8; 8]>::try_from(message.input.as_ref()) {
+                match <[u8; 8]>::try_from(message.input.to_bytes(interp.memory()).as_ref()) {
                     Ok(deadline) => self.expiry = Some(u64::from_be_bytes(deadline)),
                     Err(_) => self.reject("invalid expiry deadline encoding"),
                 }

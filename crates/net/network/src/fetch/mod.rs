@@ -184,6 +184,11 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 continue
             }
 
+            // a flagged peer must not replace an unflagged best peer
+            if maybe_better.1.last_response_likely_bad && !best_peer.1.last_response_likely_bad {
+                continue
+            }
+
             // replace best peer if this peer meets the requirements better
             if maybe_better.1.is_better(best_peer.1, &requirement) {
                 best_peer = maybe_better;
