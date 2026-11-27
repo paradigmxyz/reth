@@ -23,6 +23,13 @@ use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransact
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
 pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
 
+/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
+///
+/// This caps the initial allocation for the size and hash lists, which grow past it only as their
+/// entries are decoded.
+const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
+    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
 /// Smallest encoding of one announcement after its type: a one-byte size and an RLP string
 /// holding its hash.
 const MIN_ENCODED_ANNOUNCEMENT_LEN: usize = 1 + 1 + B256::len_bytes();
@@ -964,13 +971,6 @@ impl Decodable for NewPooledTransactionHashes72 {
     }
 }
 
-/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
-///
-/// This caps the initial allocation for the size and hash lists, which grow past it only as their
-/// entries are decoded.
-const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
-    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-
 /// Decodes the `types`, `sizes` and `hashes` fields of a `NewPooledTransactionHashes` payload.
 ///
 /// Rejects a payload too short to hold one size and one hash per type, and stops decoding
@@ -991,7 +991,10 @@ fn decode_pooled_transaction_hashes_payload(
     let mut sizes_payload = Header::decode_bytes(payload, true)?;
     while !sizes_payload.is_empty() {
         if sizes.len() == types.len() {
-            return Err(alloy_rlp::Error::Custom("more sizes than transaction types"))
+            return Err(alloy_rlp::Error::ListLengthMismatch {
+                expected: types.len(),
+                got: types.len() + 1,
+            })
         }
         sizes.push(usize::decode(&mut sizes_payload)?);
     }
@@ -1495,7 +1498,7 @@ mod tests {
 
         let result = NewPooledTransactionHashes68::decode(&mut encoded.as_slice());
 
-        assert_eq!(result, Err(alloy_rlp::Error::Custom("more sizes than transaction types")));
+        assert_eq!(result, Err(alloy_rlp::Error::ListLengthMismatch { expected: 1, got: 2 }));
     }
 
     #[test]
