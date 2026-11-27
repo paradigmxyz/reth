@@ -30,6 +30,7 @@ tracing.workspace = true
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -64,6 +65,7 @@ serde = [
     "evm2/serde",
 ]
 test-utils = [
+    "reth-concurrency/test-utils",
     "reth-trie-common/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-chainspec/test-utils",

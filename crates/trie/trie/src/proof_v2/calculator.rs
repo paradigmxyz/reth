@@ -1867,6 +1867,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use alloy_trie::proof::AddedRemovedKeys;
     use itertools::Itertools;
+    use rand::prelude::*;
     use reth_trie_common::{
         prefix_set::{PrefixSet, PrefixSetMut},
         updates::TrieUpdatesSorted,
@@ -2550,8 +2551,6 @@ mod tests {
 
     #[reth_concurrency::test]
     fn test_big_trie() {
-        use rand::prelude::*;
-
         reth_tracing::init_test_tracing();
 
         let mut rng = rand::rngs::SmallRng::seed_from_u64(1);

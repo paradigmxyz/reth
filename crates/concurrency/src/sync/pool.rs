@@ -1,14 +1,15 @@
-//! Compute pools backed by Rayon normally and Shuttle logical threads under `fuzz`.
+//! Compute pools backed by Rayon normally and Shuttle logical threads under `fuzz` plus `--cfg
+//! dst`.
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use deterministic::*;
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use rayon::{
     current_num_threads, current_thread_index, in_place_scope, join, scope, spawn, spawn_fifo,
     BroadcastContext, Scope, ThreadPool, ThreadPoolBuildError, ThreadPoolBuilder,
 };
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod deterministic {
     use crate::sync::deterministic::{with_pool_slots, Waiter};
     use shuttle::{

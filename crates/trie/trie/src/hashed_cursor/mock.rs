@@ -4,7 +4,7 @@ use crate::mock::{KeyVisit, KeyVisitType};
 
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
 use alloy_primitives::{map::B256Map, B256, U256};
-use parking_lot::{Mutex, MutexGuard};
+use reth_concurrency::sync::parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::HashedPostState;

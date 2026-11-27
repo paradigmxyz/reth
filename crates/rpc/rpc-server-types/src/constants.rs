@@ -1,3 +1,4 @@
+use reth_concurrency::sync::thread;
 use std::{cmp::max, time::Duration};
 
 /// The default port for the http server
@@ -42,7 +43,7 @@ pub fn default_max_tracing_requests() -> usize {
     // We reserve 2 cores for the rest of the system
     const RESERVED: usize = 2;
 
-    std::thread::available_parallelism()
+    thread::available_parallelism()
         .map_or(25, |cpus| max(cpus.get().saturating_sub(RESERVED), RESERVED))
 }
 

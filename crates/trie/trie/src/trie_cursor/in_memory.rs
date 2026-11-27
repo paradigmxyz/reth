@@ -356,7 +356,7 @@ mod tests {
     use super::*;
     use crate::trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory};
     use assert_matches::assert_matches;
-    use parking_lot::Mutex;
+    use reth_concurrency::sync::parking_lot::Mutex;
     use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;

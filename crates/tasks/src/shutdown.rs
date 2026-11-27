@@ -4,10 +4,11 @@ use futures_util::{
     future::{FusedFuture, Shared},
     FutureExt,
 };
+use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
 use std::{
     future::Future,
     pin::Pin,
-    sync::{atomic::AtomicUsize, Arc},
+    sync::Arc,
     task::{ready, Context, Poll},
 };
 use tokio::sync::oneshot;
@@ -58,14 +59,14 @@ pub struct GracefulShutdownGuard(Arc<AtomicUsize>);
 
 impl GracefulShutdownGuard {
     pub(crate) fn new(counter: Arc<AtomicUsize>) -> Self {
-        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        counter.fetch_add(1, Ordering::SeqCst);
         Self(counter)
     }
 }
 
 impl Drop for GracefulShutdownGuard {
     fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -103,7 +104,8 @@ pub fn signal() -> (Signal, Shutdown) {
     (Signal(sender), Shutdown(receiver.shared()))
 }
 
-#[cfg(test)]
+// These tests exercise native Tokio tasks and OS-thread shutdown, not logical workers.
+#[cfg(all(test, not(all(feature = "fuzz", dst))))]
 mod tests {
     use super::*;
     use futures_util::future::join_all;

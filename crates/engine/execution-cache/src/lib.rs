@@ -22,9 +22,8 @@ pub use txpool::*;
 
 use alloy_primitives::B256;
 use metrics::{Counter, Histogram};
-use parking_lot::Mutex;
+use reth_concurrency::sync::{parking_lot::Mutex, time::FastInstant as Instant};
 use reth_metrics::Metrics;
-use reth_primitives_traits::FastInstant as Instant;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug, instrument, warn};
 

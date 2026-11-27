@@ -8,8 +8,8 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
+use reth_concurrency::sync::rayon::prelude::*;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
     models::{

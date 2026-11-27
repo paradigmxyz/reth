@@ -29,6 +29,7 @@ reth-evm.workspace = true
 reth-eth-wire.workspace = true
 reth-eth-wire-types.workspace = true
 reth-ecies.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks.workspace = true
 reth-transaction-pool.workspace = true
 reth-storage-api.workspace = true
@@ -71,7 +72,6 @@ tracing.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
-rayon.workspace = true
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 derive_more.workspace = true
@@ -106,8 +106,18 @@ lean_vm.workspace = true
 test-case.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
+tokio = { workspace = true, features = ["test-util"] }
 
 [features]
+fuzz = [
+    "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
+    "reth-evm-ethereum?/fuzz",
+    "reth-evm/fuzz",
+    "reth-network/fuzz",
+    "reth-provider/fuzz",
+    "reth-trie/fuzz",
+]
 serde = [
     "dep:serde",
     "secp256k1/serde",
@@ -151,6 +161,7 @@ test-utils = [
     "dep:reth-evm-ethereum",
     "reth-evm-ethereum?/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "reth-stages-types/test-utils",
     "reth-trie/test-utils",
     "reth-evm/test-utils",

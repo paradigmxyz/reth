@@ -130,8 +130,8 @@ mod tests {
         tree_state.in_memory_state().state_by_hash(hash(block)).unwrap().chain_hashes().collect()
     }
 
-    #[tokio::test]
-    async fn test_tree_state_insert_executed() {
+    #[reth_concurrency::test]
+    fn test_tree_state_insert_executed() {
         let (tree_state, _, mut canonical_in_memory_state_writer) = tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..4).collect::<Vec<_>>();
         let persisted_hash = blocks[0].recovered_block().parent_hash();
@@ -170,8 +170,8 @@ mod tests {
         assert!(tree_state.blocks_by_hash(B256::random()).is_none());
     }
 
-    #[tokio::test]
-    async fn test_tree_state_insert_executed_with_reorg() {
+    #[reth_concurrency::test]
+    fn test_tree_state_insert_executed_with_reorg() {
         let (tree_state, canonical_in_memory_state, mut canonical_in_memory_state_writer) =
             tree_state();
         let mut test_block_builder = TestBlockBuilder::eth();
@@ -275,8 +275,8 @@ mod tests {
         assert_eq!(anchor_hash, hash(&blocks[1]));
     }
 
-    #[tokio::test]
-    async fn test_tree_state_remove_canonical_until() {
+    #[reth_concurrency::test]
+    fn test_tree_state_remove_canonical_until() {
         let (tree_state, canonical_in_memory_state, mut canonical_in_memory_state_writer) =
             tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
@@ -297,8 +297,8 @@ mod tests {
         assert_removed_through_block_2(&tree_state, &canonical_in_memory_state, &blocks);
     }
 
-    #[tokio::test]
-    async fn test_tree_state_remove_canonical_until_finalized() {
+    #[reth_concurrency::test]
+    fn test_tree_state_remove_canonical_until_finalized() {
         let (tree_state, canonical_in_memory_state, mut canonical_in_memory_state_writer) =
             tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
@@ -319,8 +319,8 @@ mod tests {
         assert_removed_through_block_2(&tree_state, &canonical_in_memory_state, &blocks);
     }
 
-    #[tokio::test]
-    async fn test_tree_state_remove_canonical_until_lower_finalized() {
+    #[reth_concurrency::test]
+    fn test_tree_state_remove_canonical_until_lower_finalized() {
         let (tree_state, canonical_in_memory_state, mut canonical_in_memory_state_writer) =
             tree_state();
         let blocks = TestBlockBuilder::eth().get_executed_blocks(1..6).collect::<Vec<_>>();
@@ -341,8 +341,8 @@ mod tests {
         assert_removed_through_block_2(&tree_state, &canonical_in_memory_state, &blocks);
     }
 
-    #[tokio::test]
-    async fn test_tree_state_remove_canonical_until_prunes_finalized_sidechains() {
+    #[reth_concurrency::test]
+    fn test_tree_state_remove_canonical_until_prunes_finalized_sidechains() {
         let (tree_state, canonical_in_memory_state, mut canonical_in_memory_state_writer) =
             tree_state();
         let mut builder = TestBlockBuilder::eth();

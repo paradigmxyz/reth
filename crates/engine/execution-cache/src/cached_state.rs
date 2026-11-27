@@ -6,21 +6,16 @@ use alloy_primitives::{
 };
 use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::{Counter, Gauge, Histogram};
-use parking_lot::Once;
+use reth_concurrency::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    parking_lot::Once,
+};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::EvmStateProvider;
 use reth_trie_common::bundle_state::BundleState;
-use std::{
-    cell::Cell,
-    fmt,
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{cell::Cell, fmt, sync::Arc, time::Duration};
 use tracing::{debug_span, instrument, trace, warn};
 
 /// Alignment in bytes for entries in the fixed-cache.

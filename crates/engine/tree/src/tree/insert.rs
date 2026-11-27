@@ -17,13 +17,14 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
+use reth_concurrency::sync::time::FastInstant as Instant;
 use reth_consensus::Consensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ExecutionPayload, SlowBlockInfo};
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,

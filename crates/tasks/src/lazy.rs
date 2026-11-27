@@ -1,8 +1,13 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
-use parking_lot::Mutex;
-use std::sync::{Arc, OnceLock};
+use reth_concurrency::sync::{parking_lot::Mutex, OnceLock};
+use std::sync::Arc;
 use tokio::sync::oneshot;
+
+#[cfg(all(feature = "fuzz", dst))]
+use reth_concurrency::sync::time::{self, Duration};
+#[cfg(all(feature = "fuzz", dst))]
+use tokio::sync::oneshot::error::TryRecvError;
 
 /// Handle to a value computed on a background thread.
 ///
@@ -55,7 +60,25 @@ impl<T: Send + 'static> LazyHandle<T> {
                 .lock()
                 .take()
                 .expect("LazyHandle receiver already taken without value being set");
-            rx.blocking_recv().expect("LazyHandle task dropped without producing a value")
+            #[cfg(not(all(feature = "fuzz", dst)))]
+            {
+                rx.blocking_recv().expect("LazyHandle task dropped without producing a value")
+            }
+            #[cfg(all(feature = "fuzz", dst))]
+            {
+                // Poll and yield to the simulator; Tokio's blocking receive would
+                // park the simulator's only OS thread.
+                let mut rx = rx;
+                loop {
+                    match rx.try_recv() {
+                        Ok(value) => break value,
+                        Err(TryRecvError::Empty) => time::sleep(Duration::from_millis(1)),
+                        Err(TryRecvError::Closed) => {
+                            panic!("LazyHandle task dropped without producing a value")
+                        }
+                    }
+                }
+            }
         })
     }
 

@@ -20,6 +20,7 @@ Environment variables:
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.request
 import urllib.error
@@ -81,51 +82,53 @@ def main():
     latency_improved = 1 if mean_change < 0 else 0
     throughput_improved = 1 if gas_change > 0 else 0
 
-    big_blocks = "true" if summary.get("big_blocks", False) else "false"
+    big_blocks = bool(summary.get("big_blocks", False))
     warmup_blocks = summary.get("warmup_blocks", 0) or 0
 
-    def esc(s):
-        return str(s).replace("'", "\\'")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", ch_database):
+        print(f"Invalid ClickHouse database name: {ch_database!r}", file=sys.stderr)
+        sys.exit(1)
 
-    insert = f"""
-    INSERT INTO {ch_database}.{ch_table} (
-        workflow_name, chain,
-        baseline_ref, baseline_commit,
-        feature_ref, feature_commit,
-        blocks,
-        baseline_total_latency_ms, baseline_gas_per_second,
-        baseline_latency_mean_ms, baseline_latency_median_ms,
-        baseline_latency_p90_ms, baseline_latency_p99_ms,
-        feature_total_latency_ms, feature_gas_per_second,
-        feature_latency_mean_ms, feature_latency_median_ms,
-        feature_latency_p90_ms, feature_latency_p99_ms,
-        mean_latency_change_percent, gas_per_second_change_percent,
-        latency_improved, throughput_improved,
-        warmup_blocks, big_blocks,
-        grafana_benchmark_url, github_diff_url, argo_workflow_url,
-        baseline_persistence_wait_mean_ms, baseline_execution_cache_wait_mean_ms,
-        baseline_sparse_trie_wait_mean_ms,
-        feature_persistence_wait_mean_ms, feature_execution_cache_wait_mean_ms,
-        feature_sparse_trie_wait_mean_ms
-    ) VALUES (
-        '{esc(args.workflow_name)}', '{esc(args.chain)}',
-        '{esc(baseline["ref"])}', '{esc(baseline["ref"])}',
-        '{esc(feature["ref"])}', '{esc(feature["ref"])}',
-        {blocks},
-        {b_processing_ms}, {b_gas_per_second},
-        {b_stats["mean_ms"]}, {b_stats["p50_ms"]},
-        {b_stats["p90_ms"]}, {b_stats["p99_ms"]},
-        {f_processing_ms}, {f_gas_per_second},
-        {f_stats["mean_ms"]}, {f_stats["p50_ms"]},
-        {f_stats["p90_ms"]}, {f_stats["p99_ms"]},
-        {mean_change}, {gas_change},
-        {latency_improved}, {throughput_improved},
-        {warmup_blocks}, '{big_blocks}',
-        '{esc(args.grafana_url)}', '{esc(args.github_diff_url)}', '{esc(args.job_url)}',
-        {b_persist}, {b_exec_cache}, {b_sparse},
-        {f_persist}, {f_exec_cache}, {f_sparse}
-    );
-    """
+    row = {
+        "workflow_name": str(args.workflow_name),
+        "chain": str(args.chain),
+        "baseline_ref": str(baseline["ref"]),
+        "baseline_commit": str(baseline["ref"]),
+        "feature_ref": str(feature["ref"]),
+        "feature_commit": str(feature["ref"]),
+        "blocks": int(blocks),
+        "baseline_total_latency_ms": float(b_processing_ms),
+        "baseline_gas_per_second": float(b_gas_per_second),
+        "baseline_latency_mean_ms": float(b_stats["mean_ms"]),
+        "baseline_latency_median_ms": float(b_stats["p50_ms"]),
+        "baseline_latency_p90_ms": float(b_stats["p90_ms"]),
+        "baseline_latency_p99_ms": float(b_stats["p99_ms"]),
+        "feature_total_latency_ms": float(f_processing_ms),
+        "feature_gas_per_second": float(f_gas_per_second),
+        "feature_latency_mean_ms": float(f_stats["mean_ms"]),
+        "feature_latency_median_ms": float(f_stats["p50_ms"]),
+        "feature_latency_p90_ms": float(f_stats["p90_ms"]),
+        "feature_latency_p99_ms": float(f_stats["p99_ms"]),
+        "mean_latency_change_percent": float(mean_change),
+        "gas_per_second_change_percent": float(gas_change),
+        "latency_improved": int(latency_improved),
+        "throughput_improved": int(throughput_improved),
+        "warmup_blocks": int(warmup_blocks),
+        "big_blocks": big_blocks,
+        "grafana_benchmark_url": str(args.grafana_url),
+        "github_diff_url": str(args.github_diff_url),
+        "argo_workflow_url": str(args.job_url),
+        "baseline_persistence_wait_mean_ms": float(b_persist),
+        "baseline_execution_cache_wait_mean_ms": float(b_exec_cache),
+        "baseline_sparse_trie_wait_mean_ms": float(b_sparse),
+        "feature_persistence_wait_mean_ms": float(f_persist),
+        "feature_execution_cache_wait_mean_ms": float(f_exec_cache),
+        "feature_sparse_trie_wait_mean_ms": float(f_sparse),
+    }
+
+    # Send the row as JSON data rather than building SQL values by hand.
+    query = f"INSERT INTO {ch_database}.{ch_table} FORMAT JSONEachRow"
+    payload = json.dumps(row, allow_nan=False) + "\n"
 
     # Build ClickHouse HTTP URL (credentials via headers, never in URL)
     host = ch_host.rstrip("/")
@@ -134,8 +137,8 @@ def main():
 
     url = f"{host}/?database={ch_database}"
 
-    req = urllib.request.Request(url, data=insert.encode("utf-8"), method="POST")
-    req.add_header("Content-Type", "text/plain")
+    req = urllib.request.Request(url, data=f"{query}\n{payload}".encode("utf-8"), method="POST")
+    req.add_header("Content-Type", "application/x-ndjson")
     req.add_header("X-ClickHouse-User", ch_user)
     req.add_header("X-ClickHouse-Key", ch_password)
 

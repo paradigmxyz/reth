@@ -2,17 +2,15 @@
 
 use alloy_eips::eip7685::RequestsOrHash;
 use alloy_primitives::{keccak256, Bytes, B256, U64};
-use alloy_rpc_types_engine::{ForkchoiceState, MAX_DEPENDENCY_PROOF_BYTES};
-use jsonrpsee::{
-    core::client::{ClientT, Error as ClientError},
-    rpc_params,
+use alloy_rpc_types_engine::{
+    ExecutionPayloadBodiesV3, ExecutionPayloadEnvelopeV7, ForkchoiceState,
+    ForkchoiceUpdatedResponseV2, PayloadStatusV2, MAX_DEPENDENCY_PROOF_BYTES,
 };
 use reth_chainspec::EthereumHardfork;
 use reth_db::{tables, transaction::DbTxMut};
 use reth_e2e_test_utils::{eth_payload_attributes, test_chain_spec, E2ETestSetupExt};
-use reth_node_ethereum::{EthEngineTypes, EthereumNode};
+use reth_node_ethereum::EthereumNode;
 use reth_provider::{DBProvider, DatabaseProviderFactory, DependencyProofProvider};
-use reth_rpc_api::EngineApiClient;
 use serde_json::{json, Value};
 
 #[tokio::test]
@@ -31,15 +29,15 @@ async fn payload_proofs_roundtrip_validate_and_survive_restart() -> eyre::Result
     let mut attrs = eth_payload_attributes(&spec, 1);
     attrs.inclusion_lists = Some(vec![]);
     attrs.target_gas_limit = Some(30_000_000);
-    let fcu = EngineApiClient::<EthEngineTypes>::fork_choice_updated_v6(
-        &engine,
-        state,
-        Some(attrs),
-        None,
-    )
-    .await?;
+    let fcu = engine
+        .request::<_, ForkchoiceUpdatedResponseV2>(
+            "engine_forkchoiceUpdatedV6",
+            (state, Some(attrs), Value::Null),
+        )
+        .await?;
     let id = fcu.payload_id.ok_or_else(|| eyre::eyre!("FCU V6 did not start a payload job"))?;
-    let envelope = EngineApiClient::<EthEngineTypes>::get_payload_v7(&engine, id).await?;
+    let envelope =
+        engine.request::<_, ExecutionPayloadEnvelopeV7>("engine_getPayloadV7", (id,)).await?;
     assert!(envelope.execution_payload.dependency_proof.is_empty());
     let payload = envelope.execution_payload;
     let v1 = &payload.payload_inner.payload_inner.payload_inner.payload_inner;
@@ -48,32 +46,23 @@ async fn payload_proofs_roundtrip_validate_and_survive_restart() -> eyre::Result
     let mut missing = serde_json::to_value(&payload)?;
     missing.as_object_mut().unwrap().remove("dependencyProof");
     let missing = engine
-        .request::<Value, _>(
+        .request::<_, Value>(
             "engine_newPayloadV7",
-            rpc_params![
-                missing,
-                Vec::<B256>::new(),
-                B256::ZERO,
-                requests.clone(),
-                Vec::<Value>::new()
-            ],
+            (missing, Vec::<B256>::new(), B256::ZERO, requests.clone(), Vec::<Value>::new()),
         )
         .await
         .unwrap_err();
-    assert!(matches!(missing, ClientError::Call(error) if error.code() == -32602));
+    assert_eq!(missing.as_error_resp().unwrap().code, -32602);
 
     // Oversized proofs fail before block-hash computation.
     let mut oversized = payload.clone();
     oversized.dependency_proof = vec![0; MAX_DEPENDENCY_PROOF_BYTES + 1].into();
-    let status = EngineApiClient::<EthEngineTypes>::new_payload_v7(
-        &engine,
-        oversized,
-        vec![],
-        B256::ZERO,
-        requests.clone(),
-        vec![],
-    )
-    .await?;
+    let status = engine
+        .request::<_, PayloadStatusV2>(
+            "engine_newPayloadV7",
+            (oversized, Vec::<Value>::new(), B256::ZERO, requests.clone(), Vec::<Value>::new()),
+        )
+        .await?;
     assert_eq!(
         status.payload_inner.status.validation_error(),
         Some(
@@ -85,15 +74,18 @@ async fn payload_proofs_roundtrip_validate_and_survive_restart() -> eyre::Result
     // Changed proof bytes with the old advertised hash fail the header commitment check.
     let mut changed = payload.clone();
     changed.dependency_proof = Bytes::from_static(&[1]);
-    let status = EngineApiClient::<EthEngineTypes>::new_payload_v7(
-        &engine,
-        changed.clone(),
-        vec![],
-        B256::ZERO,
-        requests.clone(),
-        vec![],
-    )
-    .await?;
+    let status = engine
+        .request::<_, PayloadStatusV2>(
+            "engine_newPayloadV7",
+            (
+                changed.clone(),
+                Vec::<Value>::new(),
+                B256::ZERO,
+                requests.clone(),
+                Vec::<Value>::new(),
+            ),
+        )
+        .await?;
     assert!(status.payload_inner.is_invalid());
     assert_eq!(status.payload_inner.latest_valid_hash, None);
 
@@ -102,106 +94,114 @@ async fn payload_proofs_roundtrip_validate_and_survive_restart() -> eyre::Result
     let mut header = built.block().header().clone();
     header.dependency_proof_hash = Some(keccak256(&changed.dependency_proof));
     changed.payload_inner.payload_inner.payload_inner.payload_inner.block_hash = header.hash_slow();
-    let status = EngineApiClient::<EthEngineTypes>::new_payload_v7(
-        &engine,
-        changed,
-        vec![],
-        B256::ZERO,
-        requests.clone(),
-        vec![],
-    )
-    .await?;
+    let status = engine
+        .request::<_, PayloadStatusV2>(
+            "engine_newPayloadV7",
+            (changed, Vec::<Value>::new(), B256::ZERO, requests.clone(), Vec::<Value>::new()),
+        )
+        .await?;
     assert_eq!(
         status.payload_inner.status.validation_error(),
         Some("invalid EIP-8288 aggregate proof")
     );
     drop(built);
 
-    let status = EngineApiClient::<EthEngineTypes>::new_payload_v7(
-        &engine,
-        payload.clone(),
-        vec![],
-        B256::ZERO,
-        requests,
-        vec![],
-    )
-    .await?;
+    let status = engine
+        .request::<_, PayloadStatusV2>(
+            "engine_newPayloadV7",
+            (payload.clone(), Vec::<Value>::new(), B256::ZERO, requests, Vec::<Value>::new()),
+        )
+        .await?;
     assert!(status.is_valid());
     assert_eq!(status.inclusion_list_satisfied, Some(true));
     assert_eq!(node.inner.provider.dependency_proof(hash)?, Some(Bytes::new()));
     let mut changed_known = payload.clone();
     changed_known.dependency_proof = Bytes::from_static(&[1]);
-    let status = EngineApiClient::<EthEngineTypes>::new_payload_v7(
-        &engine,
-        changed_known,
-        vec![],
-        B256::ZERO,
-        RequestsOrHash::default(),
-        vec![],
-    )
-    .await?;
+    let status = engine
+        .request::<_, PayloadStatusV2>(
+            "engine_newPayloadV7",
+            (
+                changed_known,
+                Vec::<Value>::new(),
+                B256::ZERO,
+                RequestsOrHash::default(),
+                Vec::<Value>::new(),
+            ),
+        )
+        .await?;
     assert!(status.payload_inner.is_invalid());
     assert_eq!(status.payload_inner.latest_valid_hash, None);
 
-    let old_version = EngineApiClient::<EthEngineTypes>::new_payload_v6(
-        &engine,
-        payload.payload_inner,
-        vec![],
-        B256::ZERO,
-        RequestsOrHash::default(),
-        vec![],
-    )
-    .await
-    .unwrap_err();
-    assert!(matches!(old_version, ClientError::Call(error) if error.code() == -38005));
+    let old_version = engine
+        .request::<_, PayloadStatusV2>(
+            "engine_newPayloadV6",
+            (
+                payload.payload_inner,
+                Vec::<Value>::new(),
+                B256::ZERO,
+                RequestsOrHash::default(),
+                Vec::<Value>::new(),
+            ),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(old_version.as_error_resp().unwrap().code, -38005);
 
     let state = ForkchoiceState {
         head_block_hash: hash,
         safe_block_hash: genesis,
         finalized_block_hash: genesis,
     };
-    assert!(EngineApiClient::<EthEngineTypes>::fork_choice_updated_v6(&engine, state, None, None)
+    assert!(engine
+        .request::<_, ForkchoiceUpdatedResponseV2>(
+            "engine_forkchoiceUpdatedV6",
+            (state, Value::Null, Value::Null,)
+        )
         .await?
         .payload_status
         .is_valid());
-    let bodies = EngineApiClient::<EthEngineTypes>::get_payload_bodies_by_hash_v3(
-        &engine,
-        vec![B256::repeat_byte(99), genesis, hash],
-    )
-    .await?;
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV3>(
+            "engine_getPayloadBodiesByHashV3",
+            (vec![B256::repeat_byte(99), genesis, hash],),
+        )
+        .await?;
     assert_eq!(bodies[0], None);
     assert_eq!(bodies[1].as_ref().unwrap().dependency_proof, None);
     assert_eq!(bodies[2].as_ref().unwrap().dependency_proof, Some(Bytes::new()));
-    let range = EngineApiClient::<EthEngineTypes>::get_payload_bodies_by_range_v3(
-        &engine,
-        U64::from(1),
-        U64::from(2),
-    )
-    .await?;
+    let range = engine
+        .request::<_, ExecutionPayloadBodiesV3>(
+            "engine_getPayloadBodiesByRangeV3",
+            (U64::from(1), U64::from(2)),
+        )
+        .await?;
     assert_eq!(range, vec![bodies[2].clone()]);
-    let error = EngineApiClient::<EthEngineTypes>::get_payload_bodies_by_range_v3(
-        &engine,
-        U64::ZERO,
-        U64::from(1),
-    )
-    .await
-    .unwrap_err();
-    assert!(matches!(error, ClientError::Call(error) if error.code() == -32602));
-    let error =
-        EngineApiClient::<EthEngineTypes>::get_payload_bodies_by_hash_v3(&engine, vec![hash; 1025])
-            .await
-            .unwrap_err();
-    assert!(matches!(error, ClientError::Call(error) if error.code() == -38004));
+    let error = engine
+        .request::<_, ExecutionPayloadBodiesV3>(
+            "engine_getPayloadBodiesByRangeV3",
+            (U64::ZERO, U64::from(1)),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.as_error_resp().unwrap().code, -32602);
+    let error = engine
+        .request::<_, ExecutionPayloadBodiesV3>(
+            "engine_getPayloadBodiesByHashV3",
+            (vec![hash; 1025],),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.as_error_resp().unwrap().code, -38004);
     drop(engine);
 
     let node = node.restart().await?;
     let engine = node.auth_server_handle().http_client();
-    let bodies = EngineApiClient::<EthEngineTypes>::get_payload_bodies_by_range_v3(
-        &engine,
-        U64::from(1),
-        U64::from(1),
-    )
-    .await?;
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV3>(
+            "engine_getPayloadBodiesByRangeV3",
+            (U64::from(1), U64::from(1)),
+        )
+        .await?;
     assert_eq!(bodies[0].as_ref().unwrap().dependency_proof, Some(Bytes::new()));
     assert_eq!(serde_json::to_value(&bodies)?[0]["dependencyProof"], json!("0x"));
 
@@ -209,9 +209,9 @@ async fn payload_proofs_roundtrip_validate_and_survive_restart() -> eyre::Result
     let provider = node.inner.provider.database_provider_rw()?;
     provider.tx_ref().delete::<tables::DependencyProofs>(hash, None)?;
     provider.commit()?;
-    let bodies =
-        EngineApiClient::<EthEngineTypes>::get_payload_bodies_by_hash_v3(&engine, vec![hash])
-            .await?;
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV3>("engine_getPayloadBodiesByHashV3", (vec![hash],))
+        .await?;
     assert_eq!(bodies[0].as_ref().unwrap().dependency_proof, None);
     assert_eq!(serde_json::to_value(&bodies)?[0]["dependencyProof"], Value::Null);
     Ok(())

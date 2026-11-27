@@ -13,7 +13,6 @@ use crate::{
     ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
 use alloy_primitives::{BlockNumber, B256};
-use parking_lot::Mutex;
 use reth_chain_state::{BlockState, ExecutedBlock, InMemoryState, PreservedSparseTrie};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
@@ -25,8 +24,6 @@ use reth_storage_api::{
     BlockNumReader, ChangeSetReader, DBProvider, PruneCheckpointReader, StageCheckpointReader,
     StorageChangeSetReader, StorageSettingsCache,
 };
-#[cfg(feature = "rayon")]
-use reth_tasks::WorkerPool;
 use reth_trie::{
     proof_v2::ProofCursorMetrics, updates::TrieUpdatesSorted, HashedPostStateSorted,
     TrieInputSorted,
@@ -36,11 +33,23 @@ use std::{
     ops::RangeInclusive,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
-    time::Instant,
 };
 use tracing::{debug, trace};
+
+#[cfg(not(all(feature = "fuzz", dst)))]
+use parking_lot::Mutex;
+#[cfg(not(all(feature = "fuzz", dst)))]
+use std::{sync::OnceLock, time::Instant};
+
+#[cfg(all(feature = "fuzz", dst))]
+use reth_concurrency::sync::{parking_lot::Mutex, time::Instant, OnceLock};
+
+#[cfg(feature = "rayon")]
+use reth_concurrency::sync::rayon;
+#[cfg(feature = "rayon")]
+use reth_tasks::WorkerPool;
 
 /// Manages state trie and execution overlays for in-memory blocks.
 ///
@@ -1022,17 +1031,15 @@ mod tests {
     use alloy_primitives::{map::HashMap, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
+    use reth_concurrency::sync::{channel::mpsc, thread};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::Account;
-    #[cfg(feature = "rayon")]
-    use reth_tasks::WorkerPool;
     use reth_trie::{updates::TrieUpdatesSorted, HashedPostState, HashedStorage, SortedTrieData};
     use reth_trie_common::bundle_state::BundleState;
-    use std::{
-        sync::{mpsc, Arc},
-        thread,
-        time::Duration,
-    };
+    use std::{sync::Arc, time::Duration};
+
+    #[cfg(feature = "rayon")]
+    use reth_tasks::WorkerPool;
 
     fn with_unique_state(
         block: &ExecutedBlock<EthPrimitives>,
@@ -1357,7 +1364,7 @@ mod tests {
         in_memory_state_writer.insert_executed(blocks[1].clone());
         manager.precompute_child_execution_overlays(blocks[1].recovered_block().hash());
         let key = OverlayCacheKey { anchor_hash, tip_hash: blocks[1].recovered_block().hash() };
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let deadline = Instant::now() + Duration::from_secs(1);
         while !manager
             .inner
             .execution_overlays
@@ -1365,7 +1372,7 @@ mod tests {
             .get(&key)
             .is_some_and(|entry| matches!(entry.value(), OverlayCacheEntry::Ready(_)))
         {
-            assert!(std::time::Instant::now() < deadline, "execution overlay was not precomputed");
+            assert!(Instant::now() < deadline, "execution overlay was not precomputed");
             thread::sleep(Duration::from_millis(10));
         }
         assert!(!manager.inner.execution_overlays.entries.contains_key(&OverlayCacheKey {
@@ -1401,12 +1408,12 @@ mod tests {
         manager.precompute_execution_overlay(tip_hash, new_anchor);
 
         let key = OverlayCacheKey { anchor_hash: new_anchor, tip_hash };
-        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let deadline = Instant::now() + Duration::from_secs(1);
         let overlay = loop {
             if let Some(overlay) = manager.inner.execution_overlays.ready(&key) {
                 break overlay
             }
-            assert!(std::time::Instant::now() < deadline, "new anchor overlay was not precomputed");
+            assert!(Instant::now() < deadline, "new anchor overlay was not precomputed");
             thread::sleep(Duration::from_millis(10));
         };
         assert_eq!(
