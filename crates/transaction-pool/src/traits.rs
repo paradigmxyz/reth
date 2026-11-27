@@ -1537,6 +1537,11 @@ pub trait PoolTransaction:
         (!pooled.is_eip4844()).then_some(pooled)
     }
 
+    /// Returns the shared blob cell availability, if this is a blob transaction.
+    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
+        None
+    }
+
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1590,11 +1595,6 @@ pub trait PoolTransaction:
 pub trait EthPoolTransaction: PoolTransaction {
     /// Extracts the blob sidecar from the transaction.
     fn take_blob(&mut self) -> EthBlobTransactionSidecar;
-
-    /// Returns the shared blob cell availability, if this is a blob transaction.
-    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
-        None
-    }
 
     /// A specialization for the EIP-4844 transaction type.
     /// Tries to reattach the blob sidecar to the transaction.
@@ -1821,6 +1821,10 @@ impl PoolTransaction for EthPooledTransaction {
         pooled.clear_eip7594_blobs();
         Some(pooled)
     }
+
+    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
+        Self::blob_cell_availability(self)
+    }
 }
 
 impl<T: Typed2718> Typed2718 for EthPooledTransaction<T> {
@@ -1913,10 +1917,6 @@ impl EthPoolTransaction for EthPooledTransaction {
         } else {
             EthBlobTransactionSidecar::None
         }
-    }
-
-    fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
-        Self::blob_cell_availability(self)
     }
 
     fn try_into_pooled_eip4844(

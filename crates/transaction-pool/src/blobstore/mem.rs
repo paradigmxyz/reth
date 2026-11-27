@@ -1,11 +1,11 @@
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTxCellSidecar,
-    PooledBlobSidecar, RebuiltSidecars,
+    without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
+    eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -228,6 +228,18 @@ impl BlobStore for InMemoryBlobStore {
     // Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         Ok(self.inner.get(&tx))
+    }
+
+    fn get_without_blobs(
+        &self,
+        tx: B256,
+    ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
+        // Held across both lookups, so a move from cells to full is not missed.
+        let store = self.inner.store.read();
+        if let Some(sidecar) = store.get(&tx) {
+            return Ok(sidecar.as_eip7594().map(without_blobs))
+        }
+        Ok(self.inner.cells.read().get(&tx).map(|cells| cells.without_blobs()))
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
