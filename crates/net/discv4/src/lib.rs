@@ -999,9 +999,18 @@ impl Discv4Service {
         let removed = self.kbuckets.remove(&key);
         if removed {
             // A ping sent for the removed entry must not stand in for the proof ping of a later
-            // entry of the same node, which its reason doesn't cover.
-            self.pending_pings.remove(&node_id);
-            self.queued_pings.retain(|(node, _)| node.id != node_id);
+            // entry of the same node, which its reason doesn't cover. A bond ping is about the
+            // address the node pinged us from rather than the entry, so it is kept.
+            if self
+                .pending_pings
+                .get(&node_id)
+                .is_some_and(|ping| !matches!(ping.reason, PingReason::EstablishBond))
+            {
+                self.pending_pings.remove(&node_id);
+            }
+            self.queued_pings.retain(|(node, reason)| {
+                node.id != node_id || matches!(reason, PingReason::EstablishBond)
+            });
             trace!(target: "discv4", ?node_id, "removed node");
             self.notify(DiscoveryUpdate::Removed(node_id));
         }
@@ -4392,5 +4401,31 @@ mod tests {
         let echo = service.pending_pings[&record.id].echo_hash;
         service.on_pong(pong(&service, echo), record.udp_addr(), record.id);
         assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_remove_node_keeps_bond_ping_to_other_address() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record = NodeRecord::new("10.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let other = NodeRecord::new("10.0.0.3:30303".parse().unwrap(), record.id);
+        assert!(service.add_node(record));
+
+        // the node pings from another address while the initial ping is pending, so the bond
+        // ping to that address is queued
+        let ping = Ping {
+            from: other.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, other.udp_addr(), other.id, B256::random());
+        assert_eq!(service.queued_pings.len(), 1);
+
+        // removing the stored entry drops its initial ping but not the bond ping
+        assert!(service.remove_node(record.id));
+        service.ping_buffered();
+        let request = &service.pending_pings[&record.id];
+        assert_eq!(request.node.address, other.address);
+        assert!(matches!(request.reason, PingReason::EstablishBond));
     }
 }
