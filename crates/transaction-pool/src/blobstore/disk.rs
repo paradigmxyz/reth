@@ -338,10 +338,12 @@ impl BlobStore for DiskFileBlobStore {
         tx: B256,
     ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
         // The blob cache can outlive a deleted sidecar, so cells stored since are read from disk.
-        if !self.inner.cell_sidecars.read().contains_key(&tx) &&
-            let Some(sidecar) = self.inner.blob_cache.lock().get(&tx)
-        {
-            return Ok(sidecar.as_eip7594().map(without_blobs))
+        if !self.inner.cell_sidecars.read().contains_key(&tx) {
+            // Cloned out, so the proofs aren't copied under the lock.
+            let cached = self.inner.blob_cache.lock().get(&tx).cloned();
+            if let Some(sidecar) = cached {
+                return Ok(sidecar.as_eip7594().map(without_blobs))
+            }
         }
         Ok(self.inner.read_one(tx)?.and_then(|stored| match stored {
             // Proofs of cells not kept are unchecked, so cells that rebuild the blobs serve
