@@ -778,8 +778,20 @@ where
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            self.on_new_blob_sidecar(&hash, &sidecar);
-            self.insert_blob(hash, sidecar);
+            if sidecar.cells().is_none() {
+                self.on_new_blob_sidecar(&hash, &sidecar);
+                self.insert_blob(hash, sidecar);
+            } else {
+                let recoverable = sidecar.availability().is_recoverable();
+                self.insert_blob(hash, sidecar);
+                // A sidecar fetched as cells has no blobs, so listeners get it once rebuilt.
+                if recoverable &&
+                    !self.blob_transaction_sidecar_listener.lock().is_empty() &&
+                    let Ok(Some(full)) = self.blob_store.get(hash)
+                {
+                    self.on_new_blob_sidecar(&hash, &full);
+                }
+            }
         }
 
         // Delete replaced blob sidecar if any
@@ -1378,9 +1390,13 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
+    fn insert_blob(&self, hash: TxHash, mut blob: PooledBlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
-        if let Err(err) = self.blob_store.insert(hash, blob) {
+        let result = match blob.take_cells() {
+            Some(cells) => self.blob_store.insert_cells(hash, Arc::unwrap_or_clone(cells)),
+            None => self.blob_store.insert(hash, blob),
+        };
+        if let Err(err) = result {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }
@@ -1776,7 +1792,9 @@ mod tests {
     use alloy_consensus::Transaction;
     use alloy_eips::{
         eip2718::Encodable2718,
-        eip4844::{Blob, BlobTransactionSidecar, Bytes48, BYTES_PER_BLOB},
+        eip4844::{
+            env_settings::EnvKzgSettings, Blob, BlobTransactionSidecar, Bytes48, BYTES_PER_BLOB,
+        },
         eip7594::{
             BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarEip7594,
             BlobTransactionSidecarVariant, Cell, CELLS_PER_EXT_BLOB,
@@ -2234,5 +2252,50 @@ mod tests {
             ),
             full[..1]
         );
+    }
+
+    #[test]
+    fn test_blob_sidecar_fetched_as_cells() {
+        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default()]).unwrap();
+        let all = BlobTxCellSidecar::from_full(&full, EnvKzgSettings::Default.get()).unwrap();
+        let kept = |mask| {
+            let cells = all.get_cells(mask).unwrap();
+            BlobTxCellSidecar::new(all.commitments().to_vec(), all.proofs().to_vec(), cells, mask)
+                .unwrap()
+        };
+        let test_pool = &TestPoolBuilder::default().pool;
+        let mut listener = test_pool.add_blob_sidecar_listener();
+        let add = |cells| {
+            let tx = MockTransaction::eip4844_with_sidecar(full.clone().into());
+            let hash = *tx.get_hash();
+            test_pool.add_transactions(
+                TransactionOrigin::External,
+                [TransactionValidationOutcome::Valid {
+                    balance: U256::from(1_000),
+                    state_nonce: 0,
+                    bytecode_hash: None,
+                    transaction: ValidTransaction::ValidWithSidecar {
+                        transaction: tx,
+                        sidecar: PooledBlobSidecar::from_cells(cells),
+                    },
+                    propagate: true,
+                    authorities: None,
+                }],
+            );
+            hash
+        };
+
+        // Too few cells to rebuild the blob: they are stored as cells, and listeners get nothing.
+        let mask = BlobCellMask::from_bits(0b11);
+        let sampled = add(kept(mask));
+        assert_eq!(test_pool.blob_store().get(sampled).unwrap(), None);
+        assert_eq!(test_pool.blob_store().get_cells(sampled, mask).unwrap(), all.get_cells(mask));
+        assert_eq!(listener.try_recv().unwrap_err(), TryRecvError::Empty);
+
+        // Enough cells to rebuild it: listeners get the rebuilt sidecar.
+        let rebuilt = add(kept(BlobCellMask::from_bits(u64::MAX.into())));
+        let event = listener.try_recv().unwrap();
+        assert_eq!(event.tx_hash, rebuilt);
+        assert_eq!(*event.sidecar, BlobTransactionSidecarVariant::Eip7594(full));
     }
 }

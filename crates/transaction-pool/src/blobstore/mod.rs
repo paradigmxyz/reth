@@ -2,7 +2,10 @@
 
 use alloy_eips::{
     eip4844::{env_settings::EnvKzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
+    eip7594::{
+        BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell,
+        CELLS_PER_EXT_BLOB,
+    },
 };
 use alloy_primitives::{map::FbBuildHasher, TxHash, B256};
 pub use cells::BlobTxCellSidecar;
@@ -66,6 +69,11 @@ impl BlobCellAvailability {
     pub fn is_full(&self) -> bool {
         self.get().bits() == u128::MAX
     }
+
+    /// Returns whether enough cells are available to rebuild every blob.
+    pub fn is_recoverable(&self) -> bool {
+        self.get().count() >= CELLS_PER_EXT_BLOB / 2
+    }
 }
 
 impl PartialEq for BlobCellAvailability {
@@ -77,10 +85,14 @@ impl PartialEq for BlobCellAvailability {
 impl Eq for BlobCellAvailability {}
 
 /// A blob sidecar paired with its shared cell availability.
+///
+/// A sidecar fetched as cells keeps them in [`Self::cells`], and the wrapped sidecar holds its
+/// commitments and proofs without blobs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
     availability: BlobCellAvailability,
+    cells: Option<Arc<BlobTxCellSidecar>>,
 }
 
 impl PooledBlobSidecar {
@@ -89,7 +101,16 @@ impl PooledBlobSidecar {
         sidecar: BlobTransactionSidecarVariant,
         availability: BlobCellAvailability,
     ) -> Self {
-        Self { sidecar, availability }
+        Self { sidecar, availability, cells: None }
+    }
+
+    /// Creates a sidecar that keeps only the given cells, without rebuilding the blobs.
+    pub fn from_cells(cells: BlobTxCellSidecar) -> Self {
+        Self {
+            sidecar: cells.without_blobs().into(),
+            availability: BlobCellAvailability::new(cells.mask()),
+            cells: Some(Arc::new(cells)),
+        }
     }
 
     /// Returns the wrapped sidecar.
@@ -110,6 +131,16 @@ impl PooledBlobSidecar {
     /// Consumes the wrapper and returns the sidecar.
     pub fn into_sidecar(self) -> BlobTransactionSidecarVariant {
         self.sidecar
+    }
+
+    /// Returns the kept cells, if this sidecar was created with [`Self::from_cells`].
+    pub fn cells(&self) -> Option<&BlobTxCellSidecar> {
+        self.cells.as_deref()
+    }
+
+    // Takes the kept cells, leaving the sidecar without blobs.
+    pub(crate) const fn take_cells(&mut self) -> Option<Arc<BlobTxCellSidecar>> {
+        self.cells.take()
     }
 }
 
@@ -455,7 +486,6 @@ pub struct BlobStoreCleanupStat {
 mod tests {
     use super::*;
     use crate::blobstore::cells::tests::{fixture, subset};
-    use alloy_eips::eip7594::CELLS_PER_EXT_BLOB;
 
     // A store with the sizes it counts for a cell sidecar and for the full sidecar.
     struct TestStore {

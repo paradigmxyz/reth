@@ -861,8 +861,16 @@ where
                         }
                     }
 
-                    // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
+                    // validate the blob, or only the kept cells of a sidecar fetched as cells
+                    let validation = if let Some(cells) = sidecar.cells() {
+                        cells.validate(
+                            transaction.blob_versioned_hashes().unwrap_or_default(),
+                            self.kzg_settings.get(),
+                        )
+                    } else {
+                        transaction.validate_blob(&sidecar, self.kzg_settings.get())
+                    };
+                    if let Err(err) = validation {
                         self.validation_metrics.invalid_4844.increment(1);
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),
@@ -1600,21 +1608,28 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
-        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::{BlobTxCellSidecar, InMemoryBlobStore},
+        error::PoolErrorKind,
+        test_utils::TransactionBuilder,
+        traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
-    use alloy_consensus::{Header, Transaction};
+    use alloy_consensus::{
+        Header, SignableTransaction, Transaction, TxEip4844, TxEip4844WithSidecar,
+    };
     use alloy_eips::{
         eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
+        eip4844::{env_settings::EnvKzgSettings, Blob},
+        eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, Cell},
         eip7702::Authorization,
     };
     use alloy_primitives::{hex, Address, Bytes, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::SignedTransaction;
+    use reth_primitives_traits::{Recovered, SignedTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn test_evm_config() -> EthEvmConfig {
@@ -2502,6 +2517,54 @@ mod tests {
         assert!(matches!(
             validator.validate_stateless(TransactionOrigin::External, &transaction(gas_limit + 1)),
             Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
+        ));
+    }
+
+    #[test]
+    fn validate_blob_tx_fetched_as_cells() {
+        let settings = EnvKzgSettings::Default.get();
+        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default()]).unwrap();
+        let all = BlobTxCellSidecar::from_full(&full, settings).unwrap();
+        let mask = BlobCellMask::from_bits(0b101);
+        let kept = |cells| {
+            BlobTxCellSidecar::new(all.commitments().to_vec(), all.proofs().to_vec(), cells, mask)
+                .unwrap()
+        };
+        let body = PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar {
+                tx: TxEip4844 {
+                    blob_versioned_hashes: all.versioned_hashes().collect(),
+                    ..Default::default()
+                },
+                sidecar: all.without_blobs().into(),
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let validator = EthTransactionValidatorBuilder::new(mock_provider(), test_evm_config())
+            .set_osaka(true)
+            .build(InMemoryBlobStore::default());
+        let validate = |cells: BlobTxCellSidecar| {
+            let mut tx = EthPooledTransaction::from_pooled(Recovered::new_unchecked(
+                body.clone(),
+                Address::ZERO,
+            ));
+            assert!(tx.set_blob_sidecar(PooledBlobSidecar::from_cells(cells)));
+            validator.validate_eip4844(&mut tx)
+        };
+
+        // Only the kept cells are checked, since the sidecar has no blobs.
+        let cells = kept(all.get_cells(mask).unwrap());
+        let sidecar = validate(cells.clone()).unwrap().unwrap();
+        assert_eq!(sidecar.cells(), Some(&cells));
+        assert_eq!(sidecar.availability().get(), mask);
+
+        let mut bad = all.get_cells(mask).unwrap();
+        bad[0] = Cell::repeat_byte(1);
+        assert!(matches!(
+            validate(kept(bad)),
+            Err(InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::InvalidEip4844Blob(_)
+            ))
         ));
     }
 }
