@@ -1203,15 +1203,16 @@ impl PeersManager {
     ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self, trusted_only: bool) -> Option<(PeerId, &mut Peer)> {
+        let now = std::time::Instant::now();
         let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
-                // trusted peers stay in the set after a fatal error but are banned for a while
-                !self.ban_list.is_banned_peer(peer_id) &&
                 peer.state.is_unconnected() &&
                 (!(self.trusted_nodes_only || trusted_only) ||
                     peer.is_trusted() ||
-                    self.trusted_peer_ids.contains(*peer_id))
+                    self.trusted_peer_ids.contains(*peer_id)) &&
+                // trusted peers stay in the set after a fatal error but are banned for a while
+                !self.ban_list.is_banned_peer_at(peer_id, now)
         });
 
         // keep track of the best peer, if there's one
@@ -4852,7 +4853,10 @@ mod tests {
     async fn test_trusted_peer_not_redialed_while_banned() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let mut peers = PeersManager::new(PeersConfig::test());
+        // the default backoff keeps the trusted peer banned for the whole test
+        let mut peers = PeersManager::new(
+            PeersConfig::test().with_backoff_durations(PeerBackoffDurations::default()),
+        );
         peers.add_trusted_peer(peer, PeerAddr::from_tcp(socket_addr));
         match event!(peers) {
             PeerAction::PeerAdded(peer_id) => assert_eq!(peer_id, peer),
