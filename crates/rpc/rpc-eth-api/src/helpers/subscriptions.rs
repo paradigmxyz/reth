@@ -142,7 +142,7 @@ pub trait EthSubscriptions:
                         return None;
                     }
 
-                    match converter.convert_receipts_with_block(inputs, block.sealed_block()) {
+                    match converter.convert_receipts_with_block(inputs, &block) {
                         Ok(rpc_receipts) => Some(rpc_receipts),
                         Err(err) => {
                             error!(target = "rpc", %err, "Failed to convert receipts");

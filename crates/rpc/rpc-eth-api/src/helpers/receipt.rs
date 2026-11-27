@@ -73,9 +73,7 @@ pub trait LoadReceipt:
                 meta,
             }];
             let mut receipts = match block {
-                Some(block) => {
-                    self.converter().convert_receipts_with_block(inputs, block.sealed_block())
-                }
+                Some(block) => self.converter().convert_receipts_with_block(inputs, &block),
                 None => self.converter().convert_receipts(inputs),
             }?;
 

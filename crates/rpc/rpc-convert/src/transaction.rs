@@ -16,8 +16,8 @@ use dyn_clone::DynClone;
 use evm2::ethereum::{RecoveredTxEnvelope, TxEnvelope};
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
-    BlockTy, HeaderTy, NodePrimitives, SealedBlock, SealedHeader, SealedHeaderFor, TransactionMeta,
-    TxTy,
+    BlockTy, HeaderTy, NodePrimitives, RecoveredBlock, SealedHeader, SealedHeaderFor,
+    TransactionMeta, TxTy,
 };
 use reth_rpc_traits::{FromConsensusHeader, FromConsensusTx, TryIntoSimTx, TxInfoMapper};
 use std::{convert::Infallible, error::Error, fmt, fmt::Debug, marker::PhantomData};
@@ -67,7 +67,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, N>>,
-        _block: &SealedBlock<N::Block>,
+        _block: &RecoveredBlock<N::Block>,
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error> {
         self.convert_receipts(receipts)
     }
@@ -196,7 +196,7 @@ pub trait RpcConvert: Send + Sync + Unpin + Debug + DynClone + 'static {
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
-        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
 
     /// Converts a primitive header to an RPC header.
@@ -959,7 +959,7 @@ where
     fn convert_receipts_with_block(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
-        block: &SealedBlock<BlockTy<Self::Primitives>>,
+        block: &RecoveredBlock<BlockTy<Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
         self.receipt_converter.convert_receipts_with_block(receipts, block)
     }
