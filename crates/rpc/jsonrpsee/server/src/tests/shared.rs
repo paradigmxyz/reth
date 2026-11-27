@@ -157,6 +157,31 @@ async fn first_request_timeout_closes_connection_with_incomplete_header() {
 }
 
 #[tokio::test]
+async fn first_request_timeout_answers_request_with_incomplete_body() {
+    let addr = server_with_first_request_timeout(Duration::from_millis(100)).await;
+    let mut stream = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
+    stream
+        .write_all(
+            b"POST / HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\n\
+              content-length: 1000\r\n\r\n[",
+        )
+        .await
+        .unwrap();
+
+    // The connection is closed after the response, as the rest of the body is never read.
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .with_timeout(Duration::from_secs(5))
+        .await
+        .unwrap()
+        .unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    assert_eq!(head.lines().next(), Some("HTTP/1.1 408 Request Timeout"));
+    assert_eq!(body, "Request body was not received in time.\n");
+}
+
+#[tokio::test]
 async fn first_request_timeout_closes_connection_with_incomplete_http2_preface() {
     let addr = server_with_first_request_timeout(Duration::from_millis(100)).await;
     let mut stream = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();

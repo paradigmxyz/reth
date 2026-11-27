@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use crate::{server::handle_rpc_call, BatchRequestConfig, HttpRequest, HttpResponse, LOG_TARGET};
 use http::Method;
 use hyper::body::Bytes;
@@ -6,6 +8,7 @@ use jsonrpsee_core::{
     middleware::RpcServiceT,
     BoxError,
 };
+use tokio::time::timeout;
 
 /// Returns true if the `content_type` header indicates a valid JSON message.
 ///
@@ -26,11 +29,13 @@ fn is_json(content_type: Option<&hyper::header::HeaderValue>) -> bool {
 
 /// Make JSON-RPC HTTP call with a service [`RpcServiceT`]
 ///
-/// Fails if the HTTP request was a malformed JSON-RPC request.
+/// Fails if the HTTP request was a malformed JSON-RPC request, or with `408 Request Timeout` if its
+/// body isn't received within `body_timeout`. `None` waits for the body without a limit.
 pub async fn call_with_service<S, B>(
     request: HttpRequest<B>,
     batch_config: BatchRequestConfig,
     max_request_size: u32,
+    body_timeout: Option<Duration>,
     rpc_service: &S,
 ) -> HttpResponse
 where
@@ -44,7 +49,18 @@ where
         Method::POST if is_json(request.headers().get(hyper::header::CONTENT_TYPE)) => {
             let (parts, body) = request.into_parts();
 
-            let (body, is_single) = match read_body(&parts.headers, body, max_request_size).await {
+            // A body that stops arriving would otherwise hold the request's connection permit and
+            // its buffered bytes for as long as the client keeps the socket open.
+            let read = read_body(&parts.headers, body, max_request_size);
+            let read = match body_timeout {
+                Some(body_timeout) => timeout(body_timeout, read).await,
+                None => Ok(read.await),
+            };
+            let Ok(read) = read else {
+                tracing::debug!(target: LOG_TARGET, "HTTP request body not received in time");
+                return response::request_timeout();
+            };
+            let (body, is_single) = match read {
                 Ok(r) => r,
                 Err(HttpError::TooLarge) => return response::too_large(max_request_size),
                 Err(HttpError::Malformed) => return response::malformed(),
@@ -157,6 +173,15 @@ pub mod response {
     /// Create a response for when the server denied the request.
     pub fn denied() -> HttpResponse {
         from_template(hyper::StatusCode::FORBIDDEN, HttpBody::default(), TEXT)
+    }
+
+    /// Create a response for a request whose body wasn't received in time (408).
+    pub fn request_timeout() -> HttpResponse {
+        from_template(
+            hyper::StatusCode::REQUEST_TIMEOUT,
+            "Request body was not received in time.\n",
+            TEXT,
+        )
     }
 }
 
