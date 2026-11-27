@@ -2,7 +2,7 @@
 
 use super::constants::DEFAULT_MAX_TX_INPUT_BYTES;
 use crate::{
-    blobstore::{BlobStore, PooledBlobSidecar},
+    blobstore::{BlobCellAvailability, BlobStore, PooledBlobSidecar},
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
@@ -823,8 +823,9 @@ where
                     // is stripped from the transaction and not included in a block.
                     // check if the blob is in the store, if it's included we previously validated
                     // it and inserted it
-                    if self.blob_store.contains(*transaction.hash()).is_ok_and(|c| c) {
-                        // validated transaction is already in the store
+                    if let Ok(Some(mask)) = self.blob_store.cell_mask(*transaction.hash()) {
+                        // validated transaction is already in the store, possibly only as cells
+                        transaction.set_blob_cell_availability(BlobCellAvailability::new(mask));
                     } else {
                         self.validation_metrics.invalid_4844.increment(1);
                         return Err(InvalidPoolTransactionError::Eip4844(
@@ -1622,12 +1623,14 @@ mod tests {
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
         eip4844::{env_settings::EnvKzgSettings, Blob},
-        eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, Cell},
+        eip7594::{
+            BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell,
+        },
         eip7702::Authorization,
     };
     use alloy_primitives::{hex, Address, Bytes, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_ethereum_primitives::PooledTransactionVariant;
+    use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Recovered, SignedTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
@@ -2566,5 +2569,55 @@ mod tests {
                 Eip4844PoolTransactionError::InvalidEip4844Blob(_)
             ))
         ));
+    }
+
+    #[test]
+    fn validate_reinjected_blob_tx_keeps_stored_cells() {
+        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default()]).unwrap();
+        let all = BlobTxCellSidecar::from_full(&full, EnvKzgSettings::Default.get()).unwrap();
+        let mask = BlobCellMask::from_bits(0b101);
+        let cells = BlobTxCellSidecar::new(
+            all.commitments().to_vec(),
+            all.proofs().to_vec(),
+            all.get_cells(mask).unwrap(),
+            mask,
+        )
+        .unwrap();
+        let tx = TransactionSigned::from(
+            TxEip4844 {
+                blob_versioned_hashes: all.versioned_hashes().collect(),
+                ..Default::default()
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let hash = *tx.tx_hash();
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(mock_provider(), test_evm_config())
+            .set_osaka(true)
+            .build(blob_store.clone());
+        let validate = || {
+            // A transaction reinjected after a reorg comes without its sidecar.
+            let mut tx =
+                EthPooledTransaction::new(Recovered::new_unchecked(tx.clone(), Address::ZERO), 0);
+            validator.validate_eip4844(&mut tx).map(|sidecar| {
+                assert_eq!(sidecar, None);
+                tx.blob_cell_availability().map(BlobCellAvailability::get)
+            })
+        };
+
+        assert!(matches!(
+            validate(),
+            Err(InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::MissingEip4844BlobSidecar
+            ))
+        ));
+
+        // Stored only as cells, it is not announced as having every cell.
+        blob_store.insert_cells(hash, cells).unwrap();
+        assert_eq!(validate().unwrap(), Some(mask));
+
+        blob_store.delete(hash).unwrap();
+        blob_store.insert(hash, BlobTransactionSidecarVariant::Eip7594(full).into()).unwrap();
+        assert_eq!(validate().unwrap(), Some(BlobCellMask::from_bits(u128::MAX)));
     }
 }

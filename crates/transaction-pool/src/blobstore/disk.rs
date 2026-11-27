@@ -7,7 +7,10 @@ use crate::blobstore::{
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
+    eip7594::{
+        BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell,
+        CELLS_PER_EXT_BLOB,
+    },
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
@@ -511,9 +514,9 @@ impl BlobStore for DiskFileBlobStore {
 
         // Only blobs that can be rebuilt from their cells count as available.
         for (available, requested_hash) in result.iter_mut().zip(versioned_hashes) {
-            *available |= cell_sidecars
-                .values()
-                .any(|cells| cells.recoverable && cells.versioned_hashes.contains(requested_hash));
+            *available |= cell_sidecars.values().any(|cells| {
+                cells.is_recoverable() && cells.versioned_hashes.contains(requested_hash)
+            });
         }
 
         Ok(result)
@@ -543,6 +546,14 @@ impl BlobStore for DiskFileBlobStore {
             .compute_matching_cells(cell_mask)
             .map(Some)
             .map_err(|err| BlobStoreError::Other(Box::new(err)))
+    }
+
+    fn cell_mask(&self, tx: B256) -> Result<Option<BlobCellMask>, BlobStoreError> {
+        if let Some(cells) = self.inner.cell_sidecars.read().get(&tx) {
+            return Ok(Some(cells.mask))
+        }
+        // A promotion writes the full sidecar before dropping its cell entry, so it is seen here.
+        Ok(self.inner.contains(tx)?.then_some(BlobCellMask::from_bits(u128::MAX)))
     }
 
     fn data_size_hint(&self) -> Option<usize> {
@@ -727,7 +738,7 @@ impl DiskFileBlobStoreInner {
         data.encode(&mut buf);
 
         let file = CellSidecarFile {
-            recoverable: data.is_recoverable(),
+            mask: data.mask(),
             versioned_hashes: data.versioned_hashes().collect(),
         };
         {
@@ -756,7 +767,7 @@ impl DiskFileBlobStoreInner {
             .read()
             .iter()
             .filter(|(_, cells)| {
-                (cells.recoverable || !recoverable) &&
+                (cells.is_recoverable() || !recoverable) &&
                     cells.versioned_hashes.iter().any(|hash| hashes.contains(hash))
             })
             .map(|(tx, _)| *tx)
@@ -1041,9 +1052,16 @@ pub enum OpenDiskFileBlobStore {
 // What the disk store keeps in memory about a cell sidecar file.
 #[derive(Debug)]
 struct CellSidecarFile {
-    // Whether the blobs can be rebuilt from the kept cells.
-    recoverable: bool,
+    // Indices of the cells kept for every blob.
+    mask: BlobCellMask,
     versioned_hashes: Vec<B256>,
+}
+
+impl CellSidecarFile {
+    // Returns whether the blobs can be rebuilt from the kept cells.
+    const fn is_recoverable(&self) -> bool {
+        self.mask.count() >= CELLS_PER_EXT_BLOB / 2
+    }
 }
 
 // A sidecar decoded from its blob file.
@@ -1068,9 +1086,7 @@ mod tests {
     use alloy_consensus::BlobTransactionSidecar;
     use alloy_eips::{
         eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2, Bytes48},
-        eip7594::{
-            BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB,
-        },
+        eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     };
 
     use super::*;

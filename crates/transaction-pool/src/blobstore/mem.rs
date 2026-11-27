@@ -361,6 +361,15 @@ impl BlobStore for InMemoryBlobStore {
             .map_err(|err| BlobStoreError::Other(Box::new(err)))
     }
 
+    fn cell_mask(&self, tx: B256) -> Result<Option<BlobCellMask>, BlobStoreError> {
+        // Held across both lookups, so a move from cells to full is not missed.
+        let store = self.inner.store.read();
+        if store.contains_key(&tx) {
+            return Ok(Some(BlobCellMask::from_bits(u128::MAX)))
+        }
+        Ok(self.inner.cells.read().get(&tx).map(|cells| cells.mask()))
+    }
+
     fn data_size_hint(&self) -> Option<usize> {
         Some(self.inner.size_tracker.data_size())
     }
