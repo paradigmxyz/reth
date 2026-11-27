@@ -8,8 +8,8 @@ use std::{
 
 use super::{StateRootComputeOutcome, StateRootMessage};
 use alloy_primitives::{
-    map::{hash_map::Entry, B256Map},
-    B256,
+    map::{hash_map::Entry, AddressHashMap, B256Map, HashMap},
+    B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -288,6 +288,7 @@ where
     ) {
         let mut total_idle_time = std::time::Duration::ZERO;
         let mut idle_start = Instant::now();
+        let mut merge_scratch = StateUpdateMergeScratch::default();
 
         while let Ok(message) = updates.recv() {
             total_idle_time += idle_start.elapsed();
@@ -301,6 +302,32 @@ where
                     let _span = trace_span!(target: "engine::tree::payload_processor::sparse_trie", "hashing_state_update").entered();
                     let hashed = reth_execution_types::state_update_to_hashed_post_state(&state);
                     SparseTrieTaskMessage::HashedState(hashed)
+                }
+                StateRootMessage::StateUpdates(batch) => {
+                    let _span = trace_span!(
+                        target: "engine::tree::payload_processor::sparse_trie",
+                        "hashing_state_update_batch",
+                        batch_len = batch.len()
+                    )
+                    .entered();
+                    let mut send_err = false;
+                    merge_and_emit_state_updates(batch, &mut merge_scratch, |merged| {
+                        if !send_err {
+                            let hashed =
+                                reth_execution_types::state_update_to_hashed_post_state(&merged);
+                            if hashed_state_tx
+                                .send(SparseTrieTaskMessage::HashedState(hashed))
+                                .is_err()
+                            {
+                                send_err = true;
+                            }
+                        }
+                    });
+                    if send_err {
+                        break;
+                    }
+                    idle_start = Instant::now();
+                    continue;
                 }
                 StateRootMessage::FinishedStateUpdates => {
                     SparseTrieTaskMessage::FinishedStateUpdates
@@ -827,7 +854,7 @@ where
             ready.push(*address);
         }
         if ready.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let inline_round = job_units <= INLINE_STORAGE_WORK_UNITS;
@@ -1109,7 +1136,7 @@ where
             // We need to keep iterating if any updates are being drained because that might
             // indicate that more pending account updates can be promoted.
             if num_promoted == 0 || !self.process_account_leaf_updates(false)? {
-                break
+                break;
             }
         }
 
@@ -1118,7 +1145,7 @@ where
 
     fn dispatch_pending_targets(&mut self) -> Result<(), StateRootTaskError> {
         if self.pending_targets.is_empty() {
-            return Ok(())
+            return Ok(());
         }
 
         let _span = trace_span!("dispatch_pending_targets").entered();
@@ -1150,7 +1177,7 @@ where
         );
 
         if let Some(error) = dispatch_error {
-            return Err(error)
+            return Err(error);
         }
 
         Ok(())
@@ -1227,7 +1254,7 @@ where
                 "sparse trie task stalled: pending updates remain but no proof targets are queued or in flight"
             );
 
-            return Err(StateRootTaskError::Stalled)
+            return Err(StateRootTaskError::Stalled);
         }
 
         Ok(())
@@ -1301,7 +1328,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             output.result = trie.reveal_v2_proof_nodes(proofs, retain_updates);
             proofs.clear();
             if output.result.is_err() {
-                return output
+                return output;
             }
         }
 
@@ -1323,7 +1350,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
             output.cache_hits = (updates_len_before - pending.len()) as u64;
             output.cache_misses = pending.len() as u64;
             if output.result.is_err() {
-                return output
+                return output;
             }
         }
 
@@ -1337,7 +1364,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     /// Queues leaf updates, letting a newly known value win over one that is still queued.
     fn queue_updates(&mut self, updates: B256Map<LeafUpdate>) {
         if updates.is_empty() {
-            return
+            return;
         }
 
         self.updated = true;
@@ -1348,7 +1375,7 @@ impl<S: SparseTrie + Default> StorageTrieWork<S> {
     /// Queues proof nodes, draining them out of the batch they arrived in.
     fn queue_proofs(&mut self, nodes: &mut Vec<ProofTrieNode>) {
         if nodes.is_empty() {
-            return
+            return;
         }
 
         self.dirty = true;
@@ -1467,7 +1494,7 @@ fn merge_leaf_updates(queued: &mut B256Map<LeafUpdate>, updates: B256Map<LeafUpd
     if queued.is_empty() {
         // Take the whole map at once, no per-slot loop.
         *queued = updates;
-        return
+        return;
     }
 
     for (slot, update) in updates {
@@ -1650,6 +1677,82 @@ enum SparseTrieTaskMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// Signals that all state updates have been received.
     FinishedStateUpdates,
+}
+
+/// Reusable index scratch buffers for [`merge_and_emit_state_updates`].
+#[derive(Default)]
+struct StateUpdateMergeScratch {
+    account_idx: AddressHashMap<usize>,
+    storage_idxs: Vec<HashMap<U256, usize>>,
+}
+
+/// Merges a batch of sequential per-transaction [`reth_execution_types::StateUpdate`]s,
+/// deduplicating repeated updates to hot accounts and storage slots before forwarding to `emit`.
+///
+/// Flushes immediately before any destructive update (`current.is_none() || wiped`) so account
+/// deletion and storage wipe semantics are preserved identically.
+fn merge_and_emit_state_updates(
+    batch: Vec<reth_execution_types::StateUpdate>,
+    scratch: &mut StateUpdateMergeScratch,
+    mut emit: impl FnMut(reth_execution_types::StateUpdate),
+) {
+    let mut merged_accounts: Vec<reth_execution_types::AccountUpdate> = Vec::new();
+    scratch.account_idx.clear();
+    scratch.storage_idxs.clear();
+
+    for update in batch {
+        if update.is_empty() {
+            continue;
+        }
+        let has_destructive =
+            update.accounts.iter().any(|account| account.current.is_none() || account.wiped);
+        if has_destructive {
+            if !merged_accounts.is_empty() {
+                emit(reth_execution_types::StateUpdate {
+                    accounts: core::mem::take(&mut merged_accounts),
+                });
+                scratch.account_idx.clear();
+                scratch.storage_idxs.clear();
+            }
+            emit(update);
+            continue;
+        }
+
+        for account in update.accounts {
+            if let Some(&idx) = scratch.account_idx.get(&account.address) {
+                let existing = &mut merged_accounts[idx];
+                existing.current = account.current;
+                existing.created |= account.created;
+                if !account.storage.is_empty() {
+                    let slot_map = &mut scratch.storage_idxs[idx];
+                    if slot_map.is_empty() && !existing.storage.is_empty() {
+                        slot_map.reserve(existing.storage.len() + account.storage.len());
+                        for (sidx, (k, _)) in existing.storage.iter().enumerate() {
+                            slot_map.insert(*k, sidx);
+                        }
+                    }
+                    for (key, slot) in account.storage {
+                        if let Some(&sidx) = slot_map.get(&key) {
+                            existing.storage[sidx].1.present_value = slot.present_value;
+                        } else {
+                            let sidx = existing.storage.len();
+                            existing.storage.push((key, slot));
+                            slot_map.insert(key, sidx);
+                        }
+                    }
+                }
+            } else {
+                let idx = merged_accounts.len();
+                scratch.account_idx.insert(account.address, idx);
+                scratch.storage_idxs.push(HashMap::default());
+                merged_accounts.push(account);
+            }
+        }
+    }
+
+    if !merged_accounts.is_empty() {
+        emit(reth_execution_types::StateUpdate { accounts: merged_accounts });
+    }
 }
 
 #[cfg(test)]
@@ -2627,5 +2730,84 @@ mod tests {
         drop(updates_tx);
         drop(task);
         drain_sparse_trie_tasks(&runtime);
+    }
+
+    #[test]
+    fn merge_state_updates_matches_unbatched_hashed_post_state() {
+        use alloy_primitives::Address;
+        use evm2::evm::AccountInfo;
+        use reth_execution_types::{AccountUpdate, StateUpdate};
+        use reth_trie_common::bundle_state::StorageSlot;
+
+        let a1 = Address::repeat_byte(0x11);
+        let a2 = Address::repeat_byte(0x22);
+        let k1 = U256::from(1);
+        let k2 = U256::from(2);
+
+        let info1 = AccountInfo { nonce: 1, balance: U256::from(100), ..Default::default() };
+        let info2 = AccountInfo { nonce: 2, balance: U256::from(200), ..Default::default() };
+        let info3 = AccountInfo { nonce: 3, balance: U256::from(300), ..Default::default() };
+
+        let updates = vec![
+            StateUpdate {
+                accounts: vec![AccountUpdate {
+                    address: a1,
+                    original: Some(info1.clone()),
+                    current: Some(info2.clone()),
+                    storage: vec![(k1, StorageSlot::new_changed(U256::ZERO, U256::from(10)))],
+                    created: false,
+                    wiped: false,
+                }],
+            },
+            StateUpdate {
+                accounts: vec![AccountUpdate {
+                    address: a1,
+                    original: Some(info2),
+                    current: Some(info3.clone()),
+                    storage: vec![
+                        (k1, StorageSlot::new_changed(U256::from(10), U256::from(20))),
+                        (k2, StorageSlot::new_changed(U256::ZERO, U256::from(5))),
+                    ],
+                    created: false,
+                    wiped: false,
+                }],
+            },
+            StateUpdate {
+                accounts: vec![AccountUpdate {
+                    address: a2,
+                    original: Some(info1),
+                    current: None,
+                    storage: vec![],
+                    created: false,
+                    wiped: true,
+                }],
+            },
+            StateUpdate {
+                accounts: vec![AccountUpdate {
+                    address: a1,
+                    original: Some(info3.clone()),
+                    current: Some(info3),
+                    storage: vec![(k1, StorageSlot::new_changed(U256::from(20), U256::ZERO))],
+                    created: false,
+                    wiped: false,
+                }],
+            },
+        ];
+
+        let mut expected = HashedPostState::default();
+        for u in &updates {
+            expected.extend(reth_execution_types::state_update_to_hashed_post_state(u));
+        }
+
+        let mut actual = HashedPostState::default();
+        let mut emitted = 0usize;
+        let mut scratch = StateUpdateMergeScratch::default();
+        merge_and_emit_state_updates(updates, &mut scratch, |merged| {
+            emitted += 1;
+            actual.extend(reth_execution_types::state_update_to_hashed_post_state(&merged));
+        });
+
+        assert_eq!(emitted, 3);
+        assert_eq!(actual, expected);
     }
 }

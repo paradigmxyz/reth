@@ -13,6 +13,10 @@ use reth_execution_types::{OnStateHook, StateUpdate};
 use reth_trie::{updates::TrieUpdates, HashedPostState, MultiProofTargetsV2, ProofV2Target};
 use std::{fmt, sync::Arc};
 
+/// Maximum number of per-transaction state updates buffered in [`StateRootUpdateHook`] before
+/// sending a batch to the state-root hashing task.
+pub const STATE_UPDATE_BATCH_SIZE: usize = 32;
+
 /// Messages used internally by the multi proof task.
 #[derive(Debug)]
 pub enum StateRootMessage {
@@ -20,6 +24,8 @@ pub enum StateRootMessage {
     PrefetchProofs(MultiProofTargetsV2),
     /// New state update from transaction execution.
     StateUpdate(StateUpdate),
+    /// Batched sequential state updates from transaction execution.
+    StateUpdates(Vec<StateUpdate>),
     /// Pre-hashed state update from BAL conversion that can be applied directly without proofs.
     HashedStateUpdate(HashedPostState),
     /// Signals state update stream end.
@@ -364,6 +370,13 @@ trait StateRootSink: Send + Sync + 'static {
     /// Authoritative state update from normal block execution.
     fn on_state_update(&self, state: StateUpdate);
 
+    /// Authoritative batch of sequential state updates from normal block execution.
+    fn on_state_updates(&self, states: Vec<StateUpdate>) {
+        for state in states {
+            self.on_state_update(state);
+        }
+    }
+
     /// Authoritative pre-hashed state update, currently used by BAL streaming.
     fn on_hashed_state_update(&self, state: HashedPostState);
 
@@ -437,7 +450,7 @@ impl StateRootUpdateStream {
     /// See [`StateRootUpdateHook`] for why the hook finishes on drop while the bare stream
     /// does not, and how a panic during execution is excluded from that.
     pub fn into_state_hook(self) -> StateRootUpdateHook {
-        StateRootUpdateHook { inner: self.inner }
+        StateRootUpdateHook { inner: self.inner, batch: Vec::new() }
     }
 }
 
@@ -455,17 +468,28 @@ impl StateRootUpdateStream {
 /// case, and the stored trie is rejected by the anchor check on the next block.
 pub struct StateRootUpdateHook {
     inner: Arc<dyn StateRootSink>,
+    batch: Vec<StateUpdate>,
 }
 
 impl fmt::Debug for StateRootUpdateHook {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("StateRootUpdateHook").finish_non_exhaustive()
+        f.debug_struct("StateRootUpdateHook")
+            .field("buffered", &self.batch.len())
+            .finish_non_exhaustive()
     }
 }
 
 impl OnStateHook for StateRootUpdateHook {
     fn on_state(&mut self, state: StateUpdate) {
-        self.inner.on_state_update(state);
+        if self.batch.is_empty() {
+            self.batch.reserve(STATE_UPDATE_BATCH_SIZE);
+        }
+        self.batch.push(state);
+        if self.batch.len() >= STATE_UPDATE_BATCH_SIZE {
+            let batch =
+                core::mem::replace(&mut self.batch, Vec::with_capacity(STATE_UPDATE_BATCH_SIZE));
+            self.inner.on_state_updates(batch);
+        }
     }
 }
 
@@ -475,6 +499,10 @@ impl Drop for StateRootUpdateHook {
         // unfinished so the task fails instead of computing a root from partial updates.
         if std::thread::panicking() {
             return;
+        }
+        if !self.batch.is_empty() {
+            let batch = core::mem::take(&mut self.batch);
+            self.inner.on_state_updates(batch);
         }
         self.inner.on_updates_finished();
     }
@@ -502,6 +530,12 @@ impl StateRootSink for SparseTrieStateRootSink {
 
     fn on_state_update(&self, state: StateUpdate) {
         let _ = self.sender.send(StateRootMessage::StateUpdate(state));
+    }
+
+    fn on_state_updates(&self, states: Vec<StateUpdate>) {
+        if !states.is_empty() {
+            let _ = self.sender.send(StateRootMessage::StateUpdates(states));
+        }
     }
 
     fn on_hashed_state_update(&self, state: HashedPostState) {
@@ -667,5 +701,26 @@ mod tests {
             cancel_rx.recv_timeout(Duration::from_secs(1)),
             Err(crossbeam_channel::RecvTimeoutError::Disconnected)
         ));
+    }
+
+    #[reth_concurrency::test]
+    fn hook_batches_state_updates_and_flushes_on_drop() {
+        let (tx, rx) = crossbeam_channel::unbounded();
+        let sink = Arc::new(SparseTrieStateRootSink::new(tx));
+        let mut hook = StateRootUpdateStream::new(sink).into_state_hook();
+
+        for _ in 0..(STATE_UPDATE_BATCH_SIZE + 3) {
+            hook.on_state(StateUpdate::default());
+        }
+        drop(hook);
+
+        let msgs: Vec<_> = rx.try_iter().collect();
+        assert_eq!(msgs.len(), 3);
+        assert!(matches!(
+            &msgs[0],
+            StateRootMessage::StateUpdates(b) if b.len() == STATE_UPDATE_BATCH_SIZE
+        ));
+        assert!(matches!(&msgs[1], StateRootMessage::StateUpdates(b) if b.len() == 3));
+        assert!(matches!(&msgs[2], StateRootMessage::FinishedStateUpdates));
     }
 }
