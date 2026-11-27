@@ -1907,7 +1907,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let tx_hash = *transactions[1].tx_hash();
-        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        let parent = Block::default();
+        let parent_hash = parent.header.hash_slow();
+        provider.add_block(parent_hash, parent);
+        let header = Header { number: 1, parent_hash, gas_limit: 30_000_000, ..Default::default() };
         let block_hash = header.hash_slow();
         let block = Block { header, body: BlockBody { transactions, ..Default::default() } };
         provider.add_block(block_hash, block.clone());

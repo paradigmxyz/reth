@@ -23,6 +23,17 @@ use reth_primitives_traits::{sync::OnceLock, Block, InMemorySize, SignedTransact
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
 pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
 
+/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
+///
+/// This caps the initial allocation for the size and hash lists, which grow past it only as their
+/// entries are decoded.
+const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
+    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
+
+/// Smallest encoding of one announcement after its type: a one-byte size and an RLP string
+/// holding its hash.
+const MIN_ENCODED_ANNOUNCEMENT_LEN: usize = 1 + 1 + B256::len_bytes();
+
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(
     Clone,
@@ -960,27 +971,35 @@ impl Decodable for NewPooledTransactionHashes72 {
     }
 }
 
-/// Twice the spec'd soft limit for `NewPooledTransactionHashes` announcements.
+/// Decodes the `types`, `sizes` and `hashes` fields of a `NewPooledTransactionHashes` payload.
 ///
-/// This keeps capacity hints bounded when a malformed packet spends most of its bytes on the
-/// one-byte `types` string before the size and hash lists are validated.
-const NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP: usize =
-    2 * SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
-
+/// Rejects a payload too short to hold one size and one hash per type, and stops decoding
+/// `sizes` at the first entry beyond the number of types.
 #[inline]
 fn decode_pooled_transaction_hashes_payload(
     payload: &mut &[u8],
 ) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
-    let types = Bytes::decode(payload)?;
+    let types = Header::decode_bytes(payload, false)?;
+    if types.len().saturating_mul(MIN_ENCODED_ANNOUNCEMENT_LEN) > payload.len() {
+        return Err(alloy_rlp::Error::InputTooShort)
+    }
     let capacity = types.len().min(NEW_POOLED_TRANSACTION_HASHES_DECODE_CAP);
 
+    // Each size takes at least one byte on the wire but a `usize` in memory, so decoding stops at
+    // the first extra entry instead of reading a list longer than `types`.
     let mut sizes = Vec::with_capacity(capacity);
-    decode_append(payload, &mut sizes)?;
+    let mut sizes_payload = Header::decode_bytes(payload, true)?;
+    while !sizes_payload.is_empty() {
+        if sizes.len() == types.len() {
+            return Err(alloy_rlp::Error::Custom("more sizes than transaction types"))
+        }
+        sizes.push(usize::decode(&mut sizes_payload)?);
+    }
 
     let mut hashes = Vec::with_capacity(capacity);
     decode_append(payload, &mut hashes)?;
 
-    Ok((types.into(), sizes, hashes))
+    Ok((types.to_vec(), sizes, hashes))
 }
 
 #[inline]
@@ -1120,15 +1139,18 @@ mod tests {
     }
 
     fn eth68_hash_fields_strategy() -> impl Strategy<Value = NewPooledTransactionHashes68Fields> {
-        (0usize..128, 0usize..128, 0usize..128).prop_flat_map(
-            |(types_len, sizes_len, hashes_len)| {
-                (
-                    proptest::collection::vec(any::<u8>(), types_len),
-                    proptest::collection::vec(0usize..131_072, sizes_len),
-                    proptest::collection::vec(any::<B256>(), hashes_len),
-                )
-            },
-        )
+        // Independent lengths almost never match, so half the cases share one length.
+        prop_oneof![
+            (0usize..128).prop_map(|len| (len, len, len)),
+            (0usize..128, 0usize..128, 0usize..128),
+        ]
+        .prop_flat_map(|(types_len, sizes_len, hashes_len)| {
+            (
+                proptest::collection::vec(any::<u8>(), types_len),
+                proptest::collection::vec(0usize..131_072, sizes_len),
+                proptest::collection::vec(any::<B256>(), hashes_len),
+            )
+        })
     }
 
     proptest! {
@@ -1173,6 +1195,7 @@ mod tests {
         fn eth_68_handrolled_decode_matches_derived_implementation(
             (types, sizes, hashes) in eth68_hash_fields_strategy()
         ) {
+            let lengths_match = types.len() == sizes.len() && sizes.len() == hashes.len();
             let encodable = EncodableNewPooledTransactionHashes68 {
                 types: Bytes::from(types),
                 sizes,
@@ -1186,9 +1209,10 @@ mod tests {
             let mut handrolled_buf = encoded.as_slice();
             let handrolled = NewPooledTransactionHashes68::decode(&mut handrolled_buf);
 
-            let handrolled_is_ok = handrolled.is_ok();
-            prop_assert_eq!(&handrolled, &derived);
-            if handrolled_is_ok {
+            // The hand-rolled decoder stops early on malformed lengths, so only success must match.
+            prop_assert_eq!(handrolled.as_ref().ok(), derived.as_ref().ok());
+            prop_assert_eq!(handrolled.is_ok(), lengths_match);
+            if handrolled.is_ok() {
                 prop_assert!(derived_buf.is_empty());
                 prop_assert!(handrolled_buf.is_empty());
             }
@@ -1459,5 +1483,49 @@ mod tests {
         assert_eq!(tx_hashes.types[1], tx.ty());
         assert_eq!(tx_hashes.sizes[1], tx.encode_2718_len());
         assert_eq!(tx_hashes.hashes[1], *tx.tx_hash());
+    }
+
+    #[test]
+    fn eth_68_stops_decoding_sizes_beyond_types() {
+        let encoded = encoded(&EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from_static(&[0x02]),
+            sizes: vec![0; 1024],
+            hashes: vec![B256::ZERO],
+        });
+
+        let result = NewPooledTransactionHashes68::decode(&mut encoded.as_slice());
+
+        assert_eq!(result, Err(alloy_rlp::Error::Custom("more sizes than transaction types")));
+    }
+
+    #[test]
+    fn eth_68_types_need_room_for_sizes_and_hashes() {
+        let too_short = encoded(&EncodableNewPooledTransactionHashes68 {
+            types: Bytes::from_static(&[0x02; 4]),
+            sizes: vec![],
+            hashes: vec![],
+        });
+
+        let result = NewPooledTransactionHashes68::decode(&mut too_short.as_slice());
+
+        assert_eq!(result, Err(alloy_rlp::Error::InputTooShort));
+
+        // One-byte sizes leave the smallest room per entry that a valid announcement can have.
+        let eth68 = NewPooledTransactionHashes68 {
+            types: vec![0x02; 8],
+            sizes: vec![0; 8],
+            hashes: vec![B256::ZERO; 8],
+        };
+        let decoded = NewPooledTransactionHashes68::decode(&mut encoded(&eth68).as_slice());
+        assert_eq!(decoded, Ok(eth68.clone()));
+
+        let eth72 = NewPooledTransactionHashes72 {
+            types: eth68.types,
+            sizes: eth68.sizes,
+            hashes: eth68.hashes,
+            cell_mask: None,
+        };
+        let decoded = NewPooledTransactionHashes72::decode(&mut encoded(&eth72).as_slice());
+        assert_eq!(decoded, Ok(eth72));
     }
 }

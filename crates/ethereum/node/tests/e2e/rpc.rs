@@ -401,7 +401,8 @@ async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     assert_eq!(frame.state_gas_used, Some(state_gas.state_gas_used));
     assert_eq!(frame.gas_refund, Some(state_gas.gas_refund));
     assert!(frame.struct_logs.iter().any(|log| log.state_gas_cost.is_some()));
-    assert!(frame.struct_logs.iter().all(|log| log.state_gas_reservoir.is_some()));
+    // This transaction is below the gas cap, so its zero reservoir is omitted from each log.
+    assert!(frame.struct_logs.iter().all(|log| log.state_gas_reservoir.is_none()));
 
     let GethTrace::CallTracer(frame) = provider
         .debug_trace_transaction(

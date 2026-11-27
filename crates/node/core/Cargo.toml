@@ -59,6 +59,7 @@ url.workspace = true
 dirs-next.workspace = true
 
 # obs
+log.workspace = true
 tracing.workspace = true
 reth-tracing-otlp.workspace = true
 
@@ -86,7 +87,9 @@ tracy = ["reth-tracing/tracy"]
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
-min-debug-logs = ["tracing/release_max_level_debug"]
+# Only `min-debug-logs` sets `log/release_max_level_debug` because `log` errors if multiple
+# `release_max_level_*` features are unified (e.g. `--all-features` or `default` + `min-debug-logs`).
+min-debug-logs = ["tracing/release_max_level_debug", "log/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 
 # Debug recording for sparse trie mutations
