@@ -669,8 +669,9 @@ impl PeersManager {
         {
             self.connection_info.decr_state(peer.state);
             if peer.is_temporary() {
-                // `Self::remove_peer` ran during the dial and already queued `PeerRemoved`.
+                // a temporary peer is removed however its dial ends
                 self.peers.remove(peer_id);
+                self.queued_actions.push_back(PeerAction::PeerRemoved(*peer_id));
                 return
             }
             peer.state = PeerConnectionState::Idle;
@@ -4859,7 +4860,12 @@ mod tests {
         let closed = PeerId::random();
         peers.add_and_connect_kind(closed, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
         peers.remove_peer(closed);
+        peers.queued_actions.clear();
         peers.on_outgoing_pending_session_gracefully_closed(&closed);
+        assert!(matches!(
+            peers.queued_actions.pop_front(),
+            Some(PeerAction::PeerRemoved(peer_id)) if peer_id == closed
+        ));
 
         let timed_out = PeerId::random();
         peers.add_and_connect_kind(timed_out, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
