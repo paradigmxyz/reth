@@ -2,12 +2,12 @@
 
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTxCellSidecar,
-    PooledBlobSidecar, RebuiltSidecars,
+    without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
+    eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
@@ -331,6 +331,19 @@ impl BlobStore for DiskFileBlobStore {
 
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.inner.get_one(tx)
+    }
+
+    fn get_without_blobs(
+        &self,
+        tx: B256,
+    ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
+        if let Some(sidecar) = self.inner.blob_cache.lock().get(&tx) {
+            return Ok(sidecar.as_eip7594().map(without_blobs))
+        }
+        Ok(self.inner.read_one(tx)?.and_then(|stored| match stored {
+            StoredSidecar::Full(sidecar) => sidecar.as_eip7594().map(without_blobs),
+            StoredSidecar::Cells(cells) => Some(cells.without_blobs()),
+        }))
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {

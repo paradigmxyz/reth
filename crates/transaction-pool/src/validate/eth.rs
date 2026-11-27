@@ -861,8 +861,16 @@ where
                         }
                     }
 
-                    // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
+                    // validate the blob, or only the kept cells of a sidecar fetched as cells
+                    let validation = if let Some(cells) = sidecar.cells() {
+                        cells.validate(
+                            transaction.blob_versioned_hashes().unwrap_or_default(),
+                            self.kzg_settings.get(),
+                        )
+                    } else {
+                        transaction.validate_blob(&sidecar, self.kzg_settings.get())
+                    };
+                    if let Err(err) = validation {
                         self.validation_metrics.invalid_4844.increment(1);
                         return Err(InvalidPoolTransactionError::Eip4844(
                             Eip4844PoolTransactionError::InvalidEip4844Blob(err),

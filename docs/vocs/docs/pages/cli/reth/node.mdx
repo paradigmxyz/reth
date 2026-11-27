@@ -229,6 +229,11 @@ Networking:
 
           [default: 4096]
 
+      --blob-fetch-probability <PERCENT>
+          Percentage of blob transactions received from eth/72 peers that are fetched with enough cells to rebuild their blobs. The others only fetch the custody columns of the consensus client. Use 100 to disable sampling
+
+          [default: 15]
+
       --pooled-tx-response-soft-limit <BYTES>
           Experimental, for usage in research. Sets the max accumulated byte size of transactions
           to pack in one response.

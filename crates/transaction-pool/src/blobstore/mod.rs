@@ -2,7 +2,10 @@
 
 use alloy_eips::{
     eip4844::{env_settings::EnvKzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
+    eip7594::{
+        BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell,
+        CELLS_PER_EXT_BLOB,
+    },
 };
 use alloy_primitives::{map::FbBuildHasher, TxHash, B256};
 pub use cells::BlobTxCellSidecar;
@@ -41,6 +44,12 @@ impl BlobCellAvailability {
     const LOW_WORD: usize = 0;
     const HIGH_WORD: usize = 1;
 
+    /// Creates availability for the cells in `mask`.
+    pub fn new(mask: BlobCellMask) -> Self {
+        let bits = mask.bits();
+        Self(Arc::new([AtomicU64::new(bits as u64), AtomicU64::new((bits >> 64) as u64)]))
+    }
+
     /// Returns full availability for all blob cells.
     pub fn full() -> Self {
         Self(Arc::new([AtomicU64::new(u64::MAX), AtomicU64::new(u64::MAX)]))
@@ -60,6 +69,11 @@ impl BlobCellAvailability {
     pub fn is_full(&self) -> bool {
         self.get().bits() == u128::MAX
     }
+
+    /// Returns whether enough cells are available to rebuild every blob.
+    pub fn is_recoverable(&self) -> bool {
+        self.get().count() >= CELLS_PER_EXT_BLOB / 2
+    }
 }
 
 impl PartialEq for BlobCellAvailability {
@@ -71,10 +85,14 @@ impl PartialEq for BlobCellAvailability {
 impl Eq for BlobCellAvailability {}
 
 /// A blob sidecar paired with its shared cell availability.
+///
+/// A sidecar fetched as cells keeps them in [`Self::cells`], and the wrapped sidecar holds its
+/// commitments and proofs without blobs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PooledBlobSidecar {
     sidecar: BlobTransactionSidecarVariant,
     availability: BlobCellAvailability,
+    cells: Option<Arc<BlobTxCellSidecar>>,
 }
 
 impl PooledBlobSidecar {
@@ -83,7 +101,26 @@ impl PooledBlobSidecar {
         sidecar: BlobTransactionSidecarVariant,
         availability: BlobCellAvailability,
     ) -> Self {
-        Self { sidecar, availability }
+        Self { sidecar, availability, cells: None }
+    }
+
+    /// Creates a sidecar that keeps only the given cells, without rebuilding the blobs.
+    pub fn from_cells(cells: BlobTxCellSidecar) -> Self {
+        Self {
+            sidecar: cells.without_blobs().into(),
+            availability: BlobCellAvailability::new(cells.mask()),
+            cells: Some(Arc::new(cells)),
+        }
+    }
+
+    /// Returns the kept cells, if this sidecar was created with [`Self::from_cells`].
+    pub fn cells(&self) -> Option<&BlobTxCellSidecar> {
+        self.cells.as_deref()
+    }
+
+    // Takes the kept cells, leaving the sidecar without blobs.
+    pub(crate) const fn take_cells(&mut self) -> Option<Arc<BlobTxCellSidecar>> {
+        self.cells.take()
     }
 
     /// Returns the wrapped sidecar.
@@ -163,6 +200,17 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
 
     /// Retrieves the decoded blob data for the given transaction hash.
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
+
+    /// Retrieves the EIP-7594 sidecar of `tx` without its blobs, as served to eth/72 peers.
+    ///
+    /// Unlike [`Self::get`], this also returns sidecars stored only as cells. Returns `None` if
+    /// `tx` is missing or has a legacy sidecar.
+    fn get_without_blobs(
+        &self,
+        tx: B256,
+    ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
+        Ok(self.get(tx)?.and_then(|sidecar| sidecar.as_eip7594().map(without_blobs)))
+    }
 
     /// Checks if the given transaction hash is in the blob store.
     ///
@@ -339,6 +387,15 @@ impl PartialEq for BlobStoreSize {
     }
 }
 
+/// Returns `sidecar` with its commitments and cell proofs, but no blobs.
+fn without_blobs(sidecar: &BlobTransactionSidecarEip7594) -> BlobTransactionSidecarEip7594 {
+    BlobTransactionSidecarEip7594::new(
+        Vec::new(),
+        sidecar.commitments.clone(),
+        sidecar.cell_proofs.clone(),
+    )
+}
+
 /// Most bytes of sidecars rebuilt from cells to keep in memory.
 const MAX_REBUILT_SIDECARS_SIZE: usize = 64 * 1024 * 1024;
 
@@ -429,7 +486,6 @@ pub struct BlobStoreCleanupStat {
 mod tests {
     use super::*;
     use crate::blobstore::cells::tests::{fixture, subset};
-    use alloy_eips::eip7594::CELLS_PER_EXT_BLOB;
 
     // A store with the sizes it counts for a cell sidecar and for the full sidecar.
     struct TestStore {
@@ -550,6 +606,7 @@ mod tests {
             store.insert(tx, (*full).clone().into()).unwrap();
             store.insert_cells(tx, half.clone()).unwrap();
             assert_eq!(store.get(tx).unwrap(), Some(full.clone()));
+            assert_eq!(store.get_without_blobs(tx).unwrap(), Some(half.without_blobs()));
             assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(full_size)));
             let other = B256::random();
             store.insert_cells(other, half.clone()).unwrap();
@@ -577,6 +634,8 @@ mod tests {
             ));
             assert_eq!(store.get_by_versioned_hashes_v3(&[hash]).unwrap(), vec![None]);
             assert_eq!(store.has_versioned_hashes(&[hash]).unwrap(), vec![false]);
+            // Its body can still be served without blobs.
+            assert_eq!(store.get_without_blobs(tx).unwrap(), Some(partial.without_blobs()));
             assert_eq!(
                 store.get_cells(tx, kept).unwrap(),
                 Some(vec![cells[0], cells[1], cells[3], cells[128], cells[129], cells[131]])

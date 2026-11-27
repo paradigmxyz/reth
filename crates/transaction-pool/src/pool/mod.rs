@@ -98,7 +98,7 @@ use reth_execution_types::ChangedAccount;
 
 use alloy_eips::{
     eip2718::Encodable2718,
-    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    eip7594::{BlobSidecarEncoding, BlobTransactionSidecarVariant},
     Typed2718,
 };
 use reth_primitives_traits::Recovered;
@@ -505,19 +505,12 @@ where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         if transaction.is_eip4844() {
-            let sidecar = self.blob_store.get(*transaction.hash()).ok()??;
+            let hash = *transaction.hash();
             let sidecar = match encoding {
-                BlobSidecarEncoding::WithBlobs => sidecar,
+                BlobSidecarEncoding::WithBlobs => self.blob_store.get(hash).ok()??,
+                // This also serves transactions stored only as cells, without rebuilding blobs.
                 BlobSidecarEncoding::WithoutBlobs => {
-                    let sidecar = sidecar.as_eip7594()?;
-                    Arc::new(
-                        BlobTransactionSidecarEip7594::new(
-                            Vec::new(),
-                            sidecar.commitments.clone(),
-                            sidecar.cell_proofs.clone(),
-                        )
-                        .into(),
-                    )
+                    Arc::new(self.blob_store.get_without_blobs(hash).ok()??.into())
                 }
             };
             transaction.transaction.clone().try_into_pooled_eip4844(sidecar)
@@ -785,8 +778,20 @@ where
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            self.on_new_blob_sidecar(&hash, &sidecar);
-            self.insert_blob(hash, sidecar);
+            if sidecar.cells().is_none() {
+                self.on_new_blob_sidecar(&hash, &sidecar);
+                self.insert_blob(hash, sidecar);
+            } else {
+                let recoverable = sidecar.availability().is_recoverable();
+                self.insert_blob(hash, sidecar);
+                // A sidecar fetched as cells has no blobs, so listeners get it once rebuilt.
+                if recoverable &&
+                    !self.blob_transaction_sidecar_listener.lock().is_empty() &&
+                    let Ok(Some(full)) = self.blob_store.get(hash)
+                {
+                    self.on_new_blob_sidecar(&hash, &full);
+                }
+            }
         }
 
         // Delete replaced blob sidecar if any
@@ -1385,9 +1390,13 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: PooledBlobSidecar) {
+    fn insert_blob(&self, hash: TxHash, mut blob: PooledBlobSidecar) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
-        if let Err(err) = self.blob_store.insert(hash, blob) {
+        let result = match blob.take_cells() {
+            Some(cells) => self.blob_store.insert_cells(hash, Arc::unwrap_or_clone(cells)),
+            None => self.blob_store.insert(hash, blob),
+        };
+        if let Err(err) = result {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
             self.blob_store_metrics.blobstore_failed_inserts.increment(1);
         }

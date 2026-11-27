@@ -7,6 +7,8 @@ use smallvec::SmallVec;
 /// Normalized transaction announcements.
 pub mod announcement;
 
+mod blob_buffer;
+mod blob_fetcher;
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
 /// Default and spec'd bounds.
@@ -23,6 +25,7 @@ pub use self::constants::{
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use announcement::TransactionAnnouncement;
+use blob_fetcher::{BlobFetchEvent, BlobFetcher};
 use config::AnnouncementAcceptance;
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionIngressPolicy,
@@ -47,7 +50,10 @@ use crate::{
     transactions::config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
     NetworkHandle, TxTypesCounter,
 };
-use alloy_eips::eip2718::{Encodable2718, Typed2718};
+use alloy_eips::{
+    eip2718::{Encodable2718, Typed2718},
+    eip7594::{BlobCellMask, CELLS_PER_EXT_BLOB},
+};
 use alloy_primitives::{
     bytes::BufMut,
     map::{hash_map::Entry, B256Map, B256Set, FbBuildHasher, HashMap, HashSet},
@@ -78,6 +84,7 @@ use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
+    blobstore::BlobCellAvailability,
     error::{PoolError, PoolResult},
     AddedTransactionOutcome, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
     PropagatedTransactions, TransactionPool, ValidPoolTransaction,
@@ -339,7 +346,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<Pool: TransactionPool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Cache of recovered transaction senders shared with payload execution, if enabled.
@@ -352,6 +359,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     network_events: EventStream<NetworkEvent<PeerRequest<N>>>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher<N>,
+    /// Fetches the cells of blob transactions received from eth/72 peers without blobs.
+    blob_fetcher: BlobFetcher<Pool::Transaction>,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -463,12 +472,17 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             .capacity_pending_pool_imports_bytes
             .increment(pending_pool_imports_info.max_pending_pool_imports_bytes as u64);
 
+        let blob_fetcher = BlobFetcher::new(
+            reth_network_api::NetworkInfo::cell_custody(&network).clone(),
+            transactions_manager_config.blob_fetch_probability,
+        );
         Self {
             pool,
             sender_recovery_cache: None,
             network,
             network_events,
             transaction_fetcher,
+            blob_fetcher,
             transactions_by_peers: Default::default(),
             announcement_hashes: B256Set::default(),
             pool_imports: Default::default(),
@@ -569,6 +583,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             self.policies.propagation_policy_mut().on_session_closed(&mut peer);
         }
         self.transaction_fetcher.on_peer_disconnected(peer_id);
+        self.blob_fetcher.drop_peer(*peer_id);
     }
 
     /// Clear the transaction
@@ -822,6 +837,16 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 .increment(already_known_hashes_count as u64);
         }
 
+        // eth/72 peers announce which cells they can serve for the blob transactions.
+        if let Some(mask) = announcement.cell_mask() {
+            let mask = BlobCellMask::from_bits(u128::from_le_bytes(mask.into()));
+            for tx in &announcement {
+                if tx.metadata.is_some_and(|metadata| metadata.tx_type == EIP4844_TX_TYPE_ID) {
+                    self.blob_fetcher.announce(tx.hash, peer_id, mask);
+                }
+            }
+        }
+
         if announcement.is_empty() {
             // nothing to request
             return
@@ -914,7 +939,7 @@ where
         let PropagateTransactions { pooled, full } = full_transactions.build();
 
         // send hashes if any
-        if let Some(new_pooled_hashes) = pooled {
+        for new_pooled_hashes in pooled {
             for hash in new_pooled_hashes.iter_hashes().copied() {
                 propagated.record(hash, PropagateKind::Hash(peer_id));
                 // mark transaction as seen by peer
@@ -981,22 +1006,17 @@ where
                 }
             }
 
-            let new_pooled_hashes = hashes.build();
+            for new_pooled_hashes in hashes.build() {
+                for hash in new_pooled_hashes.iter_hashes().copied() {
+                    propagated.record(hash, PropagateKind::Hash(peer_id));
+                    peer.seen_transactions.insert(hash);
+                }
 
-            if new_pooled_hashes.is_empty() {
-                // nothing to propagate
-                return
+                trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
+
+                // send hashes of transactions
+                self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
             }
-
-            for hash in new_pooled_hashes.iter_hashes().copied() {
-                propagated.record(hash, PropagateKind::Hash(peer_id));
-                peer.seen_transactions.insert(hash);
-            }
-
-            trace!(target: "net::tx::propagation", ?peer_id, ?new_pooled_hashes, "Propagating transactions to peer");
-
-            // send hashes of transactions
-            self.network.send_transactions_hashes(peer_id, new_pooled_hashes);
 
             // Update propagated transactions metrics
             self.metrics.propagated_transactions.increment(propagated.len() as u64);
@@ -1072,7 +1092,7 @@ where
             let PropagateTransactions { pooled, full } = builder.build();
 
             // send hashes if any
-            if let Some(mut new_pooled_hashes) = pooled {
+            for mut new_pooled_hashes in pooled {
                 // Unhappy path: too many hashes for a single message. This should not happen
                 // during regular propagation, which is capped at the soft limit per batch, and
                 // is only reachable via manual propagation commands with oversized batches.
@@ -1282,13 +1302,11 @@ where
             msg_builder.push_pooled(pooled_tx);
         }
 
-        let msg = msg_builder.build();
-        if msg.is_empty() {
-            return
+        for msg in msg_builder.build() {
+            peer.seen_transactions.extend(msg.iter_hashes().copied());
+            debug!(target: "net::tx", ?peer_id, tx_count = msg.len(), "Broadcasting transaction hashes");
+            self.network.send_transactions_hashes(peer_id, msg);
         }
-        peer.seen_transactions.extend(msg.iter_hashes().copied());
-        debug!(target: "net::tx", ?peer_id, tx_count = msg.len(), "Broadcasting transaction hashes");
-        self.network.send_transactions_hashes(peer_id, msg);
     }
 
     /// Handles a received event related to common network events.
@@ -1446,23 +1464,6 @@ where
             }
         }
 
-        // Eth/72 and later `PooledTransactions` responses elide blob payloads from type 3
-        // transactions per EIP-8070, so their sidecars can never validate. Drop them before
-        // touching the pool; geth equivalently diverts these bodies into a buffer that is
-        // completed with cells fetched via `GetCells`, which is not implemented yet.
-        if version >= EthVersion::Eth72 {
-            let len_before = transactions.len();
-            transactions.retain(|tx| !tx.is_eip4844());
-            let dropped = len_before - transactions.len();
-            if dropped > 0 {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    dropped,
-                    "dropped blob transactions from sparse blobpool response, cell fetching not implemented"
-                );
-            }
-        }
-
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
@@ -1520,17 +1521,49 @@ where
             }
         };
 
-        let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
+        let mut new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
 
         has_bad_transactions |= new_txs.len() != txs_len;
+
+        // Eth/72 and later `PooledTransactions` responses elide blob payloads from type 3
+        // transactions per EIP-8070. Their bodies wait in the blob fetcher for the cells fetched
+        // with `GetCells`, which then imports them.
+        if version >= EthVersion::Eth72 {
+            for tx in new_txs.extract_if(.., |tx| tx.is_eip4844()) {
+                has_bad_transactions |= self.blob_fetcher.body(peer_id, tx).is_err();
+            }
+        }
 
         // Record the transactions as seen by the peer
         for tx in &new_txs {
             self.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
         }
 
-        // 3. import new transactions as a batch to minimize lock contention on the underlying
-        // pool
+        self.import_recovered_transactions(new_txs);
+
+        if num_already_seen_by_peer > 0 {
+            self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
+            self.metrics
+                .occurrences_of_transaction_already_seen_by_peer
+                .increment(num_already_seen_by_peer);
+            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
+        }
+
+        if has_bad_transactions {
+            // peer sent us invalid transactions
+            self.report_peer_bad_transactions(peer_id)
+        }
+
+        if num_already_seen_by_peer > 0 {
+            self.report_already_seen(peer_id);
+        }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
+    }
+
+    /// Queues recovered transactions for import into the pool, counted against the import limits.
+    fn import_recovered_transactions(&self, new_txs: Vec<Pool::Transaction>) {
+        // import new transactions as a batch to minimize lock contention on the underlying pool
         if !new_txs.is_empty() {
             let pool = self.pool.clone();
             // update metrics
@@ -1570,25 +1603,6 @@ where
 
             self.pool_imports.push(import);
         }
-
-        if num_already_seen_by_peer > 0 {
-            self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
-            self.metrics
-                .occurrences_of_transaction_already_seen_by_peer
-                .increment(num_already_seen_by_peer);
-            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
-        }
-
-        if has_bad_transactions {
-            // peer sent us invalid transactions
-            self.report_peer_bad_transactions(peer_id)
-        }
-
-        if num_already_seen_by_peer > 0 {
-            self.report_already_seen(peer_id);
-        }
-
-        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].
@@ -1698,6 +1712,24 @@ where
             },
             |event| this.on_fetch_event(event),
         );
+
+        // Advance cell requests and verification, importing blob transactions whose cells passed.
+        if this.has_capacity_for_pending_pool_imports() &&
+            let Poll::Ready(event) = this.blob_fetcher.poll(cx, &this.peers)
+        {
+            match event {
+                BlobFetchEvent::Transaction(peer, tx) => {
+                    this.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer]);
+                    this.import_recovered_transactions(vec![tx]);
+                }
+                BlobFetchEvent::BadPeers(peers) => {
+                    for peer in peers {
+                        this.report_peer_bad_transactions(peer);
+                    }
+                }
+            }
+            cx.waker().wake_by_ref();
+        }
 
         // Remember whether response polling stopped at capacity so imports completing below
         // can trigger another poll even if the waiting response has not registered a waker yet.
@@ -1839,6 +1871,8 @@ struct PropagateTransaction {
     propagation_size: usize,
     /// Size advertised to eth/72 peers, which receive blob transactions without their blobs.
     propagation_size_without_blobs: Option<usize>,
+    /// Cells kept for every blob, for blob transactions.
+    cell_mask: Option<BlobCellMask>,
     transaction: LazyEncodedTransaction,
 }
 
@@ -1856,6 +1890,7 @@ impl PropagateTransaction {
             is_broadcastable_in_full,
             propagation_size,
             propagation_size_without_blobs: (!transaction.is_eip4844()).then_some(propagation_size),
+            cell_mask: transaction.is_eip4844().then_some(BlobCellMask::from_bits(u128::MAX)),
             transaction: LazyEncoded::new(transaction),
         }
     }
@@ -1869,10 +1904,12 @@ impl PropagateTransaction {
         let is_broadcastable_in_full = tx.transaction.consensus_ref().is_broadcastable_in_full();
         let propagation_size = tx.encoded_length();
         let propagation_size_without_blobs = tx.transaction.encoded_length_eth72();
+        let cell_mask = tx.transaction.blob_cell_availability().map(BlobCellAvailability::get);
         Self {
             is_broadcastable_in_full,
             propagation_size,
             propagation_size_without_blobs,
+            cell_mask,
             transaction: LazyEncoded::new(PropagatePooledTransactionEncoder::new(tx)),
         }
     }
@@ -1899,8 +1936,12 @@ impl PropagateTransaction {
     }
 
     /// Returns whether the transaction can be announced to a peer on `version`.
-    const fn can_announce_to(&self, version: EthVersion) -> bool {
-        !version.is_eth72_or_newer() || self.propagation_size_without_blobs.is_some()
+    fn can_announce_to(&self, version: EthVersion) -> bool {
+        if version.is_eth72_or_newer() {
+            self.propagation_size_without_blobs.is_some()
+        } else {
+            can_serve_blobs(self.cell_mask)
+        }
     }
 }
 
@@ -1974,9 +2015,7 @@ impl PropagateTransactionsBuilder {
     /// Consumes the type and returns the built messages that should be sent to the peer.
     fn build(self) -> PropagateTransactions {
         match self {
-            Self::Pooled(pooled) => {
-                PropagateTransactions { pooled: Some(pooled.build()), full: None }
-            }
+            Self::Pooled(pooled) => PropagateTransactions { pooled: pooled.build(), full: None },
             Self::Full(full) => full.build(),
         }
     }
@@ -1995,7 +2034,7 @@ impl PropagateTransactionsBuilder {
 /// Represents how the transactions should be sent to a peer if any.
 struct PropagateTransactions {
     /// The pooled transaction hashes to send.
-    pooled: Option<NewPooledTransactionHashes>,
+    pooled: Vec<NewPooledTransactionHashes>,
     /// The transactions to send in full.
     full: Option<BroadcastPoolTransactions>,
 }
@@ -2043,7 +2082,7 @@ impl FullTransactionsBuilder {
 
     /// Returns the messages that should be propagated to the peer.
     fn build(self) -> PropagateTransactions {
-        let pooled = Some(self.pooled.build()).filter(|pooled| !pooled.is_empty());
+        let pooled = self.pooled.build();
         let full =
             (!self.transactions.is_empty()).then_some(BroadcastPoolTransactions(self.transactions));
         PropagateTransactions { pooled, full }
@@ -2099,7 +2138,8 @@ impl FullTransactionsBuilder {
 enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
-    Eth72(NewPooledTransactionHashes72),
+    /// One announcement per cell mask, since an eth/72 announcement has a single mask.
+    Eth72(Vec<NewPooledTransactionHashes72>),
 }
 
 // === impl PooledTransactionsHashesBuilder ===
@@ -2112,6 +2152,7 @@ impl PooledTransactionsHashesBuilder {
             pooled_tx.transaction.ty(),
             pooled_tx.encoded_length(),
             pooled_tx.transaction.encoded_length_eth72(),
+            pooled_tx.transaction.blob_cell_availability().map(BlobCellAvailability::get),
         );
     }
 
@@ -2120,7 +2161,7 @@ impl PooledTransactionsHashesBuilder {
         match self {
             Self::Eth66(hashes) => hashes.is_empty(),
             Self::Eth68(hashes) => hashes.is_empty(),
-            Self::Eth72(hashes) => hashes.is_empty(),
+            Self::Eth72(messages) => messages.iter().all(|msg| msg.is_empty()),
         }
     }
 
@@ -2137,25 +2178,41 @@ impl PooledTransactionsHashesBuilder {
             tx.tx_type(),
             tx.propagation_size(),
             tx.propagation_size_without_blobs,
+            tx.cell_mask,
         );
     }
 
-    fn push_hash(&mut self, hash: TxHash, ty: u8, size: usize, eth72_size: Option<usize>) {
+    fn push_hash(
+        &mut self,
+        hash: TxHash,
+        ty: u8,
+        size: usize,
+        eth72_size: Option<usize>,
+        cell_mask: Option<BlobCellMask>,
+    ) {
         match self {
-            Self::Eth66(msg) => msg.push(hash),
-            Self::Eth68(msg) => {
+            Self::Eth66(msg) if can_serve_blobs(cell_mask) => msg.push(hash),
+            Self::Eth68(msg) if can_serve_blobs(cell_mask) => {
                 msg.hashes.push(hash);
                 msg.sizes.push(size);
                 msg.types.push(ty);
             }
-            Self::Eth72(msg) => {
+            Self::Eth66(_) | Self::Eth68(_) => {}
+            Self::Eth72(messages) => {
                 let Some(size) = eth72_size else { return };
+                let cell_mask = cell_mask.map(|mask| B128::from(mask.bits().to_le_bytes()));
+                let index = messages
+                    .iter()
+                    .position(|msg| msg.cell_mask == cell_mask)
+                    .unwrap_or_else(|| {
+                        messages
+                            .push(NewPooledTransactionHashes72 { cell_mask, ..Default::default() });
+                        messages.len() - 1
+                    });
+                let msg = &mut messages[index];
                 msg.hashes.push(hash);
                 msg.sizes.push(size);
                 msg.types.push(ty);
-                if ty == EIP4844_TX_TYPE_ID {
-                    msg.cell_mask = Some(NewPooledTransactionHashes72::ALL_CELLS_MASK);
-                }
             }
         }
     }
@@ -2182,27 +2239,38 @@ impl PooledTransactionsHashesBuilder {
                 Self::Eth68(NewPooledTransactionHashes68::with_capacity(capacity))
             }
             EthVersion::Eth72 | EthVersion::Eth73 => {
-                Self::Eth72(NewPooledTransactionHashes72::with_capacity(capacity))
+                Self::Eth72(vec![NewPooledTransactionHashes72::with_capacity(capacity)])
             }
         }
     }
 
-    fn build(self) -> NewPooledTransactionHashes {
-        match self {
+    /// Returns the non-empty announcements to send.
+    fn build(self) -> Vec<NewPooledTransactionHashes> {
+        let messages = match self {
             Self::Eth66(mut msg) => {
                 msg.shrink_to_fit();
-                msg.into()
+                vec![msg.into()]
             }
             Self::Eth68(mut msg) => {
                 msg.shrink_to_fit();
-                msg.into()
+                vec![msg.into()]
             }
-            Self::Eth72(mut msg) => {
-                msg.shrink_to_fit();
-                msg.into()
-            }
-        }
+            Self::Eth72(messages) => messages
+                .into_iter()
+                .map(|mut msg| {
+                    msg.shrink_to_fit();
+                    msg.into()
+                })
+                .collect(),
+        };
+        messages.into_iter().filter(|msg: &NewPooledTransactionHashes| !msg.is_empty()).collect()
     }
+}
+
+/// Returns whether a transaction with `cell_mask` can be served with its blobs, as eth/66 to eth/71
+/// peers need.
+fn can_serve_blobs(cell_mask: Option<BlobCellMask>) -> bool {
+    cell_mask.is_none_or(|mask| mask.count() >= CELLS_PER_EXT_BLOB / 2)
 }
 
 /// How we received the transactions.
@@ -3323,6 +3391,75 @@ mod tests {
     }
 
     #[test]
+    fn test_blob_transactions_are_announced_with_their_cells() {
+        let sidecar = BlobTransactionSidecarEip7594::new(
+            vec![Blob::repeat_byte(1)],
+            vec![Bytes48::repeat_byte(2)],
+            vec![Bytes48::repeat_byte(3); CELLS_PER_EXT_BLOB],
+        );
+        let blob_tx = |nonce, mask| {
+            let tx = PooledTransactionVariant::Eip4844(
+                TxEip4844WithSidecar {
+                    tx: TxEip4844 {
+                        nonce,
+                        blob_versioned_hashes: vec![B256::ZERO],
+                        ..Default::default()
+                    },
+                    sidecar: sidecar.clone().into(),
+                }
+                .into_signed(Signature::test_signature()),
+            );
+            let mut tx =
+                EthPooledTransaction::from_pooled(Recovered::new_unchecked(tx, Address::ZERO));
+            tx.blob_cell_availability = Some(BlobCellAvailability::new(mask));
+            valid_eth_pool_transaction(tx)
+        };
+        let all = BlobCellMask::from_bits(u128::MAX);
+        let custody = BlobCellMask::from_bits(0b11);
+        let provider = blob_tx(0, all);
+        let sampler = blob_tx(1, custody);
+
+        // eth/72 announcements carry one mask, so each mask gets its own announcement.
+        for push in [true, false] {
+            let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
+            for tx in [&provider, &sampler] {
+                if push {
+                    builder.push(&PropagateTransaction::pool_tx(tx.clone()));
+                } else {
+                    builder.push_pooled(tx.clone());
+                }
+            }
+            let announced: Vec<_> = builder
+                .build()
+                .iter()
+                .map(|msg| {
+                    let msg = msg.as_eth72().unwrap();
+                    (msg.hashes.clone(), msg.cell_mask)
+                })
+                .collect();
+            assert_eq!(
+                announced,
+                [
+                    (vec![*provider.hash()], Some(B128::from(all.bits().to_le_bytes()))),
+                    (vec![*sampler.hash()], Some(B128::from(custody.bits().to_le_bytes()))),
+                ]
+            );
+        }
+
+        // Older peers need the blobs, which the sampler can't rebuild.
+        let sampler = PropagateTransaction::pool_tx(sampler);
+        assert!(sampler.can_announce_to(EthVersion::Eth72));
+        assert!(!sampler.can_announce_to(EthVersion::Eth71));
+        let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth68);
+        builder.push(&PropagateTransaction::pool_tx(provider));
+        builder.push(&sampler);
+        let [NewPooledTransactionHashes::Eth68(msg)] = &builder.build()[..] else {
+            panic!("expected one eth/68 announcement")
+        };
+        assert_eq!(msg.hashes.len(), 1);
+    }
+
+    #[test]
     fn test_blob_transaction_announced_size_matches_served_body() {
         let sidecar = BlobTransactionSidecarEip7594::new(
             vec![Blob::repeat_byte(1); 2],
@@ -3353,13 +3490,13 @@ mod tests {
             let mut builder = PooledTransactionsHashesBuilder::new(version);
             builder.push(&tx);
             builder.push_pooled(pool_tx.clone());
-            let sizes = match builder.build() {
-                NewPooledTransactionHashes::Eth68(msg) => msg.sizes,
-                NewPooledTransactionHashes::Eth72(msg) => {
+            let sizes = match &builder.build()[..] {
+                [NewPooledTransactionHashes::Eth68(msg)] => msg.sizes.clone(),
+                [NewPooledTransactionHashes::Eth72(msg)] => {
                     assert_eq!(msg.cell_mask, Some(NewPooledTransactionHashes72::ALL_CELLS_MASK));
-                    msg.sizes
+                    msg.sizes.clone()
                 }
-                msg => panic!("unexpected announcement {msg:?}"),
+                msgs => panic!("unexpected announcements {msgs:?}"),
             };
             assert_eq!(sizes, vec![served.encode_2718_len(); 2]);
         }
@@ -3378,7 +3515,7 @@ mod tests {
 
         let txs = builder.build();
         assert!(txs.full.is_none());
-        let txs = txs.pooled.unwrap();
+        let [txs] = &txs.pooled[..] else { panic!("expected one announcement") };
         assert_eq!(txs.len(), 1);
     }
 
@@ -3419,14 +3556,14 @@ mod tests {
         assert!(!builder.is_empty());
 
         let txs = builder.clone().build();
-        assert!(txs.pooled.is_none());
+        assert!(txs.pooled.is_empty());
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
 
         builder.push(&tx);
 
         let txs = builder.clone().build();
-        let pooled = txs.pooled.unwrap();
+        let [pooled] = &txs.pooled[..] else { panic!("expected one announcement") };
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
@@ -3445,7 +3582,7 @@ mod tests {
 
         let txs = builder.clone().build();
         assert!(txs.full.is_none());
-        let txs = txs.pooled.unwrap();
+        let [txs] = &txs.pooled[..] else { panic!("expected one announcement") };
         assert_eq!(txs.len(), 1);
 
         let tx =
@@ -3453,7 +3590,7 @@ mod tests {
         builder.push(&tx);
 
         let txs = builder.clone().build();
-        let pooled = txs.pooled.unwrap();
+        let [pooled] = &txs.pooled[..] else { panic!("expected one announcement") };
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
@@ -3526,7 +3663,7 @@ mod tests {
         builder.push(&PropagateTransaction::pool_tx(valid_eth_pool_transaction(
             tx_gen.gen_eip1559_pooled(),
         )));
-        let msg = builder.build();
+        let [msg] = &builder.build()[..] else { panic!("expected one announcement") };
         assert_eq!(msg.as_eth72().unwrap().cell_mask, None);
 
         // A blob transaction without a known cell sidecar cannot be served over eth/72.
@@ -3550,10 +3687,7 @@ mod tests {
             let mut builder = PooledTransactionsHashesBuilder::new(EthVersion::Eth72);
             builder.push(&PropagateTransaction::pool_tx(blob.clone()));
             builder.push_pooled(blob);
-            let msg = builder.build();
-            let msg = msg.as_eth72().unwrap();
-            assert!(msg.hashes.is_empty());
-            assert_eq!(msg.cell_mask, None);
+            assert!(builder.build().is_empty());
         }
     }
 

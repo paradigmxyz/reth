@@ -34,7 +34,8 @@ use reth_network::{
                 DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             },
             tx_manager::{
-                DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS, DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+                DEFAULT_BLOB_FETCH_PROBABILITY, DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+                DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
                 DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
                 DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES,
             },
@@ -75,6 +76,8 @@ pub struct DefaultNetworkArgs {
     pub max_seen_tx_history: u32,
     /// Default max number of transactions to import concurrently.
     pub max_pending_pool_imports: usize,
+    /// Default percentage of eth/72 blob transactions fetched with enough cells to rebuild them.
+    pub blob_fetch_probability: u8,
     /// Default max accumulated byte size of transactions to pack in one response.
     pub soft_limit_byte_size_pooled_transactions_response: usize,
     /// Default max accumulated byte size of transactions to request in one request.
@@ -219,6 +222,7 @@ impl Default for DefaultNetworkArgs {
             max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_pending_pool_imports: DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
+            blob_fetch_probability: DEFAULT_BLOB_FETCH_PROBABILITY,
             soft_limit_byte_size_pooled_transactions_response:
                 SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request:
@@ -343,6 +347,12 @@ pub struct NetworkArgs {
     #[arg(long = "max-pending-imports", value_name = "COUNT", default_value_t = DefaultNetworkArgs::get_global().max_pending_pool_imports, verbatim_doc_comment)]
     /// Max number of transactions to import concurrently.
     pub max_pending_pool_imports: usize,
+
+    /// Percentage of blob transactions received from eth/72 peers that are fetched with enough
+    /// cells to rebuild their blobs. The others only fetch the custody columns of the consensus
+    /// client. Use 100 to disable sampling.
+    #[arg(long = "blob-fetch-probability", value_name = "PERCENT", default_value_t = DefaultNetworkArgs::get_global().blob_fetch_probability, value_parser = clap::value_parser!(u8).range(15..=100))]
+    pub blob_fetch_probability: u8,
 
     /// Experimental, for usage in research. Sets the max accumulated byte size of transactions
     /// to pack in one response.
@@ -537,6 +547,7 @@ impl NetworkArgs {
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             max_pending_pool_imports: self.max_pending_pool_imports,
             max_pending_pool_imports_bytes: DEFAULT_MAX_BYTE_SIZE_PENDING_POOL_IMPORTS,
+            blob_fetch_probability: self.blob_fetch_probability,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
             tx_channel_memory_limit_bytes: self.tx_channel_memory_limit_bytes,
@@ -718,6 +729,7 @@ impl Default for NetworkArgs {
             max_concurrent_tx_requests_per_peer,
             max_seen_tx_history,
             max_pending_pool_imports,
+            blob_fetch_probability,
             soft_limit_byte_size_pooled_transactions_response,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             max_capacity_cache_txns_pending_fetch,
@@ -750,6 +762,7 @@ impl Default for NetworkArgs {
             soft_limit_byte_size_pooled_transactions_response,
             soft_limit_byte_size_pooled_transactions_response_on_pack_request,
             max_pending_pool_imports,
+            blob_fetch_probability,
             max_seen_tx_history,
             max_capacity_cache_txns_pending_fetch,
             tx_channel_memory_limit_bytes,

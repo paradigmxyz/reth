@@ -62,6 +62,12 @@ pub mod tx_manager {
     /// tasks. When the budget is exhausted, new events are dropped (see metric
     /// `total_dropped_tx_events_at_full_capacity`).
     pub const DEFAULT_TX_MANAGER_CHANNEL_MEMORY_LIMIT_BYTES: usize = 1024 * 1024 * 1024;
+
+    /// Default percentage of eth/72 blob transactions fetched with enough cells to rebuild their
+    /// blobs, the minimum set by [EIP-8070].
+    ///
+    /// [EIP-8070]: https://eips.ethereum.org/EIPS/eip-8070
+    pub const DEFAULT_BLOB_FETCH_PROBABILITY: u8 = 15;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
