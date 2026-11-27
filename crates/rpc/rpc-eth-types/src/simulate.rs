@@ -555,7 +555,8 @@ where
     // Per the eth_simulateV1 spec, unspecified fee fields default to 0 (not the block base fee),
     // matching geth's `CallDefaults` behavior. This lets simulation behave like a free-gas
     // `eth_call` when validation is off, and surfaces "max fee per gas less than block base fee"
-    // errors when validation is on with a real base fee.
+    // errors when validation is on with a real base fee. A blob call without `maxFeePerBlobGas` is
+    // never buildable, so it always takes this branch.
     let _ = block_base_fee_per_gas;
     if tx.as_ref().output_tx_type_checked().is_none() {
         if tx_type.is_legacy() || tx_type.is_eip2930() {
@@ -568,6 +569,9 @@ where
             }
             if tx.as_ref().max_priority_fee_per_gas().is_none() {
                 tx.as_mut().set_max_priority_fee_per_gas(0);
+            }
+            if tx_type.is_eip4844() {
+                tx.as_mut().max_fee_per_blob_gas.get_or_insert(0);
             }
         }
     }

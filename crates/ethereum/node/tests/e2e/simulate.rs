@@ -1,5 +1,5 @@
 use alloy_eips::eip7825::MAX_TX_GAS_LIMIT_OSAKA;
-use alloy_primitives::{address, bytes, Address, U256};
+use alloy_primitives::{address, b256, bytes, Address, U256};
 use alloy_provider::Provider;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -411,6 +411,7 @@ async fn test_simulate_v1_validation_error_codes() -> eyre::Result<()> {
             .max_priority_fee_per_gas(0)
             .nonce(5)
     };
+    let blob_hash = b256!("0x0100000000000000000000000000000000000000000000000000000000000001");
     let state_overrides = || {
         StateOverridesBuilder::default()
             .with_balance(from, U256::from(u64::MAX))
@@ -427,6 +428,12 @@ async fn test_simulate_v1_validation_error_codes() -> eyre::Result<()> {
             tx().max_fee_per_gas(1),
             -38012,
             "max fee per gas less than block base fee",
+        ),
+        (
+            "default blob fee too low",
+            TransactionRequest { blob_versioned_hashes: Some(vec![blob_hash]), ..tx() },
+            -32003,
+            "max fee per blob gas less than block blob gas fee",
         ),
         (
             "insufficient funds",
@@ -509,6 +516,46 @@ async fn test_simulate_v1_with_max_fee_per_blob_gas_only() -> eyre::Result<()> {
     assert!(call.status, "expected call to succeed");
     assert!(call.error.is_none(), "expected no error");
     assert_eq!(call.max_used_gas, Some(call.gas_used), "expected maxUsedGas in call result");
+
+    Ok(())
+}
+
+/// Tests that `eth_simulateV1` defaults a missing `maxFeePerBlobGas` to 0 for a blob call.
+///
+/// Reproduces <https://github.com/paradigmxyz/reth/issues/28631>
+#[tokio::test]
+async fn test_simulate_v1_blob_call_without_max_fee_per_blob_gas() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+
+    let from = address!("0xc000000000000000000000000000000000000000");
+    let to = address!("0xc100000000000000000000000000000000000000");
+    let tx = TransactionRequest {
+        blob_versioned_hashes: Some(vec![b256!(
+            "0x0100000000000000000000000000000000000000000000000000000000000001"
+        )]),
+        ..TransactionRequest::default().from(from).to(to)
+    };
+    let state_overrides = StateOverride::from_iter([
+        (from, AccountOverride::default().with_balance(U256::from(u64::MAX))),
+        // ORIGIN BALANCE PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN
+        (to, AccountOverride::default().with_code(bytes!("0x32315f5260205ff3"))),
+    ]);
+    let payload = SimulatePayload::default()
+        .with_full_transactions()
+        .extend(SimBlock::default().with_state_overrides(state_overrides).call(tx));
+
+    let result: Vec<SimulatedBlock> =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+
+    assert!(result[0].calls[0].status);
+    let tx = &result[0].inner.transactions.as_transactions().unwrap()[0];
+    assert!(tx.inner.is_eip4844());
+    assert_eq!(tx.max_fee_per_blob_gas(), Some(0));
+    // No blob fee is charged.
+    assert_eq!(U256::from_be_slice(&result[0].calls[0].return_data), U256::from(u64::MAX));
 
     Ok(())
 }

@@ -163,6 +163,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                         evm_env.version_mut().features.remove(evm2::EvmFeatures::NONCE_CHECK);
                         evm_env.version_mut().features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
                         evm_env.block_env_mut().basefee = U256::ZERO;
+                        // The spec zeroes the blob base fee without validation, so a default
+                        // `maxFeePerBlobGas` of 0 passes the cap check and no blob fee is charged.
+                        evm_env.block_env_mut().blob_basefee = U256::ZERO;
                     }
 
                     // Set prevrandao to zero for simulated blocks by default,
