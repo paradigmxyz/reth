@@ -1,6 +1,6 @@
 # syntax=docker.io/docker/dockerfile:1.7-labs
 
-FROM lukemathwalker/cargo-chef:latest-rust-1.96-trixie AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.100-trixie AS chef
 WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 # Install system dependencies
 COPY .github/scripts/install_llvm_ubuntu.sh /tmp/install_llvm.sh
 RUN /tmp/install_llvm.sh && rm /tmp/install_llvm.sh && \
-    apt-get install -y --no-install-recommends libclang-dev m4 pkg-config
+    apt-get install -y --no-install-recommends cmake libclang-dev m4 pkg-config
 
 # Builds a cargo-chef plan
 FROM chef AS planner
@@ -30,6 +30,9 @@ ENV RUSTFLAGS="$RUSTFLAGS"
 # Extra Cargo features
 ARG FEATURES=""
 ENV FEATURES=$FEATURES
+
+# Stamp the real build time into the binary's version
+ENV VERGEN_IDEMPOTENT=0
 
 # Builds dependencies
 RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json

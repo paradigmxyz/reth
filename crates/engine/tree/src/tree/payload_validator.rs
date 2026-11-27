@@ -391,7 +391,9 @@ where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
+            BlockOrPayload::Payload(payload) => {
+                self.validator.convert_payload_to_block(payload).map(Arc::unwrap_or_clone)
+            }
             BlockOrPayload::Block(block) => Ok(block.split().0),
         }
     }
@@ -516,7 +518,9 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = validated_block.try_into_inner().expect("sole handle")?;
-                        return Err(InsertBlockError::new(block, e.into()).into())
+                        return Err(
+                            InsertBlockError::new(Arc::unwrap_or_clone(block), e.into()).into()
+                        )
                     }
                 }
             };
@@ -558,7 +562,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                validated_block.try_into_inner().expect("sole handle")?,
+                Arc::unwrap_or_clone(validated_block.try_into_inner().expect("sole handle")?),
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -611,8 +615,12 @@ where
         };
         // The BAL commit loop receives only aggregate gas limits, so it cannot replay a
         // frame transaction's separate execution and state reservations.
-        let parallel_bal_execution = !has_frame_transactions &&
-            ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let sequential_reason = if has_frame_transactions {
+            Some("frame-transactions")
+        } else {
+            ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()))
+        };
+        let parallel_bal_execution = sequential_reason.is_none();
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
         let mut state_root_job =
@@ -726,6 +734,10 @@ where
         // Execute the block and handle any execution errors.
         // The receipt root task is spawned before execution and receives receipts incrementally
         // as transactions complete, allowing parallel computation during execution.
+        let path = if parallel_bal_execution { "parallel" } else { "sequential" };
+        let reason = sequential_reason.unwrap_or_default();
+        let NumHash { number, hash } = input.num_hash();
+        debug!(target: "engine::tree::bal_execution_path", block = number, %hash, path, reason, "Executing block");
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
             self.execute_block_bal(
@@ -792,8 +804,10 @@ where
                 }
             });
 
+        // Release the payload's handle so the block can be unwrapped instead of cloned.
+        drop(input);
         let block = validated_block.try_into_inner().expect("sole handle")?;
-        let block = block.with_senders(senders);
+        let block = Arc::unwrap_or_clone(block).with_senders(senders);
 
         // Wait for the receipt root computation to complete.
         let receipt_root_bloom = {
@@ -952,7 +966,7 @@ where
         &self,
         input: &BlockOrPayload<T>,
         parent: SealedHeader<N::BlockHeader>,
-    ) -> LazyHandle<Result<SealedBlock<N::Block>, InsertPayloadError<N::Block>>>
+    ) -> LazyHandle<Result<Arc<SealedBlock<N::Block>>, InsertPayloadError<N::Block>>>
     where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: PayloadValidator<T, Block = N::Block> + Clone,
@@ -969,7 +983,7 @@ where
             )
             .entered();
             let block = match input {
-                BlockOrPayload::Block(block) => block.split().0,
+                BlockOrPayload::Block(block) => Arc::new(block.split().0),
                 BlockOrPayload::Payload(payload) => {
                     validator.convert_payload_to_block(payload)?
                 }
@@ -977,7 +991,7 @@ where
 
             if let Err(e) = consensus.validate_header(block.sealed_header()) {
                 error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header");
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
             }
 
             // now validate against the parent
@@ -985,7 +999,7 @@ where
             if let Err(e) = consensus.validate_header_against_parent(block.sealed_header(), &parent)
             {
                 warn!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate header against parent");
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
             }
             drop(_enter);
 
@@ -993,7 +1007,7 @@ where
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
             {
                 error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
-                return Err(InsertBlockError::consensus_error(e, block).into())
+                return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
             }
 
             Ok(block)
@@ -1107,7 +1121,8 @@ where
         Ok((output, senders, result_rx, built_bal))
     }
 
-    /// Returns true when the BAL execute path should be used for this block.
+    /// Returns `None` when the BAL execute path should be used for this block, or else the first
+    /// gate that rules it out: `no-access-list` or `disabled`.
     // TODO: extend with stronger gating before enabling on mainnet:
     //   - Fork check: `Amsterdam.active_at_timestamp(env.evm_env.timestamp)`. Today a BAL only
     //     exists post-Amsterdam, so the BAL-presence check is a sufficient proxy. It is a proxy,
@@ -1115,17 +1130,24 @@ where
     //   - Tx-count threshold (`bal_execute_path_min_tx_count`): below the parallelism break-even
     //     point, provider setup and worker scheduling overhead can exceed the gain. Tune
     //     empirically once workers are parallel; meaningless while the commit loop is sequential.
-    fn bal_path_eligible(&self, bal: Option<&DecodedBal>) -> Result<bool, InsertBlockErrorKind> {
-        let has_bal = bal.is_some();
-        let parallel_execution = has_bal && !self.config.disable_bal_parallel_execution();
-        if parallel_execution && self.config.disable_bal_parallel_state_root() {
+    fn bal_path_eligible(
+        &self,
+        bal: Option<&DecodedBal>,
+    ) -> Result<Option<&'static str>, InsertBlockErrorKind> {
+        if bal.is_none() {
+            return Ok(Some("no-access-list"))
+        }
+        if self.config.disable_bal_parallel_execution() {
+            return Ok(Some("disabled"))
+        }
+        if self.config.disable_bal_parallel_state_root() {
             return Err(InsertBlockErrorKind::Other(
                 "disabling parallel state root is impossible when parallel execution is enabled"
                     .into(),
             ));
         }
 
-        Ok(parallel_execution)
+        Ok(None)
     }
 
     /// Executes the block on the BAL path. Mirrors the return shape of [`Self::execute_block`]
@@ -1856,7 +1878,7 @@ where
         payload: Types::ExecutionData,
     ) -> Result<SealedBlock<N::Block>, NewPayloadError> {
         let block = self.validator.convert_payload_to_block(payload)?;
-        Ok(block)
+        Ok(Arc::unwrap_or_clone(block))
     }
 
     fn validate_payload(
@@ -1954,7 +1976,8 @@ where
         let execution_cache = self
             .config
             .share_execution_cache_with_payload_builder()
-            .then(|| self.payload_processor.cache_for(parent_hash));
+            .then(|| self.payload_processor.cache_for(parent_hash))
+            .flatten();
         let state_root_handle =
             self.payload_state_root_handle_for(parent_hash, parent_header, timestamp, state);
         let mut resources = PayloadBuilderResources::new(execution_cache, state_root_handle)

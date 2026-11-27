@@ -26,7 +26,6 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadSidecar, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState,
     PayloadAttributes, PraguePayloadFields,
 };
-use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
@@ -415,7 +414,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Eth, Evm, Payload> TestingApiServer for TestingApi<Eth, Evm, Payload>
 where
     Payload: PayloadTypes<

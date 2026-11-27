@@ -7,7 +7,9 @@ use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use evm2::evm::Bal as EvmBal;
-use evm2_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
+use evm2_inspectors::tracing::{
+    TraceLimitBehavior, TraceLimits, TracingInspector, TracingInspectorConfig,
+};
 use futures::Future;
 use reth_errors::RethError;
 use reth_evm::{
@@ -18,7 +20,10 @@ use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
 use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
 use reth_storage_api::{HeaderProvider, ProviderBlock};
 use reth_tasks::cancel::is_cancelled;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 /// Context passed to per-transaction trace callbacks.
 pub struct TracingCtx<'a, Insp, EvmTypes: evm2::EvmTypes> {
@@ -82,8 +87,8 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         R: Send + 'static,
     {
         self.spawn_with_state_at_block(at, move |this, mut db| {
-            let (inspector, result) =
-                this.inspect(&mut db, evm_env, &tx_env, TracingInspector::new(config))?;
+            let inspector = this.tracing_inspector(config);
+            let (inspector, result) = this.inspect(&mut db, evm_env, &tx_env, inspector)?;
             f(inspector, result, db)
         })
     }
@@ -118,7 +123,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
-        self.spawn_trace_transaction_in_block_with_inspector(hash, TracingInspector::new(config), f)
+        self.spawn_trace_transaction_in_block_with_inspector(
+            hash,
+            self.tracing_inspector(config),
+            f,
+        )
     }
 
     /// Retrieves the transaction if it exists and returns its trace.
@@ -301,12 +310,20 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             + 'static,
         R: Send + 'static,
     {
+        // The transactions of the block share one trace byte budget, since they share one response.
+        let budget = Arc::new(RequestTraceBudget::new(self.trace_limits()));
         self.trace_block_until_with_inspector(
             block_id,
             block,
             highest_index,
-            move || TracingInspector::new(config),
-            f,
+            {
+                let budget = Arc::clone(&budget);
+                move || TracingInspector::new(config).with_limits(budget.limits())
+            },
+            move |tx_info, ctx| {
+                budget.charge(ctx.inspector.recorded_bytes());
+                f(tx_info, ctx)
+            },
         )
     }
 
@@ -482,6 +499,22 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
     }
 
+    /// Returns the limits for the tracers of the trace and debug APIs.
+    ///
+    /// A traced transaction that records more than the configured
+    /// [`max_trace_bytes`](reth_rpc_eth_types::EthApiSettings::max_trace_bytes) halts with an
+    /// error.
+    fn trace_limits(&self) -> TraceLimits {
+        TraceLimits::default()
+            .set_max_recorded_bytes(self.eth_api_settings().max_trace_bytes)
+            .set_behavior(TraceLimitBehavior::Halt)
+    }
+
+    /// Returns a [`TracingInspector`] for the config, bounded by [`Self::trace_limits`].
+    fn tracing_inspector(&self, config: TracingInspectorConfig) -> TracingInspector {
+        TracingInspector::new(config).with_limits(self.trace_limits())
+    }
+
     /// Applies chain-specific state transitions required before executing a block.
     ///
     /// Note: This should only be called when tracing an entire block vs individual transactions.
@@ -506,9 +539,43 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         let changes = self
             .evm_config()
             .pre_block_state_changes(&mut *db, evm_env, ctx)
-            .map_err(|err| EthApiError::EvmCustom(err.to_string()))
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&reth_execution_types::BundleSource(&changes));
         Ok(changes)
+    }
+}
+
+/// The trace bytes a request has left for the transactions it traces after each other.
+///
+/// The trace byte limit of [`Trace::trace_limits`] applies to each traced transaction, and a
+/// tracer starts its count over for every transaction. Requests that trace several transactions
+/// into one response take each one's limits from this budget and charge what it recorded, so that
+/// together they record at most the limit.
+#[derive(Debug)]
+pub struct RequestTraceBudget {
+    limits: TraceLimits,
+    /// Bytes recorded by the transactions traced so far. They are traced one after the other, so
+    /// relaxed ordering suffices.
+    recorded: AtomicUsize,
+}
+
+impl RequestTraceBudget {
+    /// Creates the budget of a request traced with `limits`.
+    pub const fn new(limits: TraceLimits) -> Self {
+        Self { limits, recorded: AtomicUsize::new(0) }
+    }
+
+    /// Returns the limits for the next transaction: the request's, with the byte limit lowered to
+    /// the bytes left.
+    pub fn limits(&self) -> TraceLimits {
+        let recorded = self.recorded.load(Ordering::Relaxed);
+        self.limits.set_max_recorded_bytes(
+            self.limits.max_recorded_bytes.map(|max| max.saturating_sub(recorded)),
+        )
+    }
+
+    /// Takes `recorded` bytes, what a transaction traced with [`Self::limits`] recorded.
+    pub fn charge(&self, recorded: usize) {
+        self.recorded.fetch_add(recorded, Ordering::Relaxed);
     }
 }

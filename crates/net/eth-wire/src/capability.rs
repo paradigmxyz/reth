@@ -349,16 +349,23 @@ pub fn shared_capability_offsets(
     // Message IDs are assumed to be compact from ID 0x10 onwards (0x00-0x0f is reserved for the
     // "p2p" capability) and given to each shared (equal-version, equal-name) capability in
     // alphabetic order.
-    let mut offset = MAX_RESERVED_MESSAGE_ID + 1;
+    //
+    // Message IDs are a single byte, so offsets are accumulated in u16 and the shared capabilities
+    // must fit in IDs 0x10..=0xff.
+    let mut offset = u16::from(MAX_RESERVED_MESSAGE_ID) + 1;
     for name in shared_capability_names {
         let proto_version = &shared_capabilities[&name];
+        let start = u8::try_from(offset).map_err(|_| SharedCapabilityError::MessageIdOverflow)?;
         let shared_capability = SharedCapability::new(
             &name,
             proto_version.version as u8,
-            offset,
+            start,
             proto_version.messages,
         )?;
-        offset += shared_capability.num_messages();
+        offset += u16::from(shared_capability.num_messages());
+        if offset > u16::from(u8::MAX) + 1 {
+            return Err(SharedCapabilityError::MessageIdOverflow.into())
+        }
         shared_with_offsets.push(shared_capability);
     }
 
@@ -379,6 +386,10 @@ pub enum SharedCapabilityError {
     /// message id space [`MAX_RESERVED_MESSAGE_ID`].
     #[error("message id offset `{0}` is reserved")]
     ReservedMessageIdOffset(u8),
+    /// Thrown when the shared capabilities need more message ids than fit in the single-byte
+    /// message id space.
+    #[error("shared capabilities exceed the message id space")]
+    MessageIdOverflow,
 }
 
 /// An error thrown when capabilities mismatch.
@@ -576,6 +587,45 @@ mod tests {
         // the 6th shared message is the first message of the eth capability
         let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
         assert_eq!(shared_eth.name(), "eth");
+    }
+
+    /// Negotiates `(name, messages)` protocols with a peer that shares all of them.
+    fn negotiate_all(
+        protocols: &[(&'static str, u8)],
+    ) -> Result<Vec<SharedCapability>, P2PStreamError> {
+        let local_protocols: Vec<_> = protocols
+            .iter()
+            .map(|&(name, messages)| Protocol::new(Capability::new_static(name, 1), messages))
+            .collect();
+        let peer_capabilities = local_protocols.iter().map(|p| p.cap.clone()).collect();
+        shared_capability_offsets(local_protocols, peer_capabilities)
+    }
+
+    #[test]
+    fn shared_capability_offsets_reject_last_capability_past_message_id_space() {
+        // 0x10 + 120 + 121 ends one message id past 0xff.
+        assert!(matches!(
+            negotiate_all(&[("aaa", 120), ("bbb", 121)]),
+            Err(P2PStreamError::ParseSharedCapability(SharedCapabilityError::MessageIdOverflow))
+        ));
+    }
+
+    #[test]
+    fn shared_capability_offsets_reject_capability_after_full_message_id_space() {
+        // 0x10 + 120 + 120 uses every message id, so ccc would start at 0x100.
+        assert!(matches!(
+            negotiate_all(&[("aaa", 120), ("bbb", 120), ("ccc", 1)]),
+            Err(P2PStreamError::ParseSharedCapability(SharedCapabilityError::MessageIdOverflow))
+        ));
+    }
+
+    #[test]
+    fn shared_capability_offsets_fill_message_id_space() {
+        // 0x10 + 120 + 120 uses every message id up to and including 0xff.
+        let shared = SharedCapabilities(negotiate_all(&[("aaa", 120), ("bbb", 120)]).unwrap());
+
+        assert_eq!(shared[1].message_id_offset(), MAX_RESERVED_MESSAGE_ID + 1 + 120);
+        assert_eq!(shared.find_by_offset(u8::MAX).unwrap().name(), "bbb");
     }
 
     #[test]

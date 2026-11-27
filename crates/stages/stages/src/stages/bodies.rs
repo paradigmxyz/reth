@@ -88,8 +88,10 @@ where
 
     // Make sure Transactions static file is at the same height. If it's further, this
     // input execution was interrupted previously and we need to unwind the static file.
+    let segment = StaticFileSegment::Transactions;
+    let highest_file_block = static_file_provider.get_highest_static_file_block(segment);
     let next_static_file_tx_num = static_file_provider
-        .get_highest_static_file_tx(StaticFileSegment::Transactions)
+        .highest_transaction_for_consistency(provider.tx_ref(), highest_file_block)?
         .map(|id| id + 1)
         .unwrap_or_default();
 
@@ -107,9 +109,7 @@ where
                 .unwrap_or(checkpoint);
             // Empty blocks advance the file's height without changing its transaction count.
             if next_static_file_tx_num > next_tx_num ||
-                static_file_provider
-                    .get_highest_static_file_block(StaticFileSegment::Transactions)
-                    .is_some_and(|block| block > highest_db_block)
+                highest_file_block.is_some_and(|block| block > highest_db_block)
             {
                 let mut static_file_producer =
                     static_file_provider.latest_writer(StaticFileSegment::Transactions)?;

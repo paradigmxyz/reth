@@ -545,7 +545,7 @@ mod tests {
     use alloy_rpc_types_eth::{
         simulate::{SimBlock, SimulatePayload},
         state::{AccountOverride, EvmOverrides, StateOverride},
-        BlockOverrides, Bundle, TransactionRequest,
+        AccessListResult, BlockOverrides, Bundle, TransactionRequest,
     };
     use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
     use evm2::{evm::CacheDB, AccountInfo};
@@ -553,7 +553,8 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
-    use reth_db_common::init::init_genesis;
+    use reth_db_api::{tables, transaction::DbTxMut};
+    use reth_db_common::init::{init_genesis, init_genesis_with_settings};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
@@ -567,7 +568,8 @@ mod tests {
             create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
             NoopProvider,
         },
-        PruneCheckpointReader, StageCheckpointReader,
+        BlockWriter, ExecutionOutcome, PruneCheckpointReader, StageCheckpointReader,
+        StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
@@ -579,9 +581,10 @@ mod tests {
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+        StorageSettings, TransactionsProvider,
     };
     use reth_tasks::cancel::{is_cancelled, CancelOnDrop};
-    use reth_testing_utils::generators;
+    use reth_testing_utils::generators::{self, random_block, random_receipt, BlockParams};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction, TestPool};
     use std::time::{Duration, Instant};
 
@@ -745,8 +748,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_eth_api_settings() {
+        use evm2_inspectors::tracing::{TraceLimitBehavior, TraceLimits};
         use reth_rpc_eth_api::{
-            helpers::{Call, EthState, EthTransactions, LoadPendingBlock},
+            helpers::{Call, EthState, EthTransactions, LoadPendingBlock, Trace},
             EthApiTypes,
         };
         use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiSettings};
@@ -763,6 +767,8 @@ mod tests {
             assert_eq!(actual.cache_computed_bals, expected.cache_computed_bals);
             assert_eq!(actual.gas_cap, expected.gas_cap);
             assert_eq!(actual.max_simulate_blocks, expected.max_simulate_blocks);
+            assert_eq!(actual.max_trace_bytes, expected.max_trace_bytes);
+            assert_eq!(actual.max_response_size, expected.max_response_size);
             assert_eq!(
                 actual.compute_state_root_for_eth_simulate,
                 expected.compute_state_root_for_eth_simulate
@@ -792,6 +798,8 @@ mod tests {
             cache_computed_bals: true,
             gas_cap: 123_456,
             max_simulate_blocks: 7,
+            max_trace_bytes: Some(4096),
+            max_response_size: Some(8192),
             compute_state_root_for_eth_simulate: true,
             eth_proof_window: 42,
             pending_block_kind: PendingBlockKind::Empty,
@@ -815,6 +823,8 @@ mod tests {
         .max_blocking_io_requests(expected.max_blocking_io_requests)
         .gas_cap(expected.gas_cap.into())
         .max_simulate_blocks(expected.max_simulate_blocks)
+        .max_trace_bytes(expected.max_trace_bytes)
+        .max_response_size(expected.max_response_size)
         .compute_state_root_for_eth_simulate(expected.compute_state_root_for_eth_simulate)
         .eth_proof_window(expected.eth_proof_window)
         .pending_block_kind(expected.pending_block_kind)
@@ -830,6 +840,12 @@ mod tests {
         );
         assert_eq!(Call::call_gas_limit(&api), expected.gas_cap);
         assert_eq!(Call::max_simulate_blocks(&api), expected.max_simulate_blocks);
+        assert_eq!(
+            Trace::trace_limits(&api),
+            TraceLimits::default()
+                .set_max_recorded_bytes(expected.max_trace_bytes)
+                .set_behavior(TraceLimitBehavior::Halt)
+        );
         assert_eq!(
             Call::compute_state_root_for_eth_simulate(&api),
             expected.compute_state_root_for_eth_simulate
@@ -1017,7 +1033,10 @@ mod tests {
         }];
 
         let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
-            &eth_api, bundles, None, None,
+            &eth_api,
+            bundles.into(),
+            None,
+            None,
         )
         .await;
 
@@ -1042,7 +1061,10 @@ mod tests {
         }];
 
         let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _, _>>::call_many(
-            &eth_api, bundles, None, None,
+            &eth_api,
+            bundles.into(),
+            None,
+            None,
         )
         .await;
 
@@ -1095,7 +1117,11 @@ mod tests {
             2
         );
         assert_eq!(
-            trace_api.trace_call_many(trace_calls(transfers(2)), None).await.unwrap().len(),
+            trace_api
+                .trace_call_many(trace_calls(transfers(2)), None, Default::default())
+                .await
+                .unwrap()
+                .len(),
             2
         );
         assert_eq!(
@@ -1115,7 +1141,7 @@ mod tests {
             );
             assert_eq!(
                 trace_api
-                    .trace_call_many(trace_calls(calls.clone()), None)
+                    .trace_call_many(trace_calls(calls.clone()), None, Default::default())
                     .await
                     .unwrap_err()
                     .to_string(),
@@ -1142,7 +1168,7 @@ mod tests {
         );
         assert_eq!(
             trace_api
-                .trace_call_many(trace_calls(too_many.clone()), None)
+                .trace_call_many(trace_calls(too_many.clone()), None, Default::default())
                 .await
                 .unwrap_err()
                 .to_string(),
@@ -1252,6 +1278,27 @@ mod tests {
             fee_history.reward.is_none(),
             "all: no percentiles were requested, so there should be no rewards result"
         );
+    }
+
+    /// Requesting more blocks than exist since a nonzero genesis returns the blocks since genesis
+    #[tokio::test]
+    async fn test_fee_history_clamps_to_nonzero_genesis() {
+        let genesis_block = 500_010;
+        let block_count = 37;
+        let newest_block = genesis_block + block_count - 1;
+        let genesis = Genesis { number: Some(genesis_block), ..Default::default() };
+        let mock_provider = MockEthProvider::default()
+            .with_chain_spec(ChainSpecBuilder::mainnet().genesis(genesis).build());
+
+        let (eth_api, base_fees_per_gas, gas_used_ratios) =
+            prepare_eth_api(newest_block, None, block_count, mock_provider);
+
+        let fee_history =
+            eth_api.fee_history(U64::from(1024), BlockNumberOrTag::Latest, None).await.unwrap();
+
+        assert_eq!(fee_history.oldest_block, genesis_block);
+        assert_eq!(fee_history.base_fee_per_gas, base_fees_per_gas);
+        assert_eq!(fee_history.gas_used_ratio, gas_used_ratios);
     }
 
     #[tokio::test]
@@ -1631,6 +1678,105 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(estimated, U256::from(21_000));
+    }
+
+    /// `eth_estimateGas` waits for a blocking IO permit, like `eth_call`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn estimate_gas_takes_blocking_io_permit() {
+        let provider = MockEthProvider::default();
+        provider.add_block(
+            B256::repeat_byte(0x42),
+            Block {
+                header: Header { number: 1, gas_limit: 30_000_000, ..Default::default() },
+                body: BlockBody::default(),
+            },
+        );
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .max_blocking_io_requests(1)
+        .build();
+        let request = TransactionRequest::default().with_to(Address::repeat_byte(0xaa));
+
+        let permit = api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            std::time::Duration::from_millis(200),
+            EthApiServer::estimate_gas(&api, request.clone(), None, None, None)
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let estimated = EthApiServer::estimate_gas(&api, request, None, None, None).await.unwrap();
+        assert_eq!(estimated, U256::from(21_000));
+    }
+
+    /// `eth_createAccessList` takes a blocking IO permit before it spawns its blocking task and
+    /// moves it into that task, so dropping the request does not free the permit.
+    #[test]
+    fn create_access_list_permit_stays_with_blocking_task() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let provider = MockEthProvider::default();
+            // Access-list transactions need a post-Berlin block.
+            provider.add_block(
+                B256::repeat_byte(0x42),
+                Block {
+                    header: Header {
+                        number: 13_000_000,
+                        timestamp: 1_629_000_000,
+                        base_fee_per_gas: Some(1_000_000_000),
+                        gas_limit: 30_000_000,
+                        ..Default::default()
+                    },
+                    body: BlockBody::default(),
+                },
+            );
+            let api = EthApiBuilder::new(
+                provider.clone(),
+                testing_pool(),
+                NoopNetwork::default(),
+                EthEvmConfig::new(provider.chain_spec()),
+            )
+            .max_blocking_io_requests(1)
+            .build();
+            let request = TransactionRequest {
+                gas_price: Some(0),
+                ..TransactionRequest::default().with_to(Address::repeat_byte(0xaa))
+            };
+
+            // Keep the only blocking thread busy so the request's task stays queued.
+            let (release, blocked) = std::sync::mpsc::channel::<()>();
+            let blocker = tokio::task::spawn_blocking(move || blocked.recv());
+            // Polls once, which spawns the blocking task, then drops the request.
+            assert!(futures::FutureExt::now_or_never(EthApiServer::create_access_list(
+                &api,
+                request.clone(),
+                None,
+                None
+            ))
+            .is_none());
+            assert_eq!(api.blocking_io_task_guard().available_permits(), 0);
+
+            release.send(()).unwrap();
+            blocker.await.unwrap().unwrap();
+            let result = EthApiServer::create_access_list(&api, request, None, None).await.unwrap();
+            assert_eq!(
+                result,
+                AccessListResult {
+                    access_list: Default::default(),
+                    gas_used: U256::from(21_000),
+                    error: None
+                }
+            );
+        });
     }
 
     #[tokio::test]
@@ -2060,6 +2206,137 @@ mod tests {
                 ),
                 "{err}"
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn lookups_by_tx_hash_match_block_lookups() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(Genesis::default()).build());
+        let mut rng = generators::rng();
+        for (settings, prune_senders) in [
+            (StorageSettings::v2(), false),
+            (StorageSettings::v1(), false),
+            (StorageSettings::v1(), true),
+        ] {
+            let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+            let mut parent = init_genesis_with_settings(&factory, settings).unwrap();
+            // Block 2 starts at a non-zero tx number.
+            let blocks = (1..=2)
+                .map(|number| {
+                    let block = random_block(
+                        &mut rng,
+                        number,
+                        BlockParams {
+                            parent: Some(parent),
+                            tx_count: Some(3),
+                            ommers_count: Some(0),
+                            ..Default::default()
+                        },
+                    );
+                    parent = block.hash();
+                    block.try_recover().unwrap()
+                })
+                .collect::<Vec<_>>();
+            let receipts = blocks
+                .iter()
+                .map(|block| {
+                    let mut cumulative_gas_used = 0;
+                    block
+                        .body()
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            let mut receipt = random_receipt(&mut rng, tx, Some(2), None);
+                            cumulative_gas_used += receipt.cumulative_gas_used();
+                            receipt.set_cumulative_gas_used(cumulative_gas_used);
+                            receipt
+                        })
+                        .collect()
+                })
+                .collect();
+
+            let provider_rw = factory.provider_rw().unwrap();
+            provider_rw
+                .append_blocks_with_state(
+                    blocks.clone(),
+                    &ExecutionOutcome { first_block: 1, receipts, ..Default::default() },
+                    Default::default(),
+                )
+                .unwrap();
+            if prune_senders {
+                provider_rw.tx_ref().clear::<tables::TransactionSenders>().unwrap();
+            }
+            provider_rw.update_pipeline_stages(2, false).unwrap();
+            provider_rw.commit().unwrap();
+
+            let api = build_test_eth_api(BlockchainProvider::new(factory).unwrap());
+            for block in &blocks {
+                let mut by_hash = Vec::new();
+                for (sender, tx) in block.transactions_with_sender() {
+                    let tx = EthTransactions::transaction_by_hash(&api, *tx.tx_hash())
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .into_transaction(api.converter())
+                        .unwrap();
+                    assert_eq!(tx.inner.signer(), *sender);
+                    let (_, _, stored_sender) = api
+                        .provider()
+                        .transaction_by_hash_with_meta_and_sender(*tx.inner.tx_hash())
+                        .unwrap()
+                        .unwrap();
+                    assert_eq!(stored_sender, (!prune_senders).then_some(*sender));
+                    let receipt = EthTransactions::transaction_receipt(&api, *tx.inner.tx_hash())
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    by_hash.push((tx, receipt));
+                }
+                assert!(api.cache().get_maybe_block(block.hash()).await.unwrap().is_none());
+
+                let block_receipts =
+                    EthBlocks::block_receipts(&api, block.hash().into()).await.unwrap().unwrap();
+                for (index, (tx, receipt)) in by_hash.into_iter().enumerate() {
+                    assert_eq!(
+                        EthTransactions::transaction_by_block_and_tx_index(
+                            &api,
+                            block.hash().into(),
+                            index
+                        )
+                        .await
+                        .unwrap(),
+                        Some(tx)
+                    );
+                    assert_eq!(receipt, block_receipts[index]);
+                }
+            }
+            assert_eq!(
+                EthTransactions::transaction_receipt(&api, B256::random()).await.unwrap(),
+                None
+            );
+
+            // A block that is missing some of its receipts has no receipt for any transaction.
+            let provider = api.provider().clone();
+            let static_files = provider.static_file_provider();
+            let mut receipts_writer =
+                static_files.latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.prune_receipts(1, 2).unwrap();
+            receipts_writer.commit().unwrap();
+            drop(receipts_writer);
+            let api = build_test_eth_api(provider);
+            for tx in &blocks[1].body().transactions {
+                assert_eq!(
+                    EthTransactions::transaction_receipt(&api, *tx.tx_hash()).await.unwrap(),
+                    None
+                );
+            }
+            assert!(EthTransactions::transaction_receipt(
+                &api,
+                *blocks[0].body().transactions[0].tx_hash()
+            )
+            .await
+            .unwrap()
+            .is_some());
         }
     }
 }

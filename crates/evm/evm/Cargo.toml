@@ -39,6 +39,7 @@ tracing = { workspace = true, optional = true }
 fixed-cache.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-ethereum-primitives.workspace = true
 
 [features]
@@ -66,7 +67,9 @@ portable = [
 p256-aws-lc-rs = [
     "evm2/p256-aws-lc-rs",
 ]
+bn254-mcl = ["evm2/bn254-mcl"]
 std = [
+    "reth-concurrency/std",
     "dep:moka",
     "dep:rayon",
     "dep:tracing",
@@ -92,6 +95,7 @@ std = [
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 witness = ["dep:alloy-rlp", "dep:alloy-rpc-types-debug", "dep:reth-storage-errors"]
 test-utils = [
+    "reth-concurrency/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",

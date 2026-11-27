@@ -2137,7 +2137,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash(hex!("0xd2be4e0a")), next: 0 },
+                ForkId { hash: ForkHash(hex!("0x62d16ad0")), next: 0 },
             )],
         )
     }
@@ -3073,6 +3073,15 @@ Post-merge hard forks (timestamp based):
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
                 max_blobs_per_tx: 6,
                 blob_base_cost: 0,
+            },
+            // Without an osaka entry, Osaka keeps the chain's Prague blob counts.
+            osaka: BlobParams {
+                target_blob_count: 3,
+                max_blob_count: 6,
+                update_fraction: 3338477,
+                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
+                blob_base_cost: 8192,
             },
             ..Default::default()
         };

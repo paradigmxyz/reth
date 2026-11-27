@@ -1,0 +1,172 @@
+name: EF mainnet fixtures
+
+on:
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build fixture runner
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-16' || 'ubuntu-latest' }}
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_HIVETESTS_DEBUG: 0
+      CARGO_INCREMENTAL: 0
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      # The state tests in unit.yml cover the default arkworks BN254 backend; these cover the opt-in
+      # MCL backend.
+      - run: cargo build --locked --profile hivetests -p ef-test-runner --features ef-tests/asm-keccak,ef-tests/bn254-mcl
+      - name: Bundle the runner and its CI reporter
+        run: |
+          mkdir runner
+          cp target/hivetests/ef-test-runner .github/scripts/report-ef-fixtures.py .github/scripts/hive/expected_failures.yaml runner/
+      - name: Test the fixture reporter
+        run: /usr/bin/python3 -m unittest discover -s .github/scripts -p 'test_report_ef_fixtures.py' -v
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ef-test-runner
+          path: runner/
+          compression-level: 1
+          if-no-files-found: error
+          retention-days: 1
+
+  prepare:
+    name: Prepare mainnet fixtures
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-4' || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - name: Download pinned mainnet fixtures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Pinned so that an upstream release cannot change what this workflow runs, and so that
+          # the expected failures below stay in step with the fixtures. Bump deliberately.
+          FIXTURES_TAG: tests@v21.0.3
+        run: |
+          gh api "repos/ethereum/execution-specs/releases/tags/$FIXTURES_TAG" > release.json
+          asset=$(jq -ce '.assets[] | select(.name == "fixtures.tar.gz")' release.json)
+          curl -fsSL --retry 3 "$(jq -er .browser_download_url <<< "$asset")" -o fixtures.tar.gz
+          digest=$(jq -er '.digest | capture("^sha256:(?<hash>[0-9a-f]{64})$").hash' <<< "$asset")
+          echo "$digest  fixtures.tar.gz" | sha256sum --check
+          tar -xzf fixtures.tar.gz --wildcards --wildcards-match-slash \
+            'fixtures/blockchain_tests/*.json' 'fixtures/blockchain_tests_engine/*.json' 'fixtures/.meta/index.json'
+          for format in blockchain_tests blockchain_tests_engine; do
+            jq -c --arg prefix "$format/" '
+              reduce (.test_cases[] | select(.json_path | startswith($prefix))) as $case
+                ({}; .[$case.id] = ($case.json_path | ltrimstr($prefix)))
+            ' fixtures/.meta/index.json > "fixtures/$format/fixture-paths"
+          done
+
+      - name: Split Engine fixtures across four jobs per mode
+        run: |
+          tar -I 'zstd -1 -T2' -cf blocktest.tar.zst -C fixtures/blockchain_tests .
+          cd fixtures/blockchain_tests_engine
+          find . -type f -name '*.json' -printf '%s\t%p\0' | LC_ALL=C sort -znr | cut -z -f2- |
+            split -t '\0' -n r/4 -d -a 1 - "$RUNNER_TEMP/engine-"
+          for shard in 0 1 2 3; do
+            list="$RUNNER_TEMP/engine-$shard"
+            test -s "$list"
+            tar -I 'zstd -1 -T2' -cf "$GITHUB_WORKSPACE/engine-$shard.tar.zst" --null -T "$list" fixture-paths
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: {path: blocktest.tar.zst, archive: false, retention-days: 1}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: {path: engine-0.tar.zst, archive: false, retention-days: 1}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: {path: engine-1.tar.zst, archive: false, retention-days: 1}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: {path: engine-2.tar.zst, archive: false, retention-days: 1}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with: {path: engine-3.tar.zst, archive: false, retention-days: 1}
+
+  run:
+    name: ${{ matrix.mode }} / ${{ matrix.fixtures }}
+    needs: [build, prepare]
+    runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest-8' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [enginetest, enginetest-sequential]
+        fixtures: [engine-0, engine-1, engine-2, engine-3]
+        include:
+          - mode: blocktest
+            fixtures: blocktest
+    steps:
+      - name: Secure runner
+        uses: tempoxyz/gh-actions/actions/secure-runner@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ef-test-runner
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ matrix.fixtures }}.tar.zst
+      - name: Run fixtures
+        id: fixtures
+        env:
+          MODE: ${{ matrix.mode }}
+          FIXTURES: ${{ matrix.fixtures }}
+          TMPDIR: /dev/shm/reth-fixtures
+        run: |
+          mkdir -p "$TMPDIR" fixtures
+          tar --zstd -xf "$FIXTURES.tar.zst" -C fixtures
+          chmod +x ef-test-runner
+          args=("${MODE%-sequential}" --progress)
+          if [[ "$MODE" == enginetest-sequential ]]; then args+=(--bal-sequential); fi
+          status=0
+          RUST_LOG='' ./ef-test-runner "${args[@]}" fixtures > results.json 2> >(awk '
+            /^PASS / { if (++passed % 5000 == 0) { printf "\033[32mPASS\033[0m %d fixtures\n", passed; fflush() }; next }
+            /^FAIL / { next }
+            { print; fflush() }
+          ' >&2) || status=$?
+          if (( status > 1 )); then exit "$status"; fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: List failed fixtures and replay with client logs
+        env:
+          MODE: ${{ matrix.mode }}
+          FIXTURE_SHARD: ${{ matrix.fixtures }}
+          RUNNER_STATUS: ${{ steps.fixtures.outputs.status }}
+          RUST_LOG: info,engine::tree=debug
+          TMPDIR: /dev/shm/reth-fixtures
+        run: /usr/bin/python3 report-ef-fixtures.py "$MODE" "$RUNNER_STATUS" results.json expected_failures.yaml
+
+      - name: Upload full fixture results
+        if: ${{ !cancelled() && steps.fixtures.outputs.status != '' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: results-${{ matrix.mode }}-${{ matrix.fixtures }}
+          path: results.json
+          compression-level: 1
+          retention-days: 1

@@ -553,13 +553,18 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
         block_overrides: Option<&BlockOverrides>,
     ) -> Self {
         let mut attributes = Self {
-            timestamp: parent.timestamp().saturating_add(12),
+            // The timestamp selects the hardfork rules, so it must be overridden before the EVM
+            // environment is derived from these attributes.
+            timestamp: block_overrides
+                .and_then(|overrides| overrides.time)
+                .unwrap_or_else(|| parent.timestamp().saturating_add(12)),
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
-            extra_data: parent.extra_data().clone(),
+            // The parent's extra data (e.g. a builder tag) doesn't belong to the next block.
+            extra_data: Default::default(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
         };
 
@@ -590,6 +595,16 @@ mod tests {
         let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
 
         assert_eq!(attrs.parent_beacon_block_root, Some(B256::ZERO));
+    }
+
+    #[test]
+    fn pending_env_does_not_copy_parent_extra_data() {
+        let header = Header { extra_data: b"builder".into(), ..Default::default() };
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed, None);
+
+        assert!(attrs.extra_data.is_empty());
     }
 
     #[test]

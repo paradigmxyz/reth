@@ -1,6 +1,6 @@
 //! End-to-end EIP-8141 pool coverage using externally submitted frame envelopes.
 
-use alloy_consensus::{Transaction, TxEip8141};
+use alloy_consensus::TxEip8141;
 use alloy_eips::{
     eip8141::{
         Frame, FrameAddress, FrameLimits, FrameMode, FrameSignature, SignatureScheme,

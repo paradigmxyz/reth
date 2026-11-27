@@ -853,6 +853,8 @@ mod tests {
             writer.commit().unwrap();
         }
 
+        assert!(sf_rw.account_changesets_range(..0).unwrap().is_empty());
+
         // Test get_account_before_block
         {
             // Test retrieving account state before block 0

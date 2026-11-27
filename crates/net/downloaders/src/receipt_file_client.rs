@@ -134,7 +134,7 @@ where
                             Some(num) => {
                                 // if there was a block number before this, push receipts for that
                                 // block
-                                receipts.push(receipts_for_block);
+                                receipts.push(std::mem::take(&mut receipts_for_block));
                                 // block with no txns
                                 block_number = num + receipts.len() as u64;
                             }
@@ -152,7 +152,7 @@ where
                             }
                         }
 
-                        receipts_for_block = vec![];
+                        receipts_for_block.clear();
                     }
                 }
 

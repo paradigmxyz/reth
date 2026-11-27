@@ -10,14 +10,7 @@ use tower::{
 pub trait RethRpcMiddleware:
     Layer<
         RpcService,
-        Service: jsonrpsee::server::middleware::rpc::RpcServiceT<
-            MethodResponse = jsonrpsee::MethodResponse,
-            BatchResponse = jsonrpsee::MethodResponse,
-            NotificationResponse = jsonrpsee::MethodResponse,
-        > + Send
-                     + Sync
-                     + Clone
-                     + 'static,
+        Service: jsonrpsee::server::middleware::rpc::RpcServiceT + Send + Sync + Clone + 'static,
     > + Clone
     + Send
     + 'static
@@ -27,11 +20,8 @@ pub trait RethRpcMiddleware:
 impl<T> RethRpcMiddleware for T where
     T: Layer<
             RpcService,
-            Service: jsonrpsee::server::middleware::rpc::RpcServiceT<
-                MethodResponse = jsonrpsee::MethodResponse,
-                BatchResponse = jsonrpsee::MethodResponse,
-                NotificationResponse = jsonrpsee::MethodResponse,
-            > + Send
+            Service: jsonrpsee::server::middleware::rpc::RpcServiceT
+                         + Send
                          + Sync
                          + Clone
                          + 'static,
@@ -45,7 +35,7 @@ impl<T> RethRpcMiddleware for T where
 pub type AuthHttpService<RM> = TowerServiceNoHttp<Stack<RM, Identity>>;
 
 /// Helper alias trait for auth-server HTTP transport middleware layers.
-pub trait RethAuthHttpMiddleware<RM>:
+pub trait RethAuthHttpMiddleware<RM: Layer<RpcService>>:
     tower::Layer<
         AuthHttpService<RM>,
         Service: tower::Service<
@@ -61,7 +51,7 @@ pub trait RethAuthHttpMiddleware<RM>:
 {
 }
 
-impl<T, RM> RethAuthHttpMiddleware<RM> for T where
+impl<T, RM: Layer<RpcService>> RethAuthHttpMiddleware<RM> for T where
     T: tower::Layer<
             AuthHttpService<RM>,
             Service: tower::Service<

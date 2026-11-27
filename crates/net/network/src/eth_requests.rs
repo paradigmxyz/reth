@@ -16,9 +16,9 @@ use reth_eth_wire::{
         GetAccountRangeMessage, GetStorageRangesMessage, SnapProtocolMessage, StorageData,
         StorageRangesMessage,
     },
-    BlockAccessLists, BlockBodies, BlockHeaders, Cells, EthNetworkPrimitives, GetBlockAccessLists,
-    GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts, GetReceipts70,
-    HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
+    BlockAccessLists, BlockBodies, BlockHeaders, CellMasks, Cells, EthNetworkPrimitives,
+    GetBlockAccessLists, GetBlockBodies, GetBlockHeaders, GetCells, GetNodeData, GetReceipts,
+    GetReceipts70, HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69, Receipts70,
 };
 use reth_network_p2p::{
     error::{RequestError, RequestResult},
@@ -323,10 +323,11 @@ where
 
     /// Handles partial responses for [`GetReceipts70`] queries.
     ///
-    /// This will adhere to the soft limit but allow filling the last vec partially. A response
-    /// never ends with an empty incomplete block: if not even the next receipt fits, the response
-    /// ends after the last complete block, except when it would otherwise be empty, in which case
-    /// the first receipt is served even if it exceeds the soft limit. If it cannot fit within
+    /// Whole blocks are packed until the response reaches [`SOFT_RESPONSE_LIMIT`]. The last block
+    /// is then served up to [`MAX_MESSAGE_SIZE`] and flagged incomplete only when its receipts
+    /// overflow that limit, as required by the devp2p spec. A response never ends with an empty
+    /// incomplete block: if not even the next receipt fits within the message, the response ends
+    /// after the last complete block. If the first receipt alone cannot fit within
     /// [`MAX_MESSAGE_SIZE`], including the response framing, the response is empty and complete.
     fn on_receipts70_request(
         &self,
@@ -345,7 +346,7 @@ where
 
         // The request ID is unavailable here. Reserve the message code, the largest request ID,
         // the incomplete flag, and the three RLP list headers to bound the full encoded response.
-        let max_first_receipt_size = MAX_MESSAGE_SIZE -
+        let max_receipts_size = MAX_MESSAGE_SIZE -
             (1 + u64::MAX.length() + false.length() + 3 * length_of_length(MAX_MESSAGE_SIZE));
 
         for (idx, hash) in block_hashes.into_iter().enumerate() {
@@ -379,18 +380,14 @@ where
                 continue;
             }
 
-            // If nothing has been added to the response yet, serve the first receipt even if it
-            // exceeds the soft limit, provided the framed response fits within the hard limit.
-            let always_serve_first = receipts.is_empty();
+            // This block crosses the soft limit, so it is the last one served. The devp2p spec only
+            // allows `lastBlockIncomplete` when its receipts would overflow the message, so it gets
+            // the remaining message budget.
             let remaining = block_receipts.len();
             let mut partial_block = Vec::new();
             for receipt in block_receipts {
                 let receipt_size = receipt.length();
-                if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT &&
-                    !(always_serve_first &&
-                        partial_block.is_empty() &&
-                        receipt_size <= max_first_receipt_size)
-                {
+                if total_bytes + receipt_size > max_receipts_size {
                     break;
                 }
                 total_bytes += receipt_size;
@@ -448,16 +445,43 @@ where
         request: GetCells,
         response: oneshot::Sender<RequestResult<Cells>>,
     ) {
-        let mut cells_response = Cells { cell_mask: request.cell_mask, ..Default::default() };
-        let mut total_bytes = 0;
-        let cell_mask = request.cell_mask();
+        // Incoming requests can also be supplied directly, bypassing the wire decoder.
+        if request.cell_mask.validate(&request.hashes, false).is_err() {
+            let _ = response.send(Err(RequestError::InvalidRequest));
+            return
+        }
+        let mut cells_response = Cells {
+            cell_mask: match &request.cell_mask {
+                CellMasks::Shared(mask) => (*mask).into(),
+                CellMasks::Indexed { .. } => {
+                    CellMasks::Indexed { masks: Vec::new(), mask_ids: Bytes::new() }
+                }
+            },
+            ..Default::default()
+        };
+        let mut total_bytes = cells_response.length();
+        let mut response_ids = Vec::new();
+        let shared_mask = if request.cell_mask.is_indexed() { None } else { request.cell_mask(0) };
 
-        for hash in request.hashes.into_iter().take(MAX_CELLS_SERVE) {
+        for (index, &hash) in request.hashes.iter().take(MAX_CELLS_SERVE).enumerate() {
+            // Indexed tables were validated before any blob-store lookup or cell allocation.
+            let Some(cell_mask) = shared_mask.or_else(|| request.cell_mask(index)) else { break };
             let Some(cells) = self.blob_store.get_cells(hash, cell_mask).unwrap_or_default() else {
                 continue;
             };
 
             total_bytes += hash.length() + cells.length();
+            if let CellMasks::Indexed { masks, .. } = &mut cells_response.cell_mask {
+                let Some(mask) = request.cell_mask.mask_at(index) else { break };
+                let id = masks.iter().position(|entry| *entry == mask).unwrap_or_else(|| {
+                    total_bytes += mask.length();
+                    masks.push(mask);
+                    masks.len() - 1
+                });
+                // At most 64 masks, enforced above.
+                response_ids.push(id as u8);
+                total_bytes += 1;
+            }
             cells_response.hashes.push(hash);
             cells_response.cells.push(cells);
 
@@ -466,6 +490,9 @@ where
             }
         }
 
+        if let CellMasks::Indexed { mask_ids, .. } = &mut cells_response.cell_mask {
+            *mask_ids = response_ids.into();
+        }
         let _ = response.send(Ok(cells_response));
     }
 }
@@ -1135,7 +1162,7 @@ mod tests {
     use alloy_consensus::{constants::EMPTY_ROOT_HASH, Header, TxType};
     use alloy_eips::{
         eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-        eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
+        eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell, BYTES_PER_CELL},
     };
     use alloy_primitives::{keccak256, Address, Log, LogData, TxHash, B128, U256};
     use alloy_rlp::{Decodable, Encodable};
@@ -1158,6 +1185,7 @@ mod tests {
     struct CountingBlobStore {
         get_cells_calls: Arc<AtomicUsize>,
         expected_cell_mask: Option<BlobCellMask>,
+        cell_responses: Vec<(B256, BlobCellMask, Vec<Cell>)>,
     }
 
     impl BlobStore for CountingBlobStore {
@@ -1248,10 +1276,16 @@ mod tests {
 
         fn get_cells(
             &self,
-            _tx_hash: TxHash,
+            tx_hash: TxHash,
             cell_mask: BlobCellMask,
         ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
             self.get_cells_calls.fetch_add(1, Ordering::Relaxed);
+            if let Some((_, expected, cells)) =
+                self.cell_responses.iter().find(|(hash, _, _)| *hash == tx_hash)
+            {
+                assert_eq!(cell_mask, *expected);
+                return Ok(Some(cells.clone()))
+            }
             if let Some(expected) = self.expected_cell_mask {
                 assert_eq!(cell_mask, expected);
                 return Ok(Some(vec![Cell::default()]))
@@ -1279,8 +1313,10 @@ mod tests {
         let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
             .with_blob_store(Box::new(blob_store));
         let (response, rx) = oneshot::channel();
-        let request =
-            GetCells { hashes: vec![B256::ZERO; MAX_CELLS_SERVE + 1], cell_mask: B128::default() };
+        let request = GetCells {
+            hashes: vec![B256::ZERO; MAX_CELLS_SERVE + 1],
+            cell_mask: B128::default().into(),
+        };
 
         handler.on_cells_request(PeerId::default(), request, response);
 
@@ -1306,7 +1342,7 @@ mod tests {
         let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
             .with_blob_store(Box::new(blob_store));
         let wire_mask = B128::from(numeric_mask.to_le_bytes());
-        let request = GetCells { hashes: vec![B256::ZERO], cell_mask: wire_mask };
+        let request = GetCells { hashes: vec![B256::ZERO], cell_mask: wire_mask.into() };
         let mut encoded = Vec::new();
         request.encode(&mut encoded);
         let request = GetCells::decode(&mut encoded.as_slice()).unwrap();
@@ -1317,10 +1353,122 @@ mod tests {
         let cells = rx.await.unwrap().unwrap();
         assert_eq!(cells.hashes, vec![B256::ZERO]);
         assert_eq!(cells.cells, vec![vec![Cell::default()]]);
-        assert_eq!(cells.cell_mask, wire_mask);
+        assert_eq!(cells.cell_mask, wire_mask.into());
         encoded.clear();
         cells.encode(&mut encoded);
         assert_eq!(Cells::decode(&mut encoded.as_slice()).unwrap(), cells);
+    }
+
+    #[tokio::test]
+    async fn indexed_cells_rebuilds_table_after_omissions() {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let hashes = (0..5).map(B256::repeat_byte).collect::<Vec<_>>();
+        let a = B128::from(1u128.to_le_bytes());
+        let b = B128::from(2u128.to_le_bytes());
+        let c = B128::from(4u128.to_le_bytes());
+        let request = GetCells::from_masks(hashes.clone(), vec![a, b, a, c, b]).unwrap();
+        let blob_store = CountingBlobStore {
+            cell_responses: vec![
+                (hashes[1], BlobCellMask::from_bits(2), vec![Cell::repeat_byte(1)]),
+                (hashes[2], BlobCellMask::from_bits(1), vec![Cell::repeat_byte(2)]),
+                (hashes[3], BlobCellMask::from_bits(4), vec![Cell::repeat_byte(3)]),
+                (hashes[4], BlobCellMask::from_bits(2), vec![Cell::repeat_byte(4)]),
+            ],
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        handler.on_cells_request(PeerId::default(), request.clone(), response);
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes, hashes[1..]);
+        assert_eq!(
+            cells.cell_mask,
+            CellMasks::Indexed {
+                masks: vec![b, a, c],
+                mask_ids: Bytes::from_static(&[0, 1, 2, 0]),
+            }
+        );
+        assert_eq!(cells.validate_response(&request), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn indexed_empty_response_preserves_form() {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx);
+        let (response, rx) = oneshot::channel();
+        let request = GetCells::from_masks(
+            vec![B256::ZERO, B256::repeat_byte(1)],
+            vec![B128::ZERO, B128::repeat_byte(1)],
+        )
+        .unwrap();
+        handler.on_cells_request(PeerId::default(), request.clone(), response);
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(
+            cells,
+            Cells {
+                cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Bytes::new() },
+                ..Default::default()
+            }
+        );
+        assert_eq!(cells.validate_response(&request), Ok(()));
+    }
+
+    #[test_case(1; "invalid_identifier")]
+    #[test_case(0; "uniform_indexed_request")]
+    #[tokio::test]
+    async fn invalid_indexed_request_performs_no_lookups(id: u8) {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let blob_store =
+            CountingBlobStore { get_cells_calls: Arc::clone(&calls), ..Default::default() };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request = GetCells {
+            hashes: vec![B256::ZERO],
+            cell_mask: CellMasks::Indexed { masks: vec![B128::ZERO], mask_ids: vec![id].into() },
+        };
+        handler.on_cells_request(PeerId::default(), request, response);
+        assert_eq!(rx.await.unwrap(), Err(RequestError::InvalidRequest));
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test_case(false)]
+    #[test_case(true)]
+    #[tokio::test]
+    async fn cells_forms_share_response_limit(indexed: bool) {
+        let (_incoming_tx, incoming_rx) = mpsc::channel(1);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let hashes = vec![B256::ZERO, B256::repeat_byte(1)];
+        let mask = B128::from(1u128.to_le_bytes());
+        let blob_store = CountingBlobStore {
+            get_cells_calls: Arc::clone(&calls),
+            cell_responses: vec![(
+                hashes[0],
+                BlobCellMask::from_bits(1),
+                vec![Cell::ZERO; SOFT_RESPONSE_LIMIT / BYTES_PER_CELL + 1],
+            )],
+            ..Default::default()
+        };
+        let handler = EthRequestHandler::<NoopProvider>::new(NoopProvider::default(), incoming_rx)
+            .with_blob_store(Box::new(blob_store));
+        let (response, rx) = oneshot::channel();
+        let request = GetCells {
+            hashes: hashes.clone(),
+            cell_mask: if indexed {
+                CellMasks::Indexed {
+                    masks: vec![mask, B128::from(2u128.to_le_bytes())],
+                    mask_ids: Bytes::from_static(&[0, 1]),
+                }
+            } else {
+                mask.into()
+            },
+        };
+        handler.on_cells_request(PeerId::default(), request, response);
+        let cells = rx.await.unwrap().unwrap();
+        assert_eq!(cells.hashes, vec![hashes[0]]);
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
@@ -2115,28 +2263,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn receipts70_serves_only_oversized_first_receipt_of_partial_block() {
+    async fn receipts70_serves_block_over_soft_limit_complete() {
         let provider = MockEthProvider::default();
-        let oversized = receipt_with_data(SOFT_RESPONSE_LIMIT + 1024);
-        let hash =
-            insert_receipts_block(&provider, 1, vec![oversized.clone(), receipt_with_data(16)]);
+        // The block crosses the soft limit but fits within the message, so it is served whole.
+        let small = receipt_with_data(16);
+        let large = receipt_with_data(SOFT_RESPONSE_LIMIT);
+        let hash = insert_receipts_block(&provider, 1, vec![small.clone(), large.clone()]);
 
         let resp = get_receipts70(provider, 0, vec![hash]).await;
 
-        // The oversized receipt exhausts the budget, so the rest of the block is left out.
         assert_eq!(
             resp,
-            Receipts70 { last_block_incomplete: true, receipts: vec![vec![oversized]] }
+            Receipts70 { last_block_incomplete: false, receipts: vec![vec![small, large]] }
         );
     }
 
     #[tokio::test]
-    async fn receipts70_omits_empty_incomplete_block() {
+    async fn receipts70_serves_last_block_over_soft_limit_complete() {
+        let provider = MockEthProvider::default();
+        let first = vec![receipt_with_data(1024); 160];
+        let first_hash = insert_receipts_block(&provider, 1, first.clone());
+        // The second block crosses the soft limit but fits within the message, so it is served
+        // whole after the first block.
+        let second = vec![receipt_with_data(SOFT_RESPONSE_LIMIT)];
+        let second_hash = insert_receipts_block(&provider, 2, second.clone());
+
+        let resp = get_receipts70(provider, 0, vec![first_hash, second_hash]).await;
+
+        assert_eq!(
+            resp,
+            Receipts70 { last_block_incomplete: false, receipts: vec![first, second] }
+        );
+    }
+
+    #[tokio::test]
+    async fn receipts70_omits_block_whose_first_receipt_overflows_the_message() {
         let provider = MockEthProvider::default();
         let first = vec![receipt_with_data(SOFT_RESPONSE_LIMIT - 1024)];
         let first_hash = insert_receipts_block(&provider, 1, first.clone());
-        // The first receipt of the second block does not fit into the remaining budget.
-        let second_hash = insert_receipts_block(&provider, 2, vec![receipt_with_data(4096)]);
+        // The first receipt of the second block fits in the message on its own but not in the
+        // budget left after the first block, so the response ends after the first block.
+        let second_hash =
+            insert_receipts_block(&provider, 2, vec![receipt_with_data(9 * 1024 * 1024)]);
 
         let resp = get_receipts70(provider, 0, vec![first_hash, second_hash]).await;
 
@@ -2144,9 +2312,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn receipts70_serves_partial_block() {
+    async fn receipts70_serves_partial_block_over_message_limit() {
         let provider = MockEthProvider::default();
-        let receipts = vec![receipt_with_data(16 * 1024); 200];
+        // Together the receipts overflow the 10 MiB message, so the block is split across
+        // responses and flagged incomplete.
+        let receipts = vec![receipt_with_data(1024 * 1024); 12];
         let hash = insert_receipts_block(&provider, 1, receipts.clone());
 
         let resp = get_receipts70(provider, 0, vec![hash]).await;
@@ -2156,7 +2326,11 @@ mod tests {
         let partial = &resp.receipts[0];
         assert!(!partial.is_empty() && partial.len() < receipts.len());
         assert_eq!(partial.as_slice(), &receipts[..partial.len()]);
-        assert!(partial.iter().map(Encodable::length).sum::<usize>() <= SOFT_RESPONSE_LIMIT);
+
+        let encoded = encode_receipts70_response(resp);
+        // The split happens at the message limit, not the soft limit.
+        assert!(encoded.len() > SOFT_RESPONSE_LIMIT);
+        assert!(encoded.len() <= MAX_MESSAGE_SIZE);
     }
 
     #[test_case(0, 0; "first receipt at hard limit")]
@@ -2192,9 +2366,18 @@ mod tests {
         }
         let encoded = encode_receipts70_response(resp);
         assert!(encoded.len() <= MAX_MESSAGE_SIZE);
-        EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70)
-            .decode_message(encoded.as_ref().into())
+        // The requesting side only decodes responses to requests it sent.
+        let mut requester = EthStreamInner::<EthNetworkPrimitives>::new(EthVersion::Eth70);
+        requester
+            .encode_message(EthMessage::GetReceipts70(RequestPair {
+                request_id: u64::MAX,
+                message: GetReceipts70 {
+                    first_block_receipt_index: first_receipt_index,
+                    block_hashes: vec![hash],
+                },
+            }))
             .unwrap();
+        requester.decode_message(encoded.as_ref().into()).unwrap();
     }
 
     /// Encodes a receipts response with the largest possible request ID.

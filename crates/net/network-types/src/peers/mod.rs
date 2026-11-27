@@ -160,6 +160,14 @@ impl Peer {
     pub const fn is_static(&self) -> bool {
         self.kind.is_static()
     }
+
+    /// Returns whether this peer is only tracked until its current session ends.
+    ///
+    /// Trusted peers are never temporary, even when marked for removal after disconnecting.
+    #[inline]
+    pub const fn is_temporary(&self) -> bool {
+        self.remove_after_disconnect && !self.is_trusted()
+    }
 }
 
 /// Peer info persisted to disk.

@@ -349,6 +349,26 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
+    /// Syncs read-write commits to disk, since [`SyncMode::SafeNoSync`] commits are lost on a new
+    /// boot after power loss. Best effort under [`SyncMode::UtterlyNoSync`], where later commits
+    /// can overwrite the synced state.
+    ///
+    /// [`SyncMode::SafeNoSync`]: reth_libmdbx::SyncMode::SafeNoSync
+    /// [`SyncMode::UtterlyNoSync`]: reth_libmdbx::SyncMode::UtterlyNoSync
+    #[instrument(name = "Tx::commit_durable", level = "debug", target = "providers::db", skip_all)]
+    fn commit_durable(self) -> Result<(), DatabaseError> {
+        if K::IS_READ_ONLY {
+            return self.commit()
+        }
+        let env = self.inner.env().clone();
+        self.commit()?;
+        // With `MDBX_NOSTICKYTHREADS`, MDBX skips the writer lock when syncing while any write
+        // transaction is open, so hold one to keep other writers out.
+        let _write_lock = env.begin_rw_txn().map_err(|e| DatabaseError::InitTx(e.into()))?;
+        env.sync(true).map_err(|e| DatabaseError::Commit(e.into()))?;
+        Ok(())
+    }
+
     fn abort(self) {
         self.execute_with_close_transaction_metric(TransactionOutcome::Abort, |this| {
             (drop(this.inner), None)

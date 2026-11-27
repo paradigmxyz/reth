@@ -8,9 +8,9 @@ use crate::{
 };
 use reqwest::Url;
 use reth_rpc_server_types::constants::{
-    default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKING_IO_REQUEST,
-    DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS,
-    DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS,
+    default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_ACTIVE_FILTERS,
+    DEFAULT_MAX_BLOCKING_IO_REQUEST, DEFAULT_MAX_BLOCKS_PER_FILTER, DEFAULT_MAX_LOGS_PER_RESPONSE,
+    DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS, DEFAULT_PROOF_PERMITS,
     RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
 };
 use serde::{Deserialize, Serialize};
@@ -90,6 +90,8 @@ pub struct EthConfig {
     pub rpc_gas_cap: u64,
     /// Max number of blocks for `eth_simulateV1`.
     pub rpc_max_simulate_blocks: u64,
+    /// Maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub rpc_max_trace_bytes: Option<usize>,
     /// Whether to compute state roots for `eth_simulateV1` responses.
     pub compute_state_root_for_eth_simulate: bool,
     ///
@@ -107,13 +109,30 @@ pub struct EthConfig {
     pub raw_tx_forwarder: ForwardConfig,
     /// Timeout duration for `send_raw_transaction_sync` RPC method.
     pub send_raw_transaction_sync_timeout: Duration,
-    /// Maximum memory the EVM can allocate per RPC request.
+    /// Maximum memory the EVM can allocate per call frame in an RPC request.
     pub rpc_evm_memory_limit: u64,
     /// Whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format when Osaka is active.
     ///
     /// This is disabled by default, allowing blob transactions with EIP-4844 sidecars to be
     /// submitted without automatic conversion.
     pub force_blob_sidecar_upcasting: bool,
+    /// The RPC server's response size limit in bytes. It also bounds the logs a multi-block
+    /// `eth_getLogs` query collects before its response is built.
+    ///
+    /// If `None`, only the log count bounds these queries.
+    #[serde(default)]
+    pub max_response_size: Option<usize>,
+    /// Maximum number of filters that can be installed at the same time, across all filter kinds.
+    ///
+    /// If `None`, the number of filters is unlimited.
+    #[serde(default = "default_max_active_filters")]
+    pub max_active_filters: Option<usize>,
+}
+
+/// The serde default of [`EthConfig::max_active_filters`], so that configs written before the
+/// field existed get the default cap rather than no cap.
+const fn default_max_active_filters() -> Option<usize> {
+    Some(DEFAULT_MAX_ACTIVE_FILTERS)
 }
 
 impl EthConfig {
@@ -123,6 +142,8 @@ impl EthConfig {
             .max_blocks_per_filter(self.max_blocks_per_filter)
             .max_logs_per_response(self.max_logs_per_response)
             .stale_filter_ttl(self.stale_filter_ttl)
+            .max_response_size(self.max_response_size)
+            .max_active_filters(self.max_active_filters)
     }
 }
 
@@ -139,6 +160,7 @@ impl Default for EthConfig {
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             rpc_max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
+            rpc_max_trace_bytes: None,
             compute_state_root_for_eth_simulate: false,
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
@@ -147,8 +169,10 @@ impl Default for EthConfig {
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
-            rpc_evm_memory_limit: (1 << 32) - 1,
+            rpc_evm_memory_limit: 100 * 1024 * 1024,
             force_blob_sidecar_upcasting: false,
+            max_response_size: None,
+            max_active_filters: Some(DEFAULT_MAX_ACTIVE_FILTERS),
         }
     }
 }
@@ -209,6 +233,12 @@ impl EthConfig {
         self
     }
 
+    /// Configures the maximum bytes a single traced transaction may record. `None` is unlimited.
+    pub const fn rpc_max_trace_bytes(mut self, max_trace_bytes: Option<usize>) -> Self {
+        self.rpc_max_trace_bytes = max_trace_bytes;
+        self
+    }
+
     /// Configures whether to compute state roots for `eth_simulateV1` responses.
     pub const fn compute_state_root_for_eth_simulate(mut self, enabled: bool) -> Self {
         self.compute_state_root_for_eth_simulate = enabled;
@@ -253,7 +283,7 @@ impl EthConfig {
         self
     }
 
-    /// Configures the maximum memory the EVM can allocate per RPC request.
+    /// Configures the maximum memory the EVM can allocate per call frame in an RPC request.
     pub const fn rpc_evm_memory_limit(mut self, memory_limit: u64) -> Self {
         self.rpc_evm_memory_limit = memory_limit;
         self
@@ -262,6 +292,19 @@ impl EthConfig {
     /// Configures whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.
     pub const fn force_blob_sidecar_upcasting(mut self, force: bool) -> Self {
         self.force_blob_sidecar_upcasting = force;
+        self
+    }
+
+    /// Configures the RPC server's response size limit in bytes.
+    pub const fn max_response_size(mut self, size: usize) -> Self {
+        self.max_response_size = Some(size);
+        self
+    }
+
+    /// Configures the maximum number of filters that can be installed at the same time, or
+    /// disables the limit with `None`.
+    pub const fn max_active_filters(mut self, max: Option<usize>) -> Self {
+        self.max_active_filters = max;
         self
     }
 }
@@ -282,6 +325,14 @@ pub struct EthFilterConfig {
     /// A filter is considered stale if it has not been polled for longer than this duration and
     /// will be removed.
     pub stale_filter_ttl: Duration,
+    /// Maximum JSON size in bytes of the logs a multi-block `eth_getLogs` query collects.
+    ///
+    /// If `None` then no limit is enforced.
+    pub max_response_size: Option<usize>,
+    /// Maximum number of filters that can be installed at the same time, across all filter kinds.
+    ///
+    /// If `None` then no limit is enforced.
+    pub max_active_filters: Option<usize>,
 }
 
 impl EthFilterConfig {
@@ -303,6 +354,20 @@ impl EthFilterConfig {
         self.stale_filter_ttl = duration;
         self
     }
+
+    /// Sets the maximum JSON size in bytes of the logs a multi-block `eth_getLogs` query collects,
+    /// or disables the limit with `None`.
+    pub const fn max_response_size(mut self, size: Option<usize>) -> Self {
+        self.max_response_size = size;
+        self
+    }
+
+    /// Sets the maximum number of filters that can be installed at the same time, or disables the
+    /// limit with `None`.
+    pub const fn max_active_filters(mut self, max: Option<usize>) -> Self {
+        self.max_active_filters = max;
+        self
+    }
 }
 
 impl Default for EthFilterConfig {
@@ -312,6 +377,24 @@ impl Default for EthFilterConfig {
             max_logs_per_response: None,
             // 5min
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
+            max_response_size: None,
+            max_active_filters: Some(DEFAULT_MAX_ACTIVE_FILTERS),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_max_active_filters_deserializes_to_the_default_cap() {
+        let mut config = serde_json::to_value(EthConfig::default()).unwrap();
+        config.as_object_mut().unwrap().remove("max_active_filters").unwrap();
+
+        let config = serde_json::from_value::<EthConfig>(config).unwrap();
+        assert_eq!(config.max_active_filters, Some(DEFAULT_MAX_ACTIVE_FILTERS));
+        assert_eq!(config.filter_config().max_active_filters, Some(DEFAULT_MAX_ACTIVE_FILTERS));
+        assert_eq!(EthFilterConfig::default().max_active_filters, Some(DEFAULT_MAX_ACTIVE_FILTERS));
     }
 }

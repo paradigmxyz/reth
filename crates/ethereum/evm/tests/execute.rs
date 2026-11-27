@@ -700,7 +700,7 @@ fn block_gas_limit_error() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_balance_increment_not_duplicated() {
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)

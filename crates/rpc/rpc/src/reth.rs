@@ -3,7 +3,6 @@ use std::{future::Future, sync::Arc};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockId;
 use alloy_primitives::{map::AddressMap, U256, U64};
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
 use reth_chain_state::{
@@ -22,6 +21,7 @@ use reth_storage_api::{
 };
 use reth_tasks::{pool::BlockingTaskGuard, CancelOnDrop, Runtime};
 use serde::Serialize;
+use serde_json::value::RawValue;
 use tokio::sync::oneshot;
 
 /// `reth` API implementation.
@@ -209,7 +209,6 @@ where
     }
 }
 
-#[async_trait]
 impl<Provider, EvmConfig> RethApiServer for RethApi<Provider, EvmConfig>
 where
     Provider: BlockReaderIdExt
@@ -238,14 +237,14 @@ where
         &self,
         block_id: BlockId,
         count: Option<U64>,
-    ) -> RpcResult<Option<serde_json::Value>> {
+    ) -> RpcResult<Option<Box<RawValue>>> {
         let outcome = Self::block_execution_outcome(self, block_id, count).await?;
         match outcome {
             Some(outcome) => {
-                let value = serde_json::to_value(&outcome).map_err(|e| {
+                let raw = serde_json::value::to_raw_value(&outcome).map_err(|e| {
                     EthApiError::Internal(reth_errors::RethError::msg(e.to_string()))
                 })?;
-                Ok(Some(value))
+                Ok(Some(raw))
             }
             None => Ok(None),
         }

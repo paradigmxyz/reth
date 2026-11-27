@@ -33,7 +33,7 @@ use reth_rpc_eth_types::{
     EthResult, FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx,
     TransactionsProvider,
 };
 use reth_transaction_pool::{
@@ -345,23 +345,29 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            // Full cache miss — fetch both from provider.
-            self.spawn_blocking_io(move |this| {
-                let provider = this.provider();
-                let Some((tx, meta)) = provider
-                    .transaction_by_hash_with_meta(hash)
-                    .map_err(Self::Error::from_eth_err)?
-                else {
-                    return Ok(None);
-                };
+            // Full cache miss — fetch the transaction from provider.
+            let Some((tx, meta)) = self
+                .spawn_blocking_io(move |this| this.mined_transaction_by_hash_with_meta(hash))
+                .await?
+            else {
+                return Ok(None);
+            };
 
-                let tx = this.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?;
+            // Take the receipt from the block's receipts, which `build_transaction_receipt` needs
+            // for gas accounting anyway. They are missing if pruned.
+            let Some(all_receipts) = self
+                .cache()
+                .get_receipts(meta.block_hash)
+                .await
+                .map_err(Self::Error::from_eth_err)?
+            else {
+                return Ok(None);
+            };
+            let Some(receipt) = all_receipts.get(meta.index as usize).cloned() else {
+                return Ok(None);
+            };
 
-                let receipt = provider.receipt_by_hash(hash).map_err(Self::Error::from_eth_err)?;
-
-                Ok(receipt.map(|receipt| (tx, meta, receipt, None, None)))
-            })
-            .await
+            Ok(Some((tx, meta, receipt, Some(all_receipts), None)))
         }
     }
 
@@ -517,9 +523,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
-            if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err())
-            }
+            let signer = self.find_signer(&from)?;
+
+            // Held until the pool insert below, so a concurrent request from this account reads
+            // the pool only after this transaction is in it.
+            let _nonce_guard = match signer.nonce_lock() {
+                Some(lock) if request.as_ref().nonce().is_none() => Some(lock.lock_owned().await),
+                _ => None,
+            };
 
             // set nonce if not already set before
             if request.as_ref().nonce().is_none() {
@@ -906,6 +917,29 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         txs.into_iter().map(|tx| self.recover_raw_transaction(tx.as_ref())).collect()
     }
 
+    /// Decodes and recovers a raw transaction in the pool's pooled format.
+    ///
+    /// Used by RPC methods that execute raw transactions a client could also submit to the pool,
+    /// such as `eth_callBundle`, `mev_simBundle` and `trace_rawTransaction`. The default delegates
+    /// to [`Self::recover_raw_transaction`]; implementations can override it to customize decoding
+    /// or recovery for their pooled transaction type.
+    fn recover_raw_pooled_transaction(
+        &self,
+        tx: &[u8],
+    ) -> EthResult<Recovered<PoolPooledTx<Self::Pool>>> {
+        self.recover_raw_transaction(tx)
+    }
+
+    /// Decodes and recovers raw pooled transactions in order, stopping at the first error.
+    ///
+    /// Uses [`Self::recover_raw_pooled_transaction`] for each transaction.
+    fn recover_raw_pooled_transactions(
+        &self,
+        txs: impl IntoIterator<Item = impl AsRef<[u8]>>,
+    ) -> EthResult<Vec<Recovered<PoolPooledTx<Self::Pool>>>> {
+        txs.into_iter().map(|tx| self.recover_raw_pooled_transaction(tx.as_ref())).collect()
+    }
+
     /// Recovers the sender of a mined transaction, reusing a cached sender when configured.
     ///
     /// Mined transactions can predate EIP-2, so recovery does not reject high-s signatures. A
@@ -924,6 +958,31 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 .map_err(|_| EthApiError::InvalidTransactionSignature)?,
         };
         Ok(Recovered::new_unchecked(tx, signer))
+    }
+
+    /// Returns the mined transaction with the given hash and the metadata of its block.
+    ///
+    /// Uses the stored sender, and falls back to [`Self::recover_mined_transaction`] if senders are
+    /// pruned. Reads from the provider, so this must run on a blocking task.
+    ///
+    /// Returns `Ok(None)` if the transaction was not found.
+    #[expect(clippy::type_complexity)]
+    fn mined_transaction_by_hash_with_meta(
+        &self,
+        hash: TxHash,
+    ) -> Result<Option<(Recovered<ProviderTx<Self::Provider>>, TransactionMeta)>, Self::Error> {
+        let Some((tx, meta, signer)) = self
+            .provider()
+            .transaction_by_hash_with_meta_and_sender(hash)
+            .map_err(Self::Error::from_eth_err)?
+        else {
+            return Ok(None)
+        };
+        let tx = match signer {
+            Some(signer) => tx.with_signer(signer),
+            None => self.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?,
+        };
+        Ok(Some((tx, meta)))
     }
 
     /// Returns the transaction by hash.
@@ -947,20 +1006,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
             }
 
             // Cache miss - try to find the transaction on disk
-            if let Some((tx, meta)) = self
-                .spawn_blocking_io(move |this| {
-                    this.provider()
-                        .transaction_by_hash_with_meta(hash)
-                        .map_err(Self::Error::from_eth_err)
-                })
+            if let Some((transaction, meta)) = self
+                .spawn_blocking_io(move |this| this.mined_transaction_by_hash_with_meta(hash))
                 .await?
             {
-                // Note: we assume this transaction is valid, because it's mined (or
-                // part of pending block) and already. We don't need to
-                // check for pre EIP-2 because this transaction could be pre-EIP-2.
-                let transaction =
-                    self.recover_mined_transaction(tx).map_err(Self::Error::from_eth_err)?;
-
                 return Ok(Some(TransactionSource::Block {
                     transaction,
                     index: meta.index,
