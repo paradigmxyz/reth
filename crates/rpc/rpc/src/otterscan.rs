@@ -416,7 +416,7 @@ fn calculate_issuance(
 fn total_fees(receipts: &[impl ReceiptResponse]) -> U256 {
     receipts
         .iter()
-        .map(|receipt| U256::from(receipt.gas_used()) * receipt.effective_gas_price_u256())
+        .map(|receipt| U256::from(receipt.gas_used()) * receipt.effective_gas_price())
         .sum()
 }
 
@@ -485,7 +485,9 @@ mod tests {
     };
     use reth_chain_state::ExecutedBlock;
     use reth_chainspec::{ChainInfo, MAINNET, MIN_TRANSACTION_GAS};
-    use reth_ethereum_primitives::{Block, Receipt, TransactionSigned};
+    use reth_ethereum_primitives::{
+        calculate_receipt_root_no_memo, Block, Receipt, TransactionSigned, TxType,
+    };
     use reth_evm::{ConfigureEvm, Evm};
     use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
     use reth_network_api::noop::NoopNetwork;
@@ -725,13 +727,12 @@ mod tests {
             Signature::test_signature(),
         );
         let transactions = vec![tx];
-        let receipt =
-            Receipt { success: true, cumulative_gas_used: gas_used, ..Default::default() };
+        let receipt = Receipt::standard(TxType::Legacy, true, gas_used, vec![]);
         let header = Header {
             number,
             parent_hash,
             transactions_root: calculate_transaction_root(&transactions),
-            receipts_root: Receipt::calculate_receipt_root_no_memo(std::slice::from_ref(&receipt)),
+            receipts_root: calculate_receipt_root_no_memo(std::slice::from_ref(&receipt)),
             gas_used,
             gas_limit: 30_000_000,
             timestamp: number * 12,
@@ -781,7 +782,7 @@ mod tests {
         let [receipt] = page.receipts.as_slice() else { panic!("expected one receipt") };
         assert_eq!(receipt.receipt.block_hash, Some(first_hash));
         assert_eq!(receipt.receipt.transaction_hash, tx_hash);
-        assert_eq!(receipt.receipt.effective_gas_price, 2);
+        assert_eq!(receipt.receipt.effective_gas_price, U256::from(2));
         assert_eq!(receipt.receipt.gas_used, MIN_TRANSACTION_GAS);
     }
 

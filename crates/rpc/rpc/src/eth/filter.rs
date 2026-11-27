@@ -1996,12 +1996,7 @@ mod tests {
         );
         let log =
             Log { address: Address::ZERO, data: LogData::new_unchecked(vec![], Bytes::new()) };
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
-            cumulative_gas_used: 21_000,
-            logs: vec![log; logs_per_block],
-            success: true,
-        };
+        let receipt = Receipt::standard(TxType::Legacy, true, 21_000, vec![log; logs_per_block]);
 
         let mut parent_hash = blocks
             .start()
@@ -3316,40 +3311,15 @@ mod tests {
             data: LogData::new_unchecked(vec![B256::repeat_byte(topic)], Bytes::new()),
         };
         let receipts = vec![
-            Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 21_000,
-                logs: vec![log(1, 1), log(2, 2)],
-                success: true,
-            },
-            Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 42_000,
-                logs: vec![],
-                success: true,
-            },
-            Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 63_000,
-                logs: vec![log(1, 2), log(3, 1), log(1, 1)],
-                success: true,
-            },
-            Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 84_000,
-                logs: vec![],
-                success: true,
-            },
-            Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 105_000,
-                logs: vec![],
-                success: true,
-            },
+            Receipt::standard(TxType::Legacy, true, 21_000, vec![log(1, 1), log(2, 2)]),
+            Receipt::standard(TxType::Legacy, true, 42_000, vec![]),
+            Receipt::standard(TxType::Legacy, true, 63_000, vec![log(1, 2), log(3, 1), log(1, 1)]),
+            Receipt::standard(TxType::Legacy, true, 84_000, vec![]),
+            Receipt::standard(TxType::Legacy, true, 105_000, vec![]),
         ];
 
         let mut logs_bloom = Bloom::default();
-        for log in receipts.iter().flat_map(|receipt| &receipt.logs) {
+        for log in receipts.iter().flat_map(|receipt| receipt.logs()) {
             logs_bloom.accrue_log(log);
         }
         let header = alloy_consensus::Header {
@@ -3409,7 +3379,7 @@ mod tests {
         );
         assert_eq!(
             logs.iter().map(|log| log.inner.clone()).collect::<Vec<_>>(),
-            receipts.iter().flat_map(|receipt| receipt.logs.clone()).collect::<Vec<_>>()
+            receipts.iter().flat_map(|receipt| receipt.logs().iter().cloned()).collect::<Vec<_>>()
         );
         for log in &logs {
             assert_eq!(log.block_hash, Some(header.hash()));

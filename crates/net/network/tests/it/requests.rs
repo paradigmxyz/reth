@@ -222,8 +222,8 @@ async fn test_eth71_fetch_client_get_receipts() {
     assert!(!response.last_block_incomplete);
     assert_eq!(response.receipts.len(), 1);
     assert_eq!(response.receipts[0].len(), 2);
-    assert_eq!(response.receipts[0][0].cumulative_gas_used, 21000);
-    assert_eq!(response.receipts[0][1].cumulative_gas_used, 42000);
+    assert_eq!(response.receipts[0][0].cumulative_gas_used(), 21000);
+    assert_eq!(response.receipts[0][1].cumulative_gas_used(), 42000);
 }
 
 #[tokio::test(flavor = "multi_thread")]

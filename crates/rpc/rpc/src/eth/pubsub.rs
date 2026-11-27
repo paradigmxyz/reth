@@ -692,12 +692,12 @@ mod tests {
             .iter()
             .map(|tx| {
                 cumulative_gas_used += tx.gas_limit();
-                Receipt {
-                    tx_type: tx.tx_type(),
-                    success: true,
+                Receipt::standard(
+                    tx.tx_type(),
+                    true,
                     cumulative_gas_used,
-                    logs: (0..2).map(|_| generators::random_log(&mut rng, None, Some(2))).collect(),
-                }
+                    (0..2).map(|_| generators::random_log(&mut rng, None, Some(2))).collect(),
+                )
             })
             .collect();
         Chain::new(

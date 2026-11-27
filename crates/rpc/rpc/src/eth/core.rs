@@ -2247,8 +2247,8 @@ mod tests {
                         .iter()
                         .map(|tx| {
                             let mut receipt = random_receipt(&mut rng, tx, Some(2), None);
-                            cumulative_gas_used += receipt.cumulative_gas_used;
-                            receipt.cumulative_gas_used = cumulative_gas_used;
+                            cumulative_gas_used += receipt.cumulative_gas_used();
+                            receipt.set_cumulative_gas_used(cumulative_gas_used);
                             receipt
                         })
                         .collect()
