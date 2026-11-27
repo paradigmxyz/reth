@@ -6,8 +6,7 @@ use smallvec::SmallVec;
 
 /// Normalized transaction announcements.
 pub mod announcement;
-mod blob_buffer;
-mod blob_fetcher;
+mod blob;
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -25,7 +24,7 @@ pub use self::constants::{
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use announcement::TransactionAnnouncement;
-use blob_fetcher::BlobFetcher;
+use blob::BlobFetcher;
 use config::AnnouncementAcceptance;
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionIngressPolicy,

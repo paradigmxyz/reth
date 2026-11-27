@@ -1,14 +1,12 @@
 //! Fetches the cells of blob transactions announced by eth/72 peers.
 //!
 //! eth/72 peers send blob transaction bodies without their blobs. The body is still fetched by
-//! the [`TransactionFetcher`](super::TransactionFetcher), while this fetcher requests enough
-//! cells with `GetCells` to rebuild every blob, checks them against the body and hands the
+//! the [`TransactionFetcher`](crate::transactions::TransactionFetcher), while this fetcher requests
+//! enough cells with `GetCells` to rebuild every blob, checks them against the body and hands the
 //! transaction back for the pool import.
 
-use super::{
-    blob_buffer::{BlobBuffer, BufferedBlob},
-    PeerMetadata,
-};
+use super::buffer::{BlobBuffer, BufferedBlob};
+use crate::transactions::PeerMetadata;
 use alloy_eips::eip7594::{BlobCellMask, CELLS_PER_EXT_BLOB};
 use alloy_primitives::{
     map::{B256Map, FbBuildHasher, HashMap},
@@ -58,7 +56,7 @@ const PEER_COLUMN_BUDGET: f64 = 256.0;
 const PEER_COLUMN_REFILL_PER_SEC: f64 = 9.0;
 
 /// Fetches the cells of eth/72 blob transactions and checks them against their bodies.
-pub(super) struct BlobFetcher<T> {
+pub(crate) struct BlobFetcher<T> {
     // Bodies and cells waiting for each other.
     buffer: BlobBuffer<T>,
     // Transactions whose cells are being fetched.
@@ -93,7 +91,7 @@ type VerifyFuture<T> = Pin<Box<dyn Future<Output = (B256, Option<(PeerId, T)>)> 
 
 impl<T: PoolTransaction + 'static> BlobFetcher<T> {
     /// Creates an empty fetcher.
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             buffer: Default::default(),
             pending: Default::default(),
@@ -106,7 +104,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
     }
 
     /// Records that `peer` announced the blob transaction `hash` with the cells in `mask`.
-    pub(super) fn announce(&mut self, hash: B256, peer: PeerId, mask: BlobCellMask) {
+    pub(crate) fn announce(&mut self, hash: B256, peer: PeerId, mask: BlobCellMask) {
         if mask.count() == 0 ||
             (!self.pending.contains_key(&hash) && self.pending.len() >= MAX_PENDING_TRANSACTIONS)
         {
@@ -123,12 +121,12 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
     /// Buffers the body of a blob transaction that `peer` sent without blobs.
     ///
     /// Returns `false` if the body is malformed, see [`BlobBuffer::body`].
-    pub(super) fn body(&mut self, peer: PeerId, tx: T) -> bool {
+    pub(crate) fn body(&mut self, peer: PeerId, tx: T) -> bool {
         self.buffer.body(peer, tx, Instant::now())
     }
 
     /// Stops fetching cells from a disconnected `peer`.
-    pub(super) fn drop_peer(&mut self, peer: &PeerId) {
+    pub(crate) fn drop_peer(&mut self, peer: &PeerId) {
         self.budgets.remove(peer);
         for pending in self.pending.values_mut() {
             pending.providers.retain(|(id, _)| id != peer);
@@ -138,7 +136,7 @@ impl<T: PoolTransaction + 'static> BlobFetcher<T> {
     /// Advances requests and checks, and sends new requests to `peers`.
     ///
     /// Returns a transaction whose cells passed the check, with the peer that sent its body.
-    pub(super) fn poll<N: NetworkPrimitives>(
+    pub(crate) fn poll<N: NetworkPrimitives>(
         &mut self,
         cx: &mut Context<'_>,
         peers: &HashMap<PeerId, PeerMetadata<N>, FbBuildHasher<64>>,
@@ -401,7 +399,7 @@ struct BlobFetcherMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transactions::blob_buffer::tests::fixture;
+    use crate::transactions::blob::buffer::tests::fixture;
     use futures::task::noop_waker_ref;
     use reth_eth_wire::{EthNetworkPrimitives, EthVersion};
     use reth_network_api::{PeerKind, PeerRequestSender};
