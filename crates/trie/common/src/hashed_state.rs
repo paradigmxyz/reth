@@ -51,8 +51,8 @@ impl HashedPostState {
     ) -> Self {
         #[cfg(feature = "rayon")]
         {
-            const PAR_HASH_THRESHOLD: usize = 256;
-            const PAR_STORAGE_THRESHOLD: usize = 512;
+            const PAR_HASH_THRESHOLD: usize = 2048;
+            const PAR_STORAGE_THRESHOLD: usize = 2048;
 
             let entries: Vec<(&'a Address, &'a BundleAccount)> = state.into_iter().collect();
             let mut total_hashes = entries.len();
@@ -1038,9 +1038,9 @@ mod tests {
             let mut bytes = [0u8; 20];
             bytes[12..].copy_from_slice(&(10_000 + c).to_be_bytes());
             let mut storage = StorageWithOriginalValues::default();
-            for slot in 0u64..600 {
+            for slot in 0u64..2100 {
                 storage.insert(
-                    U256::from(c * 1000 + slot),
+                    U256::from(c * 10_000 + slot),
                     StorageSlot::new_changed(U256::ZERO, U256::from(slot + 1)),
                 );
             }
@@ -1086,7 +1086,7 @@ mod tests {
         assert_eq!(sorted_owned.accounts.len(), 302);
         assert!(sorted_owned.accounts.windows(2).all(|w| w[0].0 < w[1].0));
         for storage in sorted_owned.storages.values() {
-            assert_eq!(storage.storage_slots.len(), 600);
+            assert_eq!(storage.storage_slots.len(), 2100);
             assert!(storage.storage_slots.windows(2).all(|w| w[0].0 < w[1].0));
         }
     }
