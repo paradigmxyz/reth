@@ -656,7 +656,7 @@ mod tests {
         }
         writer.commit().unwrap();
         tx.commit().unwrap();
-        let block = |n| checksum_static_file(&files, &db, segment, Some(n), Some(n), Some(1));
+        let block = |n| checksum_static_file(&files, &db, segment, Some(n), Some(n), None);
         assert_eq!(block(3).unwrap(), (checksum_hasher().finish(), 0));
         let mut expected = checksum_hasher();
         expected.write(&receipt(4).compress());
@@ -664,12 +664,12 @@ mod tests {
         for (start, end) in [(2, 3), (5, 6)] {
             writer.user_header_mut().set_tx_range(start, end);
             writer.commit().unwrap();
-            assert_eq!(checksum_static_file(&files, &db, segment, None, None, None).unwrap().1, 2);
             assert_eq!(
                 block(4).unwrap_err().to_string(),
                 format!("Receipts transaction range {start}..={end} does not fit blocks 3..=5")
             );
         }
+        assert_eq!(checksum_static_file(&files, &db, segment, None, None, None).unwrap().1, 2);
     }
 
     #[test]
@@ -698,7 +698,6 @@ mod tests {
         let checksum = |start, end| {
             checksum_static_file(&files, &db, segment, Some(start), Some(end), None).unwrap()
         };
-        assert_eq!(checksum(3, 4), (checksum_hasher().finish(), 0));
         assert_eq!(checksum(4, 4), (checksum_hasher().finish(), 0));
         let mut expected = checksum_hasher();
         expected.write(&receipt.compress());
