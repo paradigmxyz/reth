@@ -1413,6 +1413,20 @@ mod tests {
     }
 
     #[test]
+    fn disk_get_without_blobs_can_fallback_to_disk() {
+        let (store, _dir) = tmp_store();
+
+        let tx_hash = TxHash::random();
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let expected = sidecar.as_eip7594().map(without_blobs);
+        store.insert(tx_hash, sidecar.into()).unwrap();
+        store.clear_cache();
+
+        assert_eq!(store.get_without_blobs(tx_hash).unwrap(), expected);
+        assert!(store.is_cached(&tx_hash));
+    }
+
+    #[test]
     fn disk_get_blobs_v4_can_fallback_to_disk() {
         let (store, _dir) = tmp_store();
 
