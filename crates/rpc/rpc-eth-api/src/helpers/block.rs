@@ -159,7 +159,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
             })
             .collect::<Vec<_>>();
 
-        Ok(self.converter().convert_receipts_with_block(inputs, &block)?)
+        Ok(self.converter().convert_receipts_with_block(inputs, block)?)
     }
 
     /// Helper method that loads a block and all its receipts.
