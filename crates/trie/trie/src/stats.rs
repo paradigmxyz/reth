@@ -1,4 +1,4 @@
-use reth_primitives_traits::FastInstant as Instant;
+use reth_concurrency::sync::time::FastInstant as Instant;
 use std::time::Duration;
 
 /// Trie stats.

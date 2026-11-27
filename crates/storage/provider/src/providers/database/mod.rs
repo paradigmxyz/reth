@@ -249,7 +249,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     {
         let factory = self.clone();
         let db_path = self.db.path();
-        reth_tasks::spawn_os_thread("ro-sync", move || {
+        reth_tasks::spawn_thread("ro-sync", move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
                 move |res| {

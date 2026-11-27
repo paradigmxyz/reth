@@ -3,7 +3,7 @@ use super::{
     MANAGED_DATADIR_PATHS,
 };
 use eyre::Result;
-use rayon::prelude::*;
+use reth_concurrency::sync::rayon::prelude::*;
 use reth_config::config::Config;
 use reth_db::static_file::{
     last_missing_block, read_static_file_header, CONFIG_FILE_EXTENSION, OFFSETS_FILE_EXTENSION,

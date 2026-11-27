@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, optional = true }
 reth-execution-errors.workspace = true
 reth-trie-common.workspace = true
 tracing = { workspace = true, features = ["attributes"], optional = true }
@@ -24,7 +23,7 @@ alloy-primitives.workspace = true
 
 # misc
 either = { workspace = true, optional = true }
-rayon = { workspace = true, optional = true }
+reth-concurrency = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 strum = { workspace = true, features = ["derive"] }
 
@@ -33,7 +32,6 @@ reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-concurrency = { workspace = true, features = ["std"] }
 reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
@@ -47,13 +45,11 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = []
+fuzz = ["reth-concurrency?/fuzz", "reth-trie-common/fuzz", "reth-trie/fuzz"]
 default = ["std", "metrics"]
 std = [
-    "reth-concurrency/std",
     "dep:either",
-    "dep:rayon",
-    "dep:reth-primitives-traits",
+    "reth-concurrency/std",
     "dep:smallvec",
     "dep:tracing",
     "alloy-primitives/std",
@@ -61,7 +57,6 @@ std = [
     "alloy-trie/std",
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
-    "reth-primitives-traits/rayon",
     "reth-trie-common/std",
     "tracing/std",
     "strum/std",
@@ -70,7 +65,7 @@ std = [
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [
-    "reth-concurrency/test-utils",
+    "reth-concurrency?/test-utils",
     "std",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",

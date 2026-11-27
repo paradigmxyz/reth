@@ -39,6 +39,6 @@ std = [
 fuzz = ["std", "dep:either", "dep:shuttle", "shuttle-sync/shuttle", "shuttle-parking_lot/shuttle"]
 test-utils = ["reth-primitives-traits/test-utils"]
 
-# Fuzz builds replace the native Rayon backend.
+# DST builds replace the native Rayon backend.
 [package.metadata.cargo-udeps.ignore]
 normal = ["rayon"]
