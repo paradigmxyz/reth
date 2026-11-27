@@ -38,12 +38,12 @@ use std::{
 };
 use tracing::{debug, trace};
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 use parking_lot::Mutex;
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 use std::{sync::OnceLock, time::Instant};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use reth_concurrency::sync::{parking_lot::Mutex, time::Instant, OnceLock};
 
 #[cfg(feature = "rayon")]

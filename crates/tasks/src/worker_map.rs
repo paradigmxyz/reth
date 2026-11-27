@@ -2,7 +2,7 @@
 //!
 //! Each worker is a dedicated OS thread that processes closures sent to it via a channel.
 //! This is a substitute for `spawn_blocking` that reuses the same OS thread for the same
-//! named task, like a 1-thread thread pool keyed by name. Under `fuzz`, workers
+//! named task, like a 1-thread thread pool keyed by name. Under `fuzz` plus `--cfg dst`, workers
 //! use the deterministic executor and work queues use the selected channel backend.
 //! Task results still use Tokio oneshot channels.
 
@@ -16,10 +16,10 @@ use reth_concurrency::sync::{
 use std::{panic::AssertUnwindSafe, sync::Arc};
 use tokio::sync::oneshot;
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 use tokio::sync::mpsc;
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use reth_concurrency::sync::channel;
 
 type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
@@ -27,9 +27,9 @@ type BoxedTask = Box<dyn FnOnce() + Send + 'static>;
 /// A single-thread worker that processes closures sequentially on a dedicated OS thread.
 struct WorkerThread {
     /// Sender to submit work to this worker's thread.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     tx: mpsc::UnboundedSender<BoxedTask>,
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     tx: Option<channel::Sender<BoxedTask>>,
     /// Metrics labeled with this worker's name.
     metrics: WorkerThreadMetrics,
@@ -42,21 +42,21 @@ struct WorkerThread {
 impl WorkerThread {
     /// Spawns a new worker thread with the given name.
     fn new(name: &'static str) -> Self {
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         let (tx, mut rx) = mpsc::unbounded_channel::<BoxedTask>();
         // The selected queue yields to the simulator; Tokio's blocking receive would
         // park the simulator's only OS thread.
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let (tx, rx) = channel::unbounded::<BoxedTask>();
         let handle = thread::Builder::new()
             .name(name.to_string())
             .spawn(move || {
                 while let Some(task) = {
-                    #[cfg(not(feature = "fuzz"))]
+                    #[cfg(not(all(feature = "fuzz", dst)))]
                     {
                         rx.blocking_recv()
                     }
-                    #[cfg(feature = "fuzz")]
+                    #[cfg(all(feature = "fuzz", dst))]
                     {
                         rx.recv().ok()
                     }
@@ -67,9 +67,9 @@ impl WorkerThread {
             .unwrap_or_else(|e| panic!("failed to spawn worker thread {name:?}: {e}"));
 
         Self {
-            #[cfg(not(feature = "fuzz"))]
+            #[cfg(not(all(feature = "fuzz", dst)))]
             tx,
-            #[cfg(feature = "fuzz")]
+            #[cfg(all(feature = "fuzz", dst))]
             tx: Some(tx),
             metrics: WorkerThreadMetrics::new(name),
             pending: Arc::new(AtomicUsize::new(0)),
@@ -101,9 +101,9 @@ impl WorkerThread {
             let _ = result_tx.send(result);
         });
 
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         let tx = &self.tx;
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let tx = self.tx.as_ref().expect("live worker retains its sender");
         if tx.send(task).is_err() {
             self.pending.fetch_sub(1, Ordering::AcqRel);
@@ -136,9 +136,9 @@ impl WorkerThread {
             let _ = result_tx.send(result);
         });
 
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         let tx = &self.tx;
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let tx = self.tx.as_ref().expect("live worker retains its sender");
         if tx.send(task).is_err() {
             self.pending.fetch_sub(1, Ordering::AcqRel);
@@ -181,9 +181,9 @@ impl Drop for RecordTaskDurationOnDrop {
 /// Each unique name gets a dedicated OS thread that is reused for all tasks submitted under
 /// that name. Workers are created lazily on first use.
 pub(crate) struct WorkerMap {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     workers: DashMap<&'static str, WorkerThread>,
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     workers: DashMap<&'static str, Arc<WorkerThread>>,
 }
 
@@ -200,7 +200,7 @@ impl WorkerMap {
     }
 
     /// Returns the canonical worker without retaining map locks across scheduled operations.
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     fn worker(&self, name: &'static str) -> Arc<WorkerThread> {
         if let Some(worker) = self.workers.get(name) {
             return Arc::clone(worker.value());
@@ -223,9 +223,9 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let worker = self.worker(name);
         worker.spawn(f)
     }
@@ -242,15 +242,15 @@ impl WorkerMap {
         F: FnOnce() -> R + Send + 'static,
         R: Send + 'static,
     {
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         let worker = self.workers.entry(name).or_insert_with(|| WorkerThread::new(name));
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let worker = self.worker(name);
         worker.try_spawn(f)
     }
 }
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 impl Drop for WorkerMap {
     fn drop(&mut self) {
         for (_, mut w) in std::mem::take(&mut self.workers) {
@@ -267,7 +267,7 @@ impl Drop for WorkerMap {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Drop for WorkerThread {
     fn drop(&mut self) {
         // Close the queue before joining so an idle worker can exit.
@@ -288,7 +288,7 @@ impl std::fmt::Debug for WorkerMap {
 }
 
 // Native Tokio waits do not yield to Shuttle while a simulated worker is parked.
-#[cfg(all(test, not(feature = "fuzz")))]
+#[cfg(all(test, not(all(feature = "fuzz", dst))))]
 mod tests {
     use super::*;
 

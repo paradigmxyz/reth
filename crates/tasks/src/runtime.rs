@@ -624,7 +624,7 @@ impl Runtime {
     /// Unlike [`spawn_blocking`](Self::spawn_blocking) which uses tokio's blocking thread pool,
     /// this reuses the same worker for all tasks submitted under the same `name`. The worker
     /// is created lazily on first use and its name is set to `name`. It is an OS thread natively
-    /// and a logical thread under `fuzz`.
+    /// and a logical thread under `fuzz` plus `--cfg dst`.
     ///
     /// This is useful for tasks that benefit from running on a stable thread, e.g. for
     /// thread-local state reuse or to avoid thread creation overhead on hot paths.
@@ -668,11 +668,11 @@ impl Runtime {
 
         if self
             .try_spawn_blocking_named(name, move || {
-                #[cfg(not(feature = "fuzz"))]
+                #[cfg(not(all(feature = "fuzz", dst)))]
                 if let Some(func) = named_func.lock().take() {
                     func();
                 }
-                #[cfg(feature = "fuzz")]
+                #[cfg(all(feature = "fuzz", dst))]
                 {
                     if shuttle::current::try_get_current_task().is_some() {
                         reth_concurrency::sync::thread::yield_now();
@@ -688,11 +688,11 @@ impl Runtime {
             return true
         }
 
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         if let Some(func) = func.lock().take() {
             self.spawn_blocking(func);
         }
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         {
             if shuttle::current::try_get_current_task().is_some() {
                 reth_concurrency::sync::thread::yield_now();
@@ -775,8 +775,8 @@ impl Runtime {
     /// Spawns a critical task on a dedicated named selected-backend thread.
     /// The given future resolves as soon as the [`Shutdown`] signal is received.
     ///
-    /// If this task panics, the [`TaskManager`] is notified. The thread is native outside `fuzz`;
-    /// under `fuzz`, Tokio futures are not driven by the synchronous scheduler.
+    /// If this task panics, the [`TaskManager`] is notified. The thread is native outside DST;
+    /// under `fuzz` plus `--cfg dst`, Tokio futures are not driven by the synchronous scheduler.
     pub fn spawn_critical_os_thread<F>(
         &self,
         thread_name: &'static str,
@@ -1168,12 +1168,12 @@ impl RuntimeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     use crate::test_utils;
 
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     use std::{future, sync::mpsc};
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     use tokio::sync::oneshot;
 
     #[test]
@@ -1319,7 +1319,7 @@ mod tests {
     }
 
     // Exercises native Tokio runtime ownership or OS-thread behavior.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[test]
     fn last_runtime_clone_can_drop_on_its_worker() {
         test_utils::run(|| {
@@ -1338,7 +1338,7 @@ mod tests {
     }
 
     // Exercises native Tokio runtime ownership or OS-thread behavior.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[test]
     fn shutdown_with_live_runtime_clones() {
         test_utils::run(|| {
@@ -1365,7 +1365,7 @@ mod tests {
     }
 
     // Exercises native Tokio runtime ownership or OS-thread behavior.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[test]
     fn shutdown_preserves_external_runtime() {
         test_utils::run(|| {
@@ -1386,7 +1386,7 @@ mod tests {
     }
 
     // Exercises native Tokio runtime ownership or OS-thread behavior.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[reth_concurrency::test]
     fn critical_os_thread_uses_requested_name() {
         let runtime = Runtime::test();
@@ -1407,7 +1407,7 @@ mod tests {
     }
 
     // Exercises native Tokio runtime ownership or OS-thread behavior.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[reth_concurrency::test]
     fn critical_os_thread_panic_is_reported() {
         let runtime = Runtime::test();

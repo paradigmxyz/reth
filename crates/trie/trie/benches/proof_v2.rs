@@ -15,7 +15,7 @@ use reth_trie::{
 };
 use reth_trie_common::{HashedPostState, HashedStorage};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use reth_concurrency::sync::Runtime;
 
 /// Generate test data for benchmarking.
@@ -129,14 +129,14 @@ fn bench_proof_algos(c: &mut Criterion) {
                 generate_test_data(dataset_size, num_targets);
 
             // Create mock cursor factories from the hashed post state
-            #[cfg(not(feature = "fuzz"))]
+            #[cfg(not(all(feature = "fuzz", dst)))]
             let (trie_cursor_factory, hashed_cursor_factory) =
                 create_cursor_factories(&hashed_post_state);
 
             let bench_name = format!("dataset_{dataset_size}/targets_{num_targets}");
 
             group.bench_function(BenchmarkId::new("Legacy", &bench_name), |b| {
-                #[cfg(not(feature = "fuzz"))]
+                #[cfg(not(all(feature = "fuzz", dst)))]
                 b.iter_batched(
                     || legacy_targets.clone(),
                     |targets| {
@@ -152,7 +152,7 @@ fn bench_proof_algos(c: &mut Criterion) {
                 );
 
                 // Simulated mock locks cannot be retained between executions.
-                #[cfg(feature = "fuzz")]
+                #[cfg(all(feature = "fuzz", dst))]
                 b.iter_batched(
                     || (hashed_post_state.clone(), legacy_targets.clone()),
                     |(post_state, targets)| {
@@ -173,7 +173,7 @@ fn bench_proof_algos(c: &mut Criterion) {
             });
 
             group.bench_function(BenchmarkId::new("V2", &bench_name), |b| {
-                #[cfg(not(feature = "fuzz"))]
+                #[cfg(not(all(feature = "fuzz", dst)))]
                 {
                     let trie_cursor = trie_cursor_factory
                         .storage_trie_cursor(hashed_address)
@@ -196,7 +196,7 @@ fn bench_proof_algos(c: &mut Criterion) {
                     );
                 }
 
-                #[cfg(feature = "fuzz")]
+                #[cfg(all(feature = "fuzz", dst))]
                 b.iter_batched(
                     || {
                         (

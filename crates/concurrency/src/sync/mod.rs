@@ -1,19 +1,19 @@
 //! Blocking execution primitives selected at compile time.
 //!
 //! The default backend uses native threads, Crossbeam channels, and Rayon. With
-//! `fuzz`, run callers inside `Runtime::run`: stackful Shuttle tasks execute on
-//! one OS thread in fixed round-robin order. Only primitives from this crate may
+//! both `fuzz` and `--cfg dst`, run callers inside `Runtime::run`: stackful Shuttle tasks execute
+//! on one OS thread in fixed round-robin order. Only primitives from this crate may
 //! block simulated tasks; native blocking or OS I/O is outside the simulation.
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use reth_primitives_traits::sync::{LazyLock, OnceLock};
 
-#[cfg(all(feature = "std", not(feature = "fuzz")))]
+#[cfg(all(feature = "std", not(all(feature = "fuzz", dst))))]
 pub use std::{sync::*, thread_local};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use shuttle::thread_local;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use shuttle_sync::sync::{
     atomic, Arc, Barrier, BarrierWaitResult, LockResult, Once, OnceState, PoisonError, RwLock,
     RwLockReadGuard, RwLockWriteGuard, TryLockError, TryLockResult, Weak,
@@ -33,25 +33,25 @@ pub mod thread;
 #[cfg(feature = "std")]
 pub mod time;
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod deterministic;
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod condvar;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use condvar::{Condvar, WaitTimeoutResult};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod mutex;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use mutex::{Mutex, MutexGuard};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use channel::mpsc;
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod once;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use once::{LazyLock, OnceLock};
 
 #[cfg(feature = "std")]
@@ -66,16 +66,16 @@ pub mod rayon {
     pub use crate::sync::pool::*;
     /// Parallel iterator extension traits for the selected compute backend.
     pub mod prelude {
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         pub use crate::sync::iter::*;
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         pub use ::rayon::prelude::*;
     }
     /// Slice sorting operations for the selected compute backend.
     pub mod slice {
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         pub use crate::sync::iter::ParallelSliceMut;
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         pub use ::rayon::slice::*;
     }
     /// Parallel iterator types for the selected compute backend.
@@ -84,26 +84,26 @@ pub mod rayon {
     }
 }
 
-/// Native non-poisoning locks, or their Shuttle equivalents under `fuzz`.
+/// Native non-poisoning locks, or their Shuttle equivalents under `fuzz` plus `--cfg dst`.
 ///
 /// Shuttle's `RwLock` currently queues readers behind pending writers even when an
 /// upgradable reader prevents that writer from acquiring the lock. Native `parking_lot`
 /// admits readers in that situation, so simulations of this pattern are unsupported.
 #[cfg(feature = "std")]
 pub mod parking_lot {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     pub use ::parking_lot::*;
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     pub use shuttle_parking_lot::*;
 
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     pub use super::Once;
 }
 
 /// Whether these primitives require an active simulated runtime.
 ///
-/// Crates with backend-specific integration must select the same `fuzz` feature.
-pub const IS_SIMULATED: bool = cfg!(feature = "fuzz");
+/// Crates with backend-specific integration must select the same `fuzz` feature and `dst` cfg.
+pub const IS_SIMULATED: bool = cfg!(all(feature = "fuzz", dst));
 
 #[cfg(all(test, feature = "std"))]
 mod tests {
@@ -227,7 +227,7 @@ mod tests {
         });
     }
 
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[test]
     fn native_lazy_lock_is_the_standard_type() {
         let standard = std::sync::LazyLock::new(|| 42);

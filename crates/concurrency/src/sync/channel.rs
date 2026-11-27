@@ -1,8 +1,8 @@
 //! Cloneable MPMC channels for the selected backend.
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use crossbeam_channel::*;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use simulated::*;
 
 /// Selects between sending a value and receiving a cancellation message or disconnection.
@@ -10,7 +10,7 @@ pub use simulated::*;
 /// Returns the unsent value when cancellation is selected or the output disconnects.
 /// Selection is unbiased: if both operations are ready, either may win, even when
 /// cancellation was already signalled. A rendezvous send completes only when consumed.
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub fn send_or_cancel<T>(
     sender: &Sender<T>,
     value: T,
@@ -22,7 +22,7 @@ pub fn send_or_cancel<T>(
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod simulated {
     use crate::sync::{
         deterministic::{rendezvous_selection, Timer, Waiter},
@@ -572,7 +572,7 @@ mod simulated {
 /// Like the native counterpart, this prioritizes earlier ready branches. Simulation supports
 /// one to eight receive branches and an optional immediate default, not send branches or timed
 /// defaults.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[macro_export]
 macro_rules! select_biased {
     ($(recv($receiver:expr) -> $binding:pat => $body:expr),+ $(,)?) => {{
@@ -589,13 +589,13 @@ macro_rules! select_biased {
 ///
 /// Unlike native selection, simulation does not randomize ready branches. Its supported syntax
 /// and eight-receive-branch limit are the same as [`select_biased!`].
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[macro_export]
 macro_rules! select { ($($tokens:tt)*) => { $crate::select_biased! { $($tokens)* } }; }
 
 /// Internal receive-selection expansion.
 #[doc(hidden)]
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[macro_export]
 macro_rules! __select_recv {
     (@receiver_type $receiver:expr) => { &$crate::sync::channel::Receiver<_> };
@@ -638,23 +638,23 @@ macro_rules! __select_recv {
 
 /// Standard-library-style MPSC channels selected with the executor backend.
 pub mod mpsc {
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     pub use super::{
         IntoIter, Iter, Receiver, RecvError, RecvTimeoutError, SendError, Sender, TryIter,
         TryRecvError, TrySendError,
     };
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     pub use std::sync::mpsc::*;
     /// The bounded sending half of a simulated channel.
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     pub type SyncSender<T> = super::Sender<T>;
     /// Creates an unbounded simulated MPSC channel.
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
         super::unbounded()
     }
     /// Creates a bounded simulated MPSC channel, or a rendezvous when capacity is zero.
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     pub fn sync_channel<T>(capacity: usize) -> (SyncSender<T>, Receiver<T>) {
         super::bounded(capacity)
     }

@@ -19,12 +19,12 @@ use std::{
 };
 use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use reth_concurrency::sync::channel;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use std::mem;
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 use std::sync;
 
 /// RPC Tracing call guard semaphore.
@@ -172,7 +172,7 @@ reth_concurrency::sync::thread_local! {
     static WORKER: RefCell<Worker> = const { RefCell::new(Worker::new()) };
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 std::thread_local! {
     // Shuttle tasks share one runner thread, but jobs retain their logical pool worker's state.
     #[allow(
@@ -183,7 +183,7 @@ std::thread_local! {
         const { RefCell::new(std::collections::BTreeMap::new()) };
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Default)]
 struct WorkerSlot {
     state: RefCell<Worker>,
@@ -192,7 +192,7 @@ struct WorkerSlot {
 }
 
 fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     if let Some(pool) = rayon::current_pool_id() {
         let index = rayon::current_thread_index().expect("pool context has a worker index");
         #[allow(
@@ -227,11 +227,11 @@ fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
 /// [`WorkerStatefulPool::init`]. Access state through its owner from jobs executing on the pool,
 /// for example inside [`install_fn`](Self::install_fn).
 ///
-/// Worker access is backed by a thread-local [`RefCell`] (logical-worker-local under `fuzz`).
-/// State is created, accessed, and dropped on its worker, including non-`Send` values.
-/// Under `fuzz`, different simulated jobs sharing a logical slot serialize worker access even
-/// across blocking executor waits; recursive access retains the native borrow checks. Keep
-/// [`with_worker`](Self::with_worker) and [`with_worker_mut`](Self::with_worker_mut) closures short
+/// Worker access is backed by a thread-local [`RefCell`] (logical-worker-local under `fuzz` plus
+/// `--cfg dst`). State is created, accessed, and dropped on its worker, including non-`Send`
+/// values. Under `fuzz` plus `--cfg dst`, different simulated jobs sharing a logical slot serialize
+/// worker access even across blocking executor waits; recursive access retains the native borrow
+/// checks. Keep [`with_worker`](Self::with_worker) and [`with_worker_mut`](Self::with_worker_mut) closures short
 /// and non-yielding: if Rayon runs another job on the same thread while a borrow is active,
 /// re-entrant worker access can panic.
 ///
@@ -370,9 +370,9 @@ impl WorkerPool {
             return f()
         }
 
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         let (tx, rx) = sync::mpsc::sync_channel(1);
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let (tx, rx) = channel::bounded(1);
         self.spawn(move || {
             let _ = tx.send(catch_unwind(AssertUnwindSafe(f)));
@@ -450,7 +450,7 @@ impl WorkerPool {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Drop for WorkerPool {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.get() {
@@ -653,15 +653,15 @@ impl Deref for WorkerStatefulPool {
 impl Drop for WorkerStatefulPool {
     fn drop(&mut self) {
         if let Some(pool) = self.pool.pool.get() {
-            #[cfg(feature = "fuzz")]
+            #[cfg(all(feature = "fuzz", dst))]
             let unwinding = thread::panicking();
             pool.broadcast(|_| {
                 let clear = || {
                     with_current_worker(|worker| worker.borrow_mut().clear(&self.owner));
                 };
-                #[cfg(not(feature = "fuzz"))]
+                #[cfg(not(all(feature = "fuzz", dst)))]
                 clear();
-                #[cfg(feature = "fuzz")]
+                #[cfg(all(feature = "fuzz", dst))]
                 if unwinding {
                     if let Err(panic) = catch_unwind(AssertUnwindSafe(clear)) {
                         // Dropping an arbitrary secondary panic payload could panic again.

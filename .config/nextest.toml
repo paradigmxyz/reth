@@ -25,13 +25,15 @@ slow-timeout = { period = "2m", terminate-after = 10 }
 filter = "package(reth-node-ethereum) and binary(e2e)"
 slow-timeout = { period = "1m", terminate-after = 5 }
 
-# Run with --workspace --features fuzz,reth-tasks/rayon so dependencies share the
-# selected primitives. Native doctests and Ethereum fixtures keep separate jobs.
-[profile.fuzz]
+# Plain --features fuzz uses the default profile and native primitives, without
+# DST exclusions. Opt in with RUSTFLAGS="--cfg dst" and
+# --workspace --features fuzz,reth-tasks/rayon --profile dst.
+# Ethereum fixtures keep their dedicated native job.
+[profile.dst]
 # These native harnesses access simulated primitives outside Runtime::run. Keep
 # compatible sibling tests by naming individual failures in mixed binaries.
 # Whole binaries are excluded only where every non-ignored test needs adaptation.
-# Existing source-level fuzz ignores still apply; no test source is changed here.
+# Existing source-level DST ignores still apply.
 default-filter = '''
 not (
   (binary_id(=reth-cli-commands) and (

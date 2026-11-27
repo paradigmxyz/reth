@@ -16,7 +16,7 @@ doc-valid-idents = [
 ]
 allow-dbg-in-tests = true
 
-# Loaded only by the fuzz primitive CI step, never by native builds.
+# Loaded only by the DST primitive CI step, never by native or fuzz-only builds.
 # Tokio channels are temporarily exempt in all builds; retain their existing
 # async/blocking APIs instead of replacing them with selected sync channels.
 # These native waits are not controlled by the fuzz scheduler.

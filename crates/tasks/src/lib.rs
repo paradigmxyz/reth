@@ -5,8 +5,9 @@
 //! # Feature Flags
 //!
 //! - `rayon`: Enable native task-management helpers for rayon thread pools.
-//! - `fuzz`: Use deterministic executor threads, selected channels, pools, and time. Existing Tokio
-//!   channels remain native and are not controlled by Shuttle.
+//! - `fuzz`: Enable simulation support; primitives remain native unless `--cfg dst` is also set.
+//!   With both enabled, threads, selected channels, pools, and time use the deterministic backend.
+//!   Existing Tokio channels remain native and are not controlled by Shuttle.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -18,9 +19,12 @@
 
 // Backend-dependent task integration must agree with the selected primitive types.
 const _: () = assert!(
-    cfg!(feature = "fuzz") == reth_concurrency::sync::IS_SIMULATED,
-    "enable reth-tasks/fuzz when enabling reth-concurrency/fuzz"
+    cfg!(all(feature = "fuzz", dst)) == reth_concurrency::sync::IS_SIMULATED,
+    "enable reth-tasks/fuzz when enabling reth-concurrency/fuzz with --cfg dst"
 );
+
+#[cfg(all(feature = "fuzz", not(dst)))]
+use shuttle as _;
 
 pub mod cancel;
 pub mod lazy;
@@ -52,7 +56,7 @@ pub use task_manager::{
     spawn_blocking, spawn_scoped_thread, spawn_thread, PanickedTaskError, TaskExecutor, TaskManager,
 };
 // Preserve the original native thread helper names.
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use task_manager::{
     spawn_scoped_thread as spawn_scoped_os_thread, spawn_thread as spawn_os_thread,
 };
@@ -64,7 +68,7 @@ mod test_utils {
     use tokio::runtime::Builder;
 
     // This lock is acquired before entering the selected runtime and serializes simulations.
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     #[allow(
         clippy::disallowed_types,
         reason = "Host lock serializes separate simulations before either enters Shuttle."
@@ -87,7 +91,7 @@ mod test_utils {
     };
 
     #[cfg_attr(
-        feature = "fuzz",
+        all(feature = "fuzz", dst),
         allow(
             clippy::disallowed_types,
             clippy::disallowed_methods,
@@ -96,9 +100,9 @@ mod test_utils {
     )]
     pub(crate) fn run(work: impl FnOnce() + Send + 'static) {
         // Separate simulations cannot concurrently lease the process-global compute pool.
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         static SIMULATION: Mutex<()> = Mutex::new(());
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         let _simulation = SIMULATION.lock().unwrap_or_else(|error| error.into_inner());
 
         let tokio = Builder::new_multi_thread().worker_threads(2).enable_all().build().unwrap();

@@ -107,13 +107,13 @@ impl ManualCancel {
 ///
 /// Always returns `false` outside of a [`CancelOnDrop::scope`].
 pub fn is_cancelled() -> bool {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     {
         CURRENT.with_borrow(|state| {
             state.as_ref().is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
         })
     }
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     {
         // Release the TLS borrow before a selected atomic operation can switch tasks.
         let state = CURRENT.with(|state| state.borrow().clone());

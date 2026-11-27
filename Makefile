@@ -312,21 +312,16 @@ rustdocs: ## Runs `cargo docs` to generate the Rust documents in the `target/doc
 	cargo +nightly docs \
 	--document-private-items
 
-# Every workspace feature except `fuzz`, which swaps in the simulated runtime.
-NON_FUZZ_FEATURES = $(or $(shell metadata=$$(cargo metadata --no-deps --format-version 1 --locked) && \
-	printf '%s\n' "$$metadata" | jq -r \
-	'[.packages[] | .name as $$p | .features | keys[] | select(. != "fuzz" and . != "default") | "\($$p)/\(.)"] | join(",")'),$(error Failed to determine non-fuzz workspace features))
-
 cargo-test:
 	cargo test \
 	--workspace \
 	--lib --examples \
 	--tests \
 	--benches \
-	--features "$(NON_FUZZ_FEATURES)"
+	--all-features
 
 test-doc:
-	cargo test --doc --workspace --features "$(NON_FUZZ_FEATURES)"
+	cargo test --doc --workspace --all-features
 
 test:
 	make cargo-test && \

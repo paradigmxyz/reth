@@ -170,9 +170,9 @@ impl<'a> OutputVerifier<'a> {
         while filled > 0 {
             let (_, read) = rayon::join(
                 || {
-                    #[cfg(not(feature = "fuzz"))]
+                    #[cfg(not(all(feature = "fuzz", dst)))]
                     hasher.update_rayon(&current[..filled]);
-                    #[cfg(feature = "fuzz")]
+                    #[cfg(all(feature = "fuzz", dst))]
                     hasher.update(&current[..filled]);
                 },
                 || read_full(&mut file, &mut next),

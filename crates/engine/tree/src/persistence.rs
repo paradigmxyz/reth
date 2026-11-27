@@ -748,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(feature = "fuzz", ignore = "native directory watcher")]
+    #[cfg_attr(all(feature = "fuzz", dst), ignore = "native directory watcher")]
     fn test_read_only_consistency_across_reorg() {
         reth_tracing::init_test_tracing();
 

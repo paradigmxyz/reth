@@ -2,11 +2,11 @@ use reth_concurrency::sync::rayon;
 
 use crossbeam_utils::CachePadded;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use reth_concurrency::sync::channel;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 use reth_concurrency::sync::parking_lot;
 
 /// Extension trait for [`IndexedParallelIterator`]
@@ -23,12 +23,13 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     ///
     /// # Blocking
     ///
-    /// The calling thread blocks (via a condvar, or a scheduled channel under `fuzz`)
-    /// while waiting for the next item to become ready. It does **not** participate in rayon's
-    /// work-stealing while blocked. With the native backend, invoke this from a dedicated blocking
-    /// thread (e.g. via [`tokio::task::spawn_blocking`]) rather than the rayon thread pool.
-    /// With `fuzz`, invoke this inside [`reth_concurrency::sync::Runtime::run`] or one of its
-    /// selected threads, not directly from a Tokio blocking worker.
+    /// The calling thread blocks (via a condvar, or a scheduled channel under `fuzz` plus `--cfg
+    /// dst`) while waiting for the next item to become ready. It does **not** participate in
+    /// rayon's work-stealing while blocked. With the native backend, invoke this from a dedicated
+    /// blocking thread (e.g. via [`tokio::task::spawn_blocking`]) rather than the rayon thread
+    /// pool. With `fuzz` plus `--cfg dst`, invoke this inside
+    /// [`reth_concurrency::sync::Runtime::run`] or one of its selected threads, not directly from a
+    /// Tokio blocking worker.
     fn for_each_ordered<F>(self, f: F)
     where
         Self::Item: Send,
@@ -62,23 +63,23 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
 
 /// A slot with a native condvar or scheduler-aware channel for notification.
 struct Slot<T> {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     value: parking_lot::Mutex<Option<T>>,
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     notify: parking_lot::Condvar,
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     tx: channel::Sender<Result<T, ()>>,
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     rx: channel::Receiver<Result<T, ()>>,
 }
 
 impl<T> Slot<T> {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     const fn new() -> Self {
         Self { value: parking_lot::Mutex::new(None), notify: parking_lot::Condvar::new() }
     }
 
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     fn new() -> Self {
         let (tx, rx) = channel::unbounded();
         Self { tx, rx }
@@ -87,7 +88,7 @@ impl<T> Slot<T> {
 
 struct Shared<T> {
     slots: Box<[CachePadded<Slot<T>>]>,
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     panicked: std::sync::atomic::AtomicBool,
 }
 
@@ -97,7 +98,7 @@ impl<T> Shared<T> {
             (0..n).map(|_| CachePadded::new(Slot::new())).collect::<Vec<_>>().into_boxed_slice();
         Self {
             slots,
-            #[cfg(not(feature = "fuzz"))]
+            #[cfg(not(all(feature = "fuzz", dst)))]
             panicked: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -106,12 +107,12 @@ impl<T> Shared<T> {
     #[inline]
     fn write(&self, i: usize, val: T) {
         let slot = &self.slots[i];
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         {
             *slot.value.lock() = Some(val);
             slot.notify.notify_one();
         }
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         slot.tx.send(Ok(val)).unwrap_or_else(|_| unreachable!("slot retains its receiver"));
     }
 
@@ -119,11 +120,11 @@ impl<T> Shared<T> {
     /// Returns `None` if the producer panicked.
     fn take(&self, i: usize) -> Option<T> {
         let slot = &self.slots[i];
-        #[cfg(feature = "fuzz")]
+        #[cfg(all(feature = "fuzz", dst))]
         {
             slot.rx.recv().expect("slot retains its sender").ok()
         }
-        #[cfg(not(feature = "fuzz"))]
+        #[cfg(not(all(feature = "fuzz", dst)))]
         {
             let mut guard = slot.value.lock();
             loop {
@@ -164,17 +165,17 @@ where
                 });
             }));
             if let Err(payload) = res {
-                #[cfg(not(feature = "fuzz"))]
+                #[cfg(not(all(feature = "fuzz", dst)))]
                 shared.panicked.store(true, std::sync::atomic::Ordering::Release);
                 // Wake all slots so the consumer doesn't hang. Lock each slot's mutex
                 // first to serialize with the consumer's panicked check → wait sequence.
                 for slot in &*shared.slots {
-                    #[cfg(not(feature = "fuzz"))]
+                    #[cfg(not(all(feature = "fuzz", dst)))]
                     {
                         let _guard = slot.value.lock();
                         slot.notify.notify_one();
                     }
-                    #[cfg(feature = "fuzz")]
+                    #[cfg(all(feature = "fuzz", dst))]
                     slot.tx
                         .send(Err(()))
                         .unwrap_or_else(|_| unreachable!("slot retains its receiver"));
@@ -214,7 +215,7 @@ mod tests {
     };
     use std::{cell::Cell, rc::Rc};
 
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     use std::sync::Barrier;
 
     #[reth_concurrency::test]
@@ -242,7 +243,7 @@ mod tests {
     }
 
     // The fuzz iterator shim computes serially; two iterator items cannot rendezvous.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[reth_concurrency::test]
     fn slow_early_items_still_delivered_in_order() {
         let barrier = Barrier::new(2);
@@ -409,7 +410,7 @@ mod tests {
     }
 
     // The fuzz iterator shim computes serially; two iterator items cannot rendezvous.
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[reth_concurrency::test]
     fn concurrent_panic_and_drop_no_leak() {
         // Ensure items produced before a panic are all dropped.

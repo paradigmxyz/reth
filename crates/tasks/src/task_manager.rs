@@ -29,8 +29,8 @@ pub type TaskExecutor = Runtime;
 ///
 /// Natively, this captures the current Tokio handle, if available, and enters it on the new
 /// OS thread so the workload can use [`Handle::current()`] and [`Handle::spawn_blocking()`].
-/// Under `fuzz`, logical threads share the calling OS thread's Tokio context. If the workload
-/// needs Tokio, enter the desired [`Handle`] around the entire
+/// Under `fuzz` plus `--cfg dst`, logical threads share the calling OS thread's Tokio context. If
+/// the workload needs Tokio, enter the desired [`Handle`] around the entire
 /// [`reth_concurrency::sync::Runtime::run`] call, not inside individual logical threads: native
 /// context guards cannot span logical task switches.
 #[track_caller]
@@ -39,12 +39,12 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     let handle = Handle::try_current().ok();
     thread::Builder::new()
         .name(name.to_string())
         .spawn(move || {
-            #[cfg(not(feature = "fuzz"))]
+            #[cfg(not(all(feature = "fuzz", dst)))]
             let _guard = handle.as_ref().map(Handle::enter);
             f()
         })
@@ -54,7 +54,7 @@ where
 /// Spawns a scoped thread on the selected blocking backend.
 ///
 /// This is the scoped version of [`spawn_thread`], for use with [`thread::scope`], with the same
-/// Tokio context rules: native OS threads enter the captured handle, while `fuzz` logical threads
+/// Tokio context rules: native OS threads enter the captured handle, while DST logical threads
 /// share the context entered around the entire [`reth_concurrency::sync::Runtime::run`] call.
 #[track_caller]
 pub fn spawn_scoped_thread<'scope, 'env, F, T>(
@@ -66,12 +66,12 @@ where
     F: FnOnce() -> T + Send + 'scope,
     T: Send + 'scope,
 {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     let handle = Handle::try_current().ok();
     thread::Builder::new()
         .name(name.to_string())
         .spawn_scoped(scope, move || {
-            #[cfg(not(feature = "fuzz"))]
+            #[cfg(not(all(feature = "fuzz", dst)))]
             let _guard = handle.as_ref().map(Handle::enter);
             f()
         })
@@ -164,10 +164,10 @@ impl TaskManager {
 }
 
 pub(crate) fn wait_for_shutdown_progress() {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     thread::yield_now();
     // A runnable yield loop prevents the virtual clock from reaching the shutdown deadline.
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     time::sleep(time::Duration::from_millis(1));
 }
 
@@ -232,7 +232,7 @@ pub(crate) enum TaskEvent {
 }
 
 // These tests exercise native Tokio tasks and OS-thread shutdown, not logical workers.
-#[cfg(all(test, not(feature = "fuzz")))]
+#[cfg(all(test, not(all(feature = "fuzz", dst))))]
 mod tests {
     use super::*;
     use crate::test_utils;
