@@ -277,30 +277,42 @@ impl PrefixSet {
     /// This optimization was inspired by Silkworm's implementation and significantly improves
     /// incremental state root calculation performance
     /// ([see PR #2417](https://github.com/paradigmxyz/reth/pull/2417)).
+    /// Advances or rewinds `self.index` to the first key `>= target` (i.e. `partition_point`),
+    /// using a short linear probe for sequential walks before falling back to binary search.
+    #[inline]
+    fn lower_bound(index: &mut usize, keys: &[Nibbles], target: &Nibbles) -> usize {
+        const LINEAR_PROBE_LIMIT: usize = 8;
+
+        let len = keys.len();
+        let mut idx = *index;
+        if &keys[idx] >= target {
+            if idx > 0 && &keys[idx - 1] >= target {
+                idx = keys[..idx].partition_point(|key| key < target);
+            }
+        } else {
+            let linear_end = (idx + LINEAR_PROBE_LIMIT).min(len);
+            idx += 1;
+            while idx < linear_end && &keys[idx] < target {
+                idx += 1;
+            }
+            if idx < len && &keys[idx] < target {
+                idx += keys[idx..].partition_point(|key| key < target);
+            }
+        }
+        *index = idx.min(len - 1);
+        idx
+    }
+
+    /// Returns `true` if any of the keys in the set has the given prefix.
     #[inline]
     pub fn contains(&mut self, prefix: &Nibbles) -> bool {
         if self.all {
-            return true
+            return true;
         }
 
-        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
-        while self.index > 0 && &keys[self.index] > prefix {
-            self.index -= 1;
-        }
-
-        for (idx, key) in keys[self.index..].iter().enumerate() {
-            if key.starts_with(prefix) {
-                self.index += idx;
-                return true
-            }
-
-            if key > prefix {
-                self.index += idx;
-                return false
-            }
-        }
-
-        false
+        let Some(keys) = self.keys.as_deref() else { return false };
+        let idx = Self::lower_bound(&mut self.index, keys, prefix);
+        idx < keys.len() && keys[idx].starts_with(prefix)
     }
 
     /// Returns `true` if any key in the set falls within the given half-open range
@@ -311,49 +323,25 @@ impl PrefixSet {
     #[inline]
     pub fn contains_range(&mut self, range: Range<&Nibbles>) -> bool {
         if self.all {
-            return true
+            return true;
+        }
+        if range.start >= range.end {
+            return false;
         }
 
-        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
-        while self.index > 0 && &keys[self.index] >= range.end {
-            self.index -= 1;
-        }
-
-        for (idx, key) in keys[self.index..].iter().enumerate() {
-            if key >= range.start && key < range.end {
-                self.index += idx;
-                return true
-            }
-
-            if key >= range.end {
-                self.index += idx;
-                return false
-            }
-        }
-
-        false
+        let Some(keys) = self.keys.as_deref() else { return false };
+        let idx = Self::lower_bound(&mut self.index, keys, range.start);
+        idx < keys.len() && &keys[idx] < range.end
     }
 
     /// Returns `true` if any key in the set is at or after `start`.
     #[inline]
     pub fn contains_from(&mut self, start: &Nibbles) -> bool {
         if self.all {
-            return true
+            return true;
         }
 
-        let keys = self.keys.as_deref().map(Vec::as_slice).unwrap_or_default();
-        while self.index > 0 && &keys[self.index] > start {
-            self.index -= 1;
-        }
-
-        for (idx, key) in keys[self.index..].iter().enumerate() {
-            if key >= start {
-                self.index += idx;
-                return true
-            }
-        }
-
-        false
+        self.keys.as_deref().is_some_and(|keys| keys.last().is_some_and(|last| last >= start))
     }
 
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
@@ -516,5 +504,47 @@ mod tests {
         assert_eq!(frozen.storage_prefix_sets[&storage_account].slice(), &[storage_path]);
         assert!(frozen.destroyed_accounts.contains(&destroyed_account));
         assert_eq!(other.account_prefix_set.len(), 1);
+    }
+
+    #[test]
+    fn test_prefix_set_matches_linear_oracle_across_jumps() {
+        let mut psm = PrefixSetMut::with_capacity(200);
+        let mut raw_keys = Vec::new();
+        for i in 0u64..200 {
+            let mut h = alloy_primitives::keccak256(i.to_be_bytes());
+            h.0[0] &= 0x7f;
+            let nibs = Nibbles::unpack(h);
+            psm.insert(nibs);
+            raw_keys.push(nibs);
+        }
+        raw_keys.sort_unstable();
+        raw_keys.dedup();
+        let mut ps = psm.freeze();
+
+        // Mix of empty, in-range, jumping forward/backward, and past-end queries.
+        let mut queries = vec![Nibbles::new(), Nibbles::from_nibbles([0xf, 0xf])];
+        for i in 0u64..250 {
+            let h = alloy_primitives::keccak256((i * 7919).to_be_bytes());
+            let nibs = Nibbles::unpack(h);
+            queries.push(nibs.slice(0..((i as usize % 6) + 1)));
+            queries.push(nibs);
+        }
+
+        for q in &queries {
+            let expected_contains = raw_keys.iter().any(|k| k.starts_with(q));
+            assert_eq!(ps.contains(q), expected_contains, "contains mismatch for {q:?}");
+
+            let expected_from = raw_keys.iter().any(|k| k >= q);
+            assert_eq!(ps.contains_from(q), expected_from, "contains_from mismatch for {q:?}");
+
+            if let Some(end) = q.next_without_prefix() {
+                let expected_range = raw_keys.iter().any(|k| k >= q && k < &end);
+                assert_eq!(
+                    ps.contains_range(q..&end),
+                    expected_range,
+                    "contains_range mismatch for {q:?}..{end:?}"
+                );
+            }
+        }
     }
 }
