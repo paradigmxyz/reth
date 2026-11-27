@@ -348,11 +348,6 @@ impl PeersManager {
         self.backed_off_peers.len()
     }
 
-    /// Returns the number of idle trusted peers.
-    fn num_idle_trusted_peers(&self) -> usize {
-        self.peers.iter().filter(|(_, peer)| peer.kind.is_trusted() && peer.state.is_idle()).count()
-    }
-
     /// Invoked when a new _incoming_ tcp connection is accepted.
     ///
     /// returns an error if the inbound ip address is on the ban list
@@ -384,19 +379,16 @@ impl PeersManager {
 
             // there's an edge case here where no incoming connections besides from trusted peers
             // are allowed (max_inbound == 0), in which case we still need to allow new pending
-            // incoming connections until all trusted peers are connected.
-            let num_idle_trusted_peers = self.num_idle_trusted_peers();
-            if num_idle_trusted_peers <= self.trusted_peer_ids.len() {
-                // we still want to limit concurrent pending connections
-                let max_inbound =
-                    self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
-                if self.connection_info.num_pending_in < max_inbound {
-                    // Rate limit these admissions as well, otherwise a single host could keep
-                    // the pending slots occupied once the inbound slots are taken.
-                    self.throttle_incoming_ip(addr);
-                    self.connection_info.inc_pending_in();
-                    return Ok(())
-                }
+            // incoming connections until all trusted peers are connected. The identity of a pending
+            // connection is not known yet, so this is bounded by the number of trusted peers.
+            let max_inbound =
+                self.trusted_peer_ids.len().max(self.connection_info.config.max_inbound);
+            if self.connection_info.num_pending_in < max_inbound {
+                // Rate limit these admissions as well, otherwise a single host could keep
+                // the pending slots occupied once the inbound slots are taken.
+                self.throttle_incoming_ip(addr);
+                self.connection_info.inc_pending_in();
+                return Ok(())
             }
 
             // all trusted peers are either connected or connecting
@@ -4514,6 +4506,27 @@ mod tests {
             assert_eq!(peers.peers[&peer_id].state, PeerConnectionState::PendingOut);
             assert_eq!(peers.connection_info.num_pending_out, 1);
         }
+    }
+
+    #[tokio::test]
+    async fn test_incoming_without_inbound_slots_admits_up_to_trusted_count() {
+        let mut peers = PeersManager::new(PeersConfig::test().with_max_inbound(0));
+        // The cap is `max(trusted_peer_ids.len(), max_inbound)` and also counts trusted ids
+        // without a peer entry.
+        peers.add_trusted_peer(
+            PeerId::random(),
+            PeerAddr::from_tcp("127.0.0.1:8008".parse().unwrap()),
+        );
+        peers.add_trusted_peer_id(PeerId::random());
+
+        for i in 1..=2 {
+            assert!(peers.on_incoming_pending_session(Ipv4Addr::new(127, 0, 2, i).into()).is_ok());
+        }
+        assert_eq!(peers.connection_info.num_pending_in, 2);
+        assert!(matches!(
+            peers.on_incoming_pending_session(Ipv4Addr::new(127, 0, 2, 3).into()),
+            Err(InboundConnectionError::ExceedsCapacity)
+        ));
     }
 
     #[tokio::test]
