@@ -715,9 +715,11 @@ impl PeersManager {
             {
                 // Basic peers back off longer after each consecutive failure so that repeatedly
                 // failing peers don't keep taking precedence over untried candidates.
+                // A late failure from a previous address says nothing about the current one.
                 let failures = if peer.is_trusted() ||
                     peer.is_static() ||
-                    self.trusted_peer_ids.contains(peer_id)
+                    self.trusted_peer_ids.contains(peer_id) ||
+                    peer.addr.tcp() != *remote_addr
                 {
                     0
                 } else {
@@ -889,6 +891,9 @@ impl PeersManager {
                         backoff_until = Some(std::time::Instant::now() + backoff);
                         trace!(target: "net::peers", ?peer_id, ?backoff, "backing off trusted peer");
                     } else {
+                        // This backoff replaces any escalated one, so a later reset must not
+                        // shorten it.
+                        peer.unauthenticated_dial_failures = 0;
                         // Increment peer.backoff_counter
                         if kind.is_severe() {
                             peer.severe_backoff_counter =
@@ -4648,9 +4653,10 @@ mod tests {
         let assert_backoff_after_failure = |peers: &mut PeersManager, peer_id: PeerId, secs| {
             peers.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::PendingOut;
             peers.connection_info.inc_pending_out();
+            let remote_addr = peers.peers[&peer_id].addr.tcp();
             let before = std::time::Instant::now();
             peers.on_outgoing_pending_session_dropped(
-                &addr,
+                &remote_addr,
                 &peer_id,
                 &PendingSessionHandshakeError::Timeout,
             );
@@ -4677,12 +4683,39 @@ mod tests {
         peers.on_active_session_gracefully_closed(peer_id);
         assert_backoff_after_failure(&mut peers, peer_id, 10);
 
+        // A severe failure replaces the escalated backoff and clears the counter, so a later reset
+        // can't shorten it.
+        peers.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::PendingOut;
+        peers.connection_info.inc_pending_out();
+        peers.on_outgoing_connection_failure(
+            &addr,
+            &peer_id,
+            &io::Error::new(io::ErrorKind::ConnectionRefused, ""),
+        );
+        assert_eq!(peers.peers[&peer_id].unauthenticated_dial_failures, 0);
+        let until = peers.backed_off_peers[&peer_id];
+        let other_addr = PeerAddr::from_tcp("1.1.1.1:30303".parse().unwrap());
+        peers.add_peer_kind(peer_id, None, other_addr, None);
+        assert_eq!(peers.backed_off_peers[&peer_id], until);
+        peers.add_peer_kind(peer_id, None, PeerAddr::from_tcp(addr), None);
+        assert_backoff_after_failure(&mut peers, peer_id, 10);
+
         // A new address resets the escalation and shortens the pending backoff.
         assert_backoff_after_failure(&mut peers, peer_id, 20);
         let new_addr = PeerAddr::from_tcp("8.8.4.4:30303".parse().unwrap());
         peers.add_peer_kind(peer_id, None, new_addr, None);
         assert!(
             peers.backed_off_peers[&peer_id] <= std::time::Instant::now() + Duration::from_secs(10)
+        );
+        assert_eq!(peers.peers[&peer_id].unauthenticated_dial_failures, 0);
+
+        // A late failure from the previous address isn't counted for the new one.
+        peers.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::PendingOut;
+        peers.connection_info.inc_pending_out();
+        peers.on_outgoing_pending_session_dropped(
+            &addr,
+            &peer_id,
+            &PendingSessionHandshakeError::Timeout,
         );
         assert_eq!(peers.peers[&peer_id].unauthenticated_dial_failures, 0);
 
