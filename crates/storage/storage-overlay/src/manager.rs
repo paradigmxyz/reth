@@ -13,7 +13,9 @@ use crate::{
     ChangesetCache, ExecutionOverlay, OverlayBuilder,
 };
 use alloy_primitives::{BlockNumber, B256};
-use reth_chain_state::{BlockState, ExecutedBlock, InMemoryState, PreservedSparseTrie};
+use reth_chain_state::{
+    BlockState, ExecutedBlock, InMemoryState, InMemoryStateSnapshot, PreservedSparseTrie,
+};
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
@@ -362,8 +364,9 @@ impl<N: NodePrimitives> OverlayManager<N> {
     fn prune_unreachable_overlays(&self) {
         let overlays_before =
             self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
-        self.inner.state_trie_overlays.retain(|key, _| self.live_state_reaches(key));
-        self.inner.execution_overlays.retain(|key, _| self.live_state_reaches(key));
+        let snapshot = self.inner.in_memory_state.snapshot_during(|| ()).into_parts().1;
+        self.inner.state_trie_overlays.retain(|key, _| key.is_reachable(&snapshot));
+        self.inner.execution_overlays.retain(|key, _| key.is_reachable(&snapshot));
         let remaining_overlays =
             self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
         let pruned_overlays = overlays_before.saturating_sub(remaining_overlays);
@@ -374,15 +377,6 @@ impl<N: NodePrimitives> OverlayManager<N> {
             remaining_overlays,
             "pruned overlays that can no longer be built from the in-memory state"
         );
-    }
-
-    /// Returns `true` if the live in-memory state still holds the chain `key` was computed for:
-    /// its tip is tracked and its anchor is on the tip's chain.
-    fn live_state_reaches(&self, key: &OverlayCacheKey) -> bool {
-        self.inner
-            .in_memory_state
-            .state_by_hash(key.tip_hash)
-            .is_some_and(|state| state.chain_hashes().any(|hash| hash == key.anchor_hash))
     }
 
     /// Returns the flattened overlay from `anchor_hash` to `parent_hash`.
@@ -542,7 +536,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
 
         // A parent state from an in-memory snapshot can reach blocks the live state no longer
         // tracks. Such an overlay would only be pruned at the next removal, so it is not cached.
-        if !cache_config.write_to_cache || !self.live_state_reaches(&key) {
+        let snapshot = self.inner.in_memory_state.snapshot_during(|| ()).into_parts().1;
+        if !cache_config.write_to_cache || !key.is_reachable(&snapshot) {
             let parent_input = blocks.first().and_then(|block| {
                 let parent_hash = block.recovered_block().parent_hash();
                 (parent_hash != anchor_hash)
@@ -569,8 +564,7 @@ impl<N: NodePrimitives> OverlayManager<N> {
         cache.retain(|sibling_key, entry| {
             sibling_key.tip_hash == tip_hash ||
                 !matches!(entry, OverlayCacheEntry::Ready(_)) ||
-                self.inner
-                    .in_memory_state
+                snapshot
                     .state_by_hash(sibling_key.tip_hash)
                     .is_none_or(|state| state.parent_hash() != parent_hash)
         });
@@ -779,6 +773,16 @@ struct OverlayCacheKey {
     tip_hash: B256,
 }
 
+impl OverlayCacheKey {
+    // Returns `true` if `snapshot` holds the chain this overlay was computed for: its tip is
+    // tracked and its anchor is on the tip's chain.
+    fn is_reachable<N: NodePrimitives>(&self, snapshot: &InMemoryStateSnapshot<N>) -> bool {
+        snapshot
+            .state_by_hash(self.tip_hash)
+            .is_some_and(|state| state.chain_hashes().any(|hash| hash == self.anchor_hash))
+    }
+}
+
 struct OverlayCache<T> {
     entries: DashMap<OverlayCacheKey, OverlayCacheEntry<T>>,
 }
@@ -794,6 +798,8 @@ impl<T> OverlayCache<T> {
         self.entries.len()
     }
 
+    // `keep` runs under a shard write lock, so it must not take other locks: under DST the
+    // in-memory state lock is a scheduling point and blocking on the shard would hang.
     fn retain(&self, mut keep: impl FnMut(&OverlayCacheKey, &OverlayCacheEntry<T>) -> bool) {
         self.entries.retain(|key, entry| keep(key, entry))
     }
