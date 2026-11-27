@@ -833,7 +833,7 @@ where
                         ))
                     }
                 }
-                EthBlobTransactionSidecar::Present(sidecar) => {
+                EthBlobTransactionSidecar::Present(mut sidecar) => {
                     let now = Instant::now();
 
                     // EIP-7594 sidecar version handling
@@ -862,20 +862,32 @@ where
                         }
                     }
 
-                    // validate the blob, or only the kept cells of a sidecar fetched as cells
+                    // validate the blob, or the kept cells of a sidecar fetched as cells, and every
+                    // proof once those cells can rebuild the blobs
                     let validation = if let Some(cells) = sidecar.cells() {
-                        cells.validate(
-                            transaction.blob_versioned_hashes().unwrap_or_default(),
-                            self.kzg_settings.get(),
-                        )
+                        cells
+                            .validate(
+                                transaction.blob_versioned_hashes().unwrap_or_default(),
+                                self.kzg_settings.get(),
+                            )
+                            .and_then(|()| {
+                                cells
+                                    .is_recoverable()
+                                    .then(|| cells.recover_checked(self.kzg_settings.get()))
+                                    .transpose()
+                            })
                     } else {
-                        transaction.validate_blob(&sidecar, self.kzg_settings.get())
+                        transaction.validate_blob(&sidecar, self.kzg_settings.get()).map(|()| None)
                     };
-                    if let Err(err) = validation {
-                        self.validation_metrics.invalid_4844.increment(1);
-                        return Err(InvalidPoolTransactionError::Eip4844(
-                            Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                        ))
+                    match validation {
+                        Ok(Some(recovered)) => sidecar.set_recovered(recovered),
+                        Ok(None) => {}
+                        Err(err) => {
+                            self.validation_metrics.invalid_4844.increment(1);
+                            return Err(InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                            ))
+                        }
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
@@ -1622,9 +1634,10 @@ mod tests {
         eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
-        eip4844::{env_settings::EnvKzgSettings, Blob},
+        eip4844::{env_settings::EnvKzgSettings, Blob, BlobTransactionValidationError, Bytes48},
         eip7594::{
             BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell,
+            CELLS_PER_EXT_BLOB,
         },
         eip7702::Authorization,
     };
@@ -2560,6 +2573,31 @@ mod tests {
         let sidecar = validate(cells.clone()).unwrap().unwrap();
         assert_eq!(sidecar.cells(), Some(&cells));
         assert_eq!(sidecar.availability().get(), mask);
+        assert_eq!(*sidecar, all.without_blobs().into());
+
+        // Enough cells rebuild the blobs, which checks the proofs of the columns not kept too.
+        let half = BlobCellMask::from_bits(u64::MAX.into());
+        let recoverable = |proofs| {
+            BlobTxCellSidecar::new(
+                all.commitments().to_vec(),
+                proofs,
+                all.get_cells(half).unwrap(),
+                half,
+            )
+            .unwrap()
+        };
+        let sidecar = validate(recoverable(all.proofs().to_vec())).unwrap().unwrap();
+        assert_eq!(*sidecar, BlobTransactionSidecarVariant::Eip7594(full));
+        let mut proofs = all.proofs().to_vec();
+        proofs[CELLS_PER_EXT_BLOB - 1] = Bytes48::repeat_byte(1);
+        assert!(matches!(
+            validate(recoverable(proofs)),
+            Err(InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::InvalidEip4844Blob(
+                    BlobTransactionValidationError::InvalidProof
+                )
+            ))
+        ));
 
         let mut bad = all.get_cells(mask).unwrap();
         bad[0] = Cell::repeat_byte(1);

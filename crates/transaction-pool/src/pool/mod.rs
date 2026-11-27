@@ -778,20 +778,11 @@ where
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            if sidecar.cells().is_none() {
+            // A sidecar fetched as cells has blobs only once validation rebuilt them.
+            if sidecar.as_eip7594().is_none_or(|sidecar| !sidecar.blobs.is_empty()) {
                 self.on_new_blob_sidecar(&hash, &sidecar);
-                self.insert_blob(hash, sidecar);
-            } else {
-                let recoverable = sidecar.availability().is_recoverable();
-                self.insert_blob(hash, sidecar);
-                // A sidecar fetched as cells has no blobs, so listeners get it once rebuilt.
-                if recoverable &&
-                    !self.blob_transaction_sidecar_listener.lock().is_empty() &&
-                    let Ok(Some(full)) = self.blob_store.get(hash)
-                {
-                    self.on_new_blob_sidecar(&hash, &full);
-                }
             }
+            self.insert_blob(hash, sidecar);
         }
 
         // Delete replaced blob sidecar if any
@@ -2265,7 +2256,7 @@ mod tests {
         };
         let test_pool = &TestPoolBuilder::default().pool;
         let mut listener = test_pool.add_blob_sidecar_listener();
-        let add = |cells| {
+        let add = |sidecar| {
             let tx = MockTransaction::eip4844_with_sidecar(full.clone().into());
             let hash = *tx.get_hash();
             test_pool.add_transactions(
@@ -2274,10 +2265,7 @@ mod tests {
                     balance: U256::from(1_000),
                     state_nonce: 0,
                     bytecode_hash: None,
-                    transaction: ValidTransaction::ValidWithSidecar {
-                        transaction: tx,
-                        sidecar: PooledBlobSidecar::from_cells(cells),
-                    },
+                    transaction: ValidTransaction::ValidWithSidecar { transaction: tx, sidecar },
                     propagate: true,
                     authorities: None,
                 }],
@@ -2287,13 +2275,16 @@ mod tests {
 
         // Too few cells to rebuild the blob: they are stored as cells, and listeners get nothing.
         let mask = BlobCellMask::from_bits(0b11);
-        let sampled = add(kept(mask));
+        let sampled = add(PooledBlobSidecar::from_cells(kept(mask)));
         assert_eq!(test_pool.blob_store().get(sampled).unwrap(), None);
         assert_eq!(test_pool.blob_store().get_cells(sampled, mask).unwrap(), all.get_cells(mask));
         assert_eq!(listener.try_recv().unwrap_err(), TryRecvError::Empty);
 
-        // Enough cells to rebuild it: listeners get the rebuilt sidecar.
-        let rebuilt = add(kept(BlobCellMask::from_bits(u64::MAX.into())));
+        // Enough cells to rebuild it: listeners get the sidecar that validation rebuilt.
+        let cells = kept(BlobCellMask::from_bits(u64::MAX.into()));
+        let mut sidecar = PooledBlobSidecar::from_cells(cells.clone());
+        sidecar.set_recovered(cells.recover_checked(EnvKzgSettings::Default.get()).unwrap());
+        let rebuilt = add(sidecar);
         let event = listener.try_recv().unwrap();
         assert_eq!(event.tx_hash, rebuilt);
         assert_eq!(*event.sidecar, BlobTransactionSidecarVariant::Eip7594(full));

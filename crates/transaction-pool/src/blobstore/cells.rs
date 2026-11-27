@@ -174,6 +174,27 @@ impl BlobTxCellSidecar {
         )
     }
 
+    /// Rebuilds the full sidecar and checks every proof against the rebuilt ones.
+    ///
+    /// Unlike [`Self::validate`], this also covers the proofs of columns that aren't kept.
+    pub fn recover_checked(
+        &self,
+        settings: &KzgSettings,
+    ) -> Result<BlobTransactionSidecarEip7594, BlobTransactionValidationError> {
+        let sidecar = self.recover(settings).map_err(|err| match err {
+            BlobCellRecoveryError::CommitmentMismatch { .. } => {
+                BlobTransactionValidationError::InvalidProof
+            }
+            BlobCellRecoveryError::Kzg(err) => err.into(),
+            err => c_kzg::Error::MismatchLength(err.to_string()).into(),
+        })?;
+        // The rebuilt blobs match their commitments, so the recomputed proofs are the valid ones.
+        if sidecar.cell_proofs != self.proofs {
+            return Err(BlobTransactionValidationError::InvalidProof)
+        }
+        Ok(sidecar)
+    }
+
     /// Returns the sidecar without blobs, as sent in eth/72 `PooledTransactions` responses.
     pub fn without_blobs(&self) -> BlobTransactionSidecarEip7594 {
         BlobTransactionSidecarEip7594::new(

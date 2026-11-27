@@ -138,6 +138,11 @@ impl PooledBlobSidecar {
         self.cells.as_deref()
     }
 
+    // Replaces the sidecar with the one rebuilt from the kept cells, which stay for the store.
+    pub(crate) fn set_recovered(&mut self, sidecar: BlobTransactionSidecarEip7594) {
+        self.sidecar = sidecar.into();
+    }
+
     // Takes the kept cells, leaving the sidecar without blobs.
     pub(crate) const fn take_cells(&mut self) -> Option<Arc<BlobTxCellSidecar>> {
         self.cells.take()
