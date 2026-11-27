@@ -46,8 +46,8 @@ where
     fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
-        self.inner.ensure_well_formed_payload(payload).map_err(Into::into)
+    ) -> Result<Arc<SealedBlock<Self::Block>>, NewPayloadError> {
+        self.inner.ensure_well_formed_payload(payload).map(Arc::new).map_err(Into::into)
     }
 }
 
