@@ -455,7 +455,7 @@ pub struct BlobStoreCleanupStat {
 mod tests {
     use super::*;
     use crate::blobstore::cells::tests::{fixture, subset};
-    use alloy_eips::eip7594::CELLS_PER_EXT_BLOB;
+    use alloy_eips::{eip4844::Bytes48, eip7594::CELLS_PER_EXT_BLOB};
 
     // A store with the sizes it counts for a cell sidecar and for the full sidecar.
     struct TestStore {
@@ -668,6 +668,28 @@ mod tests {
                     proofs: vec![Some(proofs[0]), Some(proofs[1])],
                 })]
             );
+        }
+    }
+
+    #[test]
+    fn stores_serve_rebuilt_proofs_of_recoverable_cells() {
+        let (full, all) = fixture();
+        // Every other column, so cell 1 and its proof are not kept and never checked.
+        let mask = BlobCellMask::from_bits(u128::MAX / 3);
+        let mut proofs = all.proofs().to_vec();
+        proofs[1] = Bytes48::ZERO;
+        let cells = BlobTxCellSidecar::new(
+            all.commitments().to_vec(),
+            proofs,
+            all.get_cells(mask).unwrap(),
+            mask,
+        )
+        .unwrap();
+
+        for TestStore { store, _dir, .. } in stores(&cells) {
+            let tx = B256::random();
+            store.insert_cells(tx, cells.clone()).unwrap();
+            assert_eq!(store.get_without_blobs(tx).unwrap(), Some(without_blobs(full)));
         }
     }
 }
