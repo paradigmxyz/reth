@@ -979,7 +979,7 @@ impl Decodable for NewPooledTransactionHashes72 {
 fn decode_pooled_transaction_hashes_payload(
     payload: &mut &[u8],
 ) -> alloy_rlp::Result<(Vec<u8>, Vec<usize>, Vec<B256>)> {
-    let types = Bytes::decode(payload)?;
+    let types = Header::decode_bytes(payload, false)?;
     if types.len().saturating_mul(MIN_ENCODED_ANNOUNCEMENT_LEN) > payload.len() {
         return Err(alloy_rlp::Error::InputTooShort)
     }
@@ -999,7 +999,7 @@ fn decode_pooled_transaction_hashes_payload(
     let mut hashes = Vec::with_capacity(capacity);
     decode_append(payload, &mut hashes)?;
 
-    Ok((types.into(), sizes, hashes))
+    Ok((types.to_vec(), sizes, hashes))
 }
 
 #[inline]
