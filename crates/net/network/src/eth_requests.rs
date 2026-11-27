@@ -78,7 +78,8 @@ pub const MAX_CELLS_SERVE: usize = 1024;
 /// Maximum number of blobs to serve cells for in a single response.
 ///
 /// A blob stored in full has all its cells computed, whatever the mask selects, so the response
-/// size alone doesn't bound the work.
+/// size alone doesn't bound the work. The handler stops after the transaction that brings the
+/// response to 128 blobs or more.
 pub const MAX_CELL_BLOBS_SERVE: usize = 128;
 
 /// Maximum number of bytecode lookups to serve.
