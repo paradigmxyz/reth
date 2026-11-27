@@ -1843,7 +1843,7 @@ struct PropagateTransaction {
     propagation_size: usize,
     /// Size advertised to eth/72 peers, which receive blob transactions without their blobs.
     propagation_size_without_blobs: Option<usize>,
-    // Cells kept for every blob, or `None` if they are all kept or this isn't a blob transaction.
+    // Cells kept for every blob, or `None` if unknown, which is announced as all cells.
     cell_mask: Option<BlobCellMask>,
     transaction: LazyEncodedTransaction,
 }
