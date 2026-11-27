@@ -399,6 +399,13 @@ pub trait BlockExecutor: Sized {
     /// Applies pre-execution block changes.
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
+    /// Returns the state accumulated so far, without applying post-execution changes or
+    /// consuming the executor.
+    ///
+    /// This is the state [`Self::into_state`] would return. RPC replay uses it to keep the
+    /// pre-execution state while the same executor runs the block's transactions.
+    fn bundle_state(&self) -> BundleState;
+
     /// Consumes the executor and returns the state accumulated so far without applying
     /// post-execution block changes.
     fn into_state(self) -> BundleState;

@@ -141,9 +141,8 @@ where
                 let _permit = permit;
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
                 let block_env = *evm_env.block_env();
+                let mut executor = eth_api.apply_pre_execution_changes(&block, &mut db, evm_env)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let trace_limits = eth_api.trace_limits();
@@ -151,7 +150,6 @@ where
                 let mut response =
                     ResponseBudget::new(&inspector, eth_api.eth_api_settings().max_response_size);
                 let mut inspector = inspector.with_limits(response.limit(trace_limits));
-                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 while let Some((index, tx)) = transactions.next() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
@@ -207,8 +205,6 @@ where
                 let tx_count = block.body().transactions().len();
                 let mut results = Vec::with_capacity(tx_count);
 
-                eth_api.apply_pre_execution_changes(&block, &mut db)?;
-
                 let block_env = *evm_env.block_env();
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 // Notifications are not bound by the response size limit, so only the trace byte
@@ -226,7 +222,7 @@ where
                         return Ok(results)
                     }
                 };
-                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
+                let mut executor = eth_api.apply_pre_execution_changes(&block, &mut db, evm_env)?;
 
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
@@ -895,12 +891,14 @@ where
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let tx_count = block.body().transactions().len();
-                let mut state = eth_api.apply_pre_execution_changes(&block, &mut db)?;
+                // Pre-execution stays on this executor. Its bundle is the block state before the
+                // transactions, which the roots extend with each transaction's changes.
+                let mut executor = eth_api.apply_pre_execution_changes(&block, &mut db, evm_env)?;
+                let mut state = executor.bundle_state();
 
                 // the executor borrows the database, so collect each transaction's changes first
                 // and compute the roots once it is dropped
                 let mut transaction_states = Vec::with_capacity(tx_count);
-                let mut executor = eth_api.block_executor(&block, &mut db, evm_env)?;
                 for tx in block.transactions_recovered() {
                     if is_cancelled() {
                         return Err(EthApiError::InternalEthError.into())
