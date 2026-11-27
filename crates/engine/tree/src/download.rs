@@ -4,6 +4,7 @@ use crate::{engine::DownloadRequest, metrics::BlockDownloaderMetrics};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{map::B256Set, B256};
 use futures::{future::BoxFuture, FutureExt};
+use reth_concurrency::sync::parking_lot::Mutex;
 use reth_consensus::Consensus;
 use reth_network_p2p::{
     full_block::{
@@ -79,7 +80,7 @@ where
     /// Consensus source for supplemental proof preparation.
     consensus: Arc<dyn Consensus<B>>,
     /// The active batch waits for proofs before it reaches execution.
-    preparation: parking_lot::Mutex<Option<BoxFuture<'static, Vec<SealedBlockWithAccessList<B>>>>>,
+    preparation: Mutex<Option<BoxFuture<'static, Vec<SealedBlockWithAccessList<B>>>>>,
 }
 
 impl<Client, B> BasicBlockDownloader<Client, B>

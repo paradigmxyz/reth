@@ -148,7 +148,12 @@ fn tree_config(bal_sequential: bool) -> TreeConfig {
     };
     engine_args.validate().expect("the runner's engine arguments are valid");
     // Fixtures have their own engine; avoid creating the production pool's 128 threads per case.
-    engine_args.tree_config().with_bal_prewarm_threads(BAL_PREWARM_THREADS)
+    // Exercise sparse-trie roots on every host; CPU-count heuristics must not change fixture
+    // coverage.
+    engine_args
+        .tree_config()
+        .with_has_enough_parallelism(true)
+        .with_bal_prewarm_threads(BAL_PREWARM_THREADS)
 }
 
 /// What the engine ended with, reported beside the verdict.
