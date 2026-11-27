@@ -261,9 +261,8 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
 impl DatabaseHashedPostState for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
-    /// Reads changesets one block at a time, so memory grows with the number of distinct changed
-    /// keys rather than with the number of changeset rows in the range. `HashSet`s track seen
-    /// keys; changeset rows are already sorted, so no intermediate `HashMap` is needed.
+    /// Walks the account and storage changesets in block order. The first occurrence of each
+    /// changed key holds its value before the range.
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Addresses are always keccak256-hashed.
@@ -276,23 +275,24 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
     ) -> Result<Self, ProviderError> {
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
-        // Only keep the first (oldest) occurrence of each (address, slot) pair.
-        let mut storages = B256Map::<Vec<_>>::default();
-        let mut seen_storage_keys = HashSet::new();
-        // Rows of a block are ordered by address, so all slots of one account arrive
-        // consecutively and the address hash can be reused across them.
-        let mut last_address: Option<(Address, B256)> = None;
-
-        // Blocks are visited oldest first, so the first occurrence of a key holds its value
-        // before the range.
-        for block in range {
-            for AccountBeforeTx { address, info } in provider.account_block_changeset(block)? {
+        provider.for_each_account_changeset(
+            range.clone(),
+            |_, AccountBeforeTx { address, info }| {
                 if seen_accounts.insert(address) {
                     accounts.push((keccak256(address), info));
                 }
-            }
+            },
+        )?;
+        drop(seen_accounts);
+        accounts.sort_unstable_by_key(|(hash, _)| *hash);
 
-            for (BlockNumberAddress((_, address)), storage) in provider.storage_changeset(block)? {
+        let mut storages = B256Map::<Vec<_>>::default();
+        let mut seen_storage_keys = HashSet::new();
+        // Rows are ordered by address within each block, so consecutive slots can reuse the hash.
+        let mut last_address: Option<(Address, B256)> = None;
+        provider.for_each_storage_changeset(
+            range,
+            |BlockNumberAddress((_, address)), storage| {
                 if seen_storage_keys.insert((address, storage.key)) {
                     let hashed_address = match last_address {
                         Some((last, hashed)) if last == address => hashed,
@@ -307,9 +307,9 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                         .or_default()
                         .push((keccak256(storage.key), storage.value));
                 }
-            }
-        }
-        accounts.sort_unstable_by_key(|(hash, _)| *hash);
+            },
+        )?;
+        drop(seen_storage_keys);
 
         // Sort storage slots and convert to HashedStorageSorted
         let hashed_storages = storages
