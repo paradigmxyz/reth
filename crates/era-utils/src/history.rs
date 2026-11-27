@@ -716,9 +716,13 @@ where
 ///
 /// The bloom is always checked, the root only when `check_root` is set, as pre-Byzantium receipts
 /// can't be recomputed here.
-fn verify_receipts<BH, R>(header: &BH, receipts: &[R], check_root: bool) -> eyre::Result<()>
+pub(super) fn verify_receipts<BH, R>(
+    header: &BH,
+    receipts: &[R],
+    check_root: bool,
+) -> eyre::Result<()>
 where
-    BH: FullBlockHeader,
+    BH: BlockHeader,
     R: Receipt,
 {
     let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
@@ -876,6 +880,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{export, ExportConfig};
     use alloy_consensus::{
         Eip658Value, Header, Receipt as RlpReceipt, ReceiptWithBloom, TxLegacy, TxType,
     };
@@ -894,6 +899,7 @@ mod tests {
     use reth_provider::{
         test_utils::{
             create_test_provider_factory, create_test_provider_factory_with_genesis_block_number,
+            MockEthProvider,
         },
         DatabaseProviderFactory, ReceiptProvider, StageCheckpointReader, StaticFileProviderFactory,
         StaticFileSegment, StaticFileWriter,
@@ -1815,5 +1821,33 @@ mod tests {
 
         // The header commits to no logs at all, so the bloom cannot match.
         assert!(verify_receipts(&Header::default(), &receipts, false).is_err());
+    }
+
+    #[test]
+    fn export_rejects_status_receipt_for_post_state_root() {
+        let provider = MockEthProvider::default().with_genesis_block();
+        let (mut header, body, receipt) = block_with_one_receipt(1);
+        let status_root = header.receipts_root;
+        let post_state_root =
+            calculate_receipt_root(&[era1_receipt(Eip658Value::PostState(B256::repeat_byte(1)))]);
+        header.receipts_root = post_state_root;
+        provider.add_block(header.hash_slow(), Block { header, body });
+        provider.add_receipts(1, vec![receipt]);
+
+        let dir = tempdir().unwrap();
+        let config = ExportConfig {
+            dir: dir.path().to_owned(),
+            first_block_number: 1,
+            last_block_number: 1,
+            ..Default::default()
+        };
+        for result in [export::<Era1, _>(&provider, &config), export::<Ere, _>(&provider, &config)]
+        {
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                format!("receipts root mismatch for block 1: computed {status_root}, header has {post_state_root}")
+            );
+        }
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 }
