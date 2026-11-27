@@ -48,7 +48,7 @@ use reth_rpc_eth_types::{
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderTx, StateProvider,
 };
-use reth_tasks::{cancel::is_cancelled, CancelOnDrop};
+use reth_tasks::cancel::is_cancelled;
 use reth_transaction_pool::validate::{
     validate_frame_prefix, FramePrefixValidationError, FrameValidationPolicy,
 };
@@ -788,7 +788,7 @@ pub trait Call:
         let changes = self
             .evm_config()
             .pre_block_state_changes(&mut *db, evm_env.clone(), context)
-            .map_err(RethError::Other)
+            .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
         db.commit_source(&BundleSource(&changes));
         Ok(())

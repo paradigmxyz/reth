@@ -29,10 +29,10 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderROFactory, DependencyProofFetcher,
-    DependencyProofProvider, DependencyProofRequest, NodePrimitivesProvider, RangeEnd,
-    RangeResponse, RangeResult, StateRangeProvider, StateRangeProviderFactory, StateRangeView,
-    StorageChangeSetReader, StorageRangeResult,
+    BlockBodyIndicesProvider, DependencyProofFetcher, DependencyProofProvider,
+    DependencyProofRequest, NodePrimitivesProvider, RangeEnd, RangeResponse, RangeResult,
+    StateRangeProvider, StateRangeProviderFactory, StateRangeView, StorageChangeSetReader,
+    StorageRangeResult,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::{OverlayStateProvider, OwnedProvider};
