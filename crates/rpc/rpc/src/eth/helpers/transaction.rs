@@ -597,15 +597,29 @@ mod tests {
             ..Default::default()
         };
 
+        // Exceeds the balance, so its estimate fails as soon as it runs. Stalling while the permit
+        // is held shows the estimate waits for it.
+        let unaffordable = TransactionRequest { value: Some(U256::MAX), ..tx_req.clone() };
         let permit = eth_api.acquire_owned_blocking_io().await.unwrap();
         assert!(tokio::time::timeout(
             Duration::from_millis(200),
-            reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req.clone())
+            reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, unaffordable.clone())
         )
         .await
         .is_err());
 
         drop(permit);
+        let err = reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, unaffordable)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.message(),
+            format!(
+                "insufficient funds for gas * price + value: have 10000000000000000000 want {}",
+                U256::MAX
+            )
+        );
+
         let hash = reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req.clone())
             .await
             .unwrap();
