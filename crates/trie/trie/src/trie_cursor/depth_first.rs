@@ -7,6 +7,7 @@ use tracing::trace;
 /// Compares two Nibbles in depth-first order.
 ///
 /// See [`reth_trie_common::depth_first_cmp`] for details.
+#[inline]
 pub fn cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
     reth_trie_common::depth_first_cmp(a, b)
 }

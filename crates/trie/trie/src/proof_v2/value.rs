@@ -53,6 +53,7 @@ pub struct StorageValueEncoder;
 pub struct StorageDeferredValueEncoder(U256);
 
 impl DeferredValueEncoder for StorageDeferredValueEncoder {
+    #[inline]
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         self.0.encode(buf);
         Ok(())
@@ -63,6 +64,7 @@ impl LeafValueEncoder for StorageValueEncoder {
     type Value = U256;
     type DeferredEncoder = StorageDeferredValueEncoder;
 
+    #[inline]
     fn deferred_encoder(&mut self, _key: B256, value: Self::Value) -> Self::DeferredEncoder {
         StorageDeferredValueEncoder(value)
     }

@@ -81,6 +81,8 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     rlp_nodes_bufs: Vec<Vec<RlpNode>>,
     /// Re-usable byte buffer, used for RLP encoding.
     rlp_encode_buf: Vec<u8>,
+    /// Re-usable byte buffer for encoding leaf values before wrapping in a leaf node.
+    leaf_value_buf: Vec<u8>,
     /// Prefix set for tracking changed keys.
     prefix_set: PrefixSet,
 }
@@ -98,6 +100,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             retained_proofs: Vec::<_>::with_capacity(32),
             rlp_nodes_bufs: Vec::<_>::with_capacity(8),
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
+            leaf_value_buf: Vec::with_capacity(128),
             prefix_set: PrefixSet::default(),
         }
     }
@@ -183,13 +186,7 @@ where
     ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(?path, ?check_parent_path),
-        ret,
-    )]
+    #[inline]
     fn should_retain<'a>(
         &self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -259,6 +256,8 @@ where
     /// The caller has already determined via [`Self::should_retain`] that this child is retained.
     /// That decision must not be re-evaluated here, because `should_retain` advances the `targets`
     /// cursor. Children which are not retained are converted later, in [`Self::pop_branch`].
+    #[cold]
+    #[inline(never)]
     fn commit_child(
         &mut self,
         child_path: Nibbles,
@@ -267,7 +266,9 @@ where
         // An already encoded child only needs an extension if it has been rebased upward.
         if matches!(&child, ProofTrieBranchChild::RlpNode { .. }) {
             self.rlp_encode_buf.clear();
-            return child.into_rlp(&mut self.rlp_encode_buf).map(|(node, _)| node)
+            return child
+                .into_rlp(&mut self.rlp_encode_buf, &mut self.leaf_value_buf)
+                .map(|(node, _, _, _)| node)
         }
 
         trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
@@ -313,6 +314,7 @@ where
 
     /// Returns the path of the child on top of the `child_stack`, or the root path if the stack is
     /// empty. Returns None if the current branch has not yet pushed a child (empty `state_mask`).
+    #[inline]
     fn last_child_path(&self) -> Option<Nibbles> {
         // If there is no branch under construction then the top child must be the root child.
         let Some(branch) = self.branch_stack.last() else {
@@ -333,28 +335,25 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(child_path = ?self.last_child_path()),
-    )]
+    #[inline]
     fn commit_last_child<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
     ) -> Result<(), StateProofError> {
-        if matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode { .. })) {
-            trace!(target: TRACE_TARGET, "Last child already committed, leaving stack unchanged");
+        if targets.is_none() ||
+            matches!(self.child_stack.last(), Some(ProofTrieBranchChild::RlpNode { .. }))
+        {
+            trace!(target: TRACE_TARGET, "Last child skipped or already committed");
             return Ok(())
         }
 
         let Some(child_path) = self.last_child_path() else { return Ok(()) };
-        let child =
-            self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
 
-        // Only commit immediately if retained for the proof. Otherwise, defer conversion
-        // to pop_branch() to give DeferredEncoder time for async work.
+        // Only commit immediately if retained for the proof. Otherwise, leave the child
+        // uncommitted on the stack for pop_branch() to give DeferredEncoder time for async work.
         if self.should_retain(targets, &child_path, true) {
+            let child =
+                self.child_stack.pop().expect("child_stack can't be empty if there's a child path");
             let (hash_mask_bit, tree_mask_bit) = child.mask_bits();
             let child_rlp_node = self.commit_child(child_path, child)?;
             trace!(target: TRACE_TARGET, ?child_rlp_node, "Pushing committed child RlpNode onto stack");
@@ -364,9 +363,6 @@ where
                 hash_mask_bit,
                 tree_mask_bit,
             });
-        } else {
-            trace!(target: TRACE_TARGET, "Pushing uncommitted child onto stack");
-            self.child_stack.push(child);
         }
 
         Ok(())
@@ -434,7 +430,7 @@ where
             };
 
             // Store the child key relative to its new parent branch.
-            child.trim_short_key_prefix(path.len() - short_key.len());
+            child.set_short_key(short_key);
 
             // The preceding child is structurally final. Commit it if retained for the proof;
             // otherwise its encoding can wait until pop_branch.
@@ -459,16 +455,20 @@ where
     ///
     /// Returns the nibble of the branch's `state_mask` which should be set for the new child, and
     /// the short key that child should use.
+    #[inline]
     fn push_new_branch(&mut self, new_child_path: Nibbles) -> (u8, Nibbles) {
-        // Get the full path to the root of the existing child. The trie root is used when there is
-        // no parent branch.
-        let first_child_path = self
-            .last_child_path()
-            .expect("push_new_branch requires the current branch to have a child");
+        // Get the path length to the root of the existing child (0 at trie root, otherwise
+        // branch_path.len() + 1 for the branch's child nibble).
+        let first_child_path_len = if self.branch_stack.is_empty() {
+            0
+        } else {
+            debug_assert!(!self.branch_stack.last().unwrap().state_mask.is_empty());
+            self.branch_path.len() + 1
+        };
 
         // Put both children in the same coordinate system by trimming the existing child's root
         // path from the new child's full path.
-        let new_child_short_key = trim_nibbles_prefix(&new_child_path, first_child_path.len());
+        let new_child_short_key = trim_nibbles_prefix(&new_child_path, first_child_path_len);
         let first_child_short_key = *self
             .child_stack
             .last()
@@ -486,7 +486,7 @@ where
         let new_child_short_key = trim_nibbles_prefix(&new_child_short_key, common_prefix_len + 1);
 
         // The new branch starts after the existing child's parent path and their shared extension.
-        let branch_path_len = first_child_path.len() + common_prefix_len;
+        let branch_path_len = first_child_path_len + common_prefix_len;
         self.branch_path = new_child_path.slice_unchecked(0, branch_path_len);
 
         // Rebase the existing child beneath the new branch by removing the extension and its
@@ -524,7 +524,6 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn pop_branch<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -564,11 +563,10 @@ where
             .iter()
             .zip(self.child_stack.drain(self.child_stack.len() - num_children..))
         {
-            let (hash_mask_bit, tree_mask_bit) = child.mask_bits();
-            masks.set_child_bits(nibble, hash_mask_bit, tree_mask_bit);
-
             self.rlp_encode_buf.clear();
-            let (child_rlp_node, freed_buf) = child.into_rlp(&mut self.rlp_encode_buf)?;
+            let (child_rlp_node, hash_mask_bit, tree_mask_bit, freed_buf) =
+                child.into_rlp(&mut self.rlp_encode_buf, &mut self.leaf_value_buf)?;
+            masks.set_child_bits(nibble, hash_mask_bit, tree_mask_bit);
             if let Some(buf) = freed_buf {
                 self.rlp_nodes_bufs.push(buf);
             }
@@ -614,12 +612,6 @@ where
     ///
     /// It is expected that this method is "driven" by `next_uncached_key_range`, which decides
     /// which ranges of keys need to be calculated based on what cached trie data is available.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(?lower_bound, ?upper_bound),
-    )]
     fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &mut VE,
@@ -961,7 +953,6 @@ where
     ///
     /// Once returned the `branch_stack` will be in the correct state to start calculating leaves
     /// for the given range, if any.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -1190,16 +1181,6 @@ where
     /// Calculates trie nodes and retains proofs for targeted nodes within a sub-trie. The
     /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
     /// `upper_bound` is exclusive, None indicates unbounded.
-    #[instrument(
-        target = TRACE_TARGET,
-        level = "trace",
-        skip_all,
-        fields(
-            parent_prefix=?sub_trie_targets.parent_prefix,
-            lower_bound=?sub_trie_targets.lower_bound,
-            upper_bound=?sub_trie_targets.upper_bound,
-        ),
-    )]
     fn proof_subtrie<'a>(
         &mut self,
         value_encoder: &mut VE,
@@ -1414,6 +1395,7 @@ where
 
         // Divide targets into bounded ranges, each corresponding to one direct child of an
         // already-revealed parent, and handle all proofs within that range.
+        self.retained_proofs.reserve((targets.len() * 2).clamp(32, 4096));
         for sub_trie_targets in iter_sub_trie_targets(targets) {
             let traversal_lower_bound = sub_trie_targets.lower_bound;
             let traversal_upper_bound = sub_trie_targets.upper_bound;
