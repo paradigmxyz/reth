@@ -517,6 +517,77 @@ mod tests {
         }
     }
 
+    #[reth_concurrency::test]
+    fn rejects_prague_request_contract_without_code() {
+        // Absent and empty-code accounts are both invalid. The other contract has code, so the
+        // reported address is the empty one.
+        for empty in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+            for insert_empty in [false, true] {
+                let other = if empty == WITHDRAWAL_REQUEST_ADDRESS {
+                    CONSOLIDATION_REQUEST_ADDRESS
+                } else {
+                    WITHDRAWAL_REQUEST_ADDRESS
+                };
+                let mut database = InMemoryDB::default();
+                if insert_empty {
+                    database.insert_account_info(&empty, AccountInfo::default());
+                }
+                database.insert_account_info(
+                    &other,
+                    AccountInfo::default().with_code(return_byte_code(0xaa)),
+                );
+                let error = execute_block(
+                    SpecId::PRAGUE,
+                    BlockEnv::default(),
+                    database,
+                    core::iter::empty::<Recovered<TransactionSigned>>(),
+                    None,
+                )
+                .expect_err("request contract without code");
+                assert_system_contract_empty(&error, empty);
+            }
+        }
+    }
+
+    #[reth_concurrency::test]
+    fn rejects_amsterdam_builder_request_contract_without_code() {
+        for empty in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+            let mut database = InMemoryDB::default();
+            for address in [
+                WITHDRAWAL_REQUEST_ADDRESS,
+                CONSOLIDATION_REQUEST_ADDRESS,
+                BUILDER_DEPOSIT_REQUEST_ADDRESS,
+                BUILDER_EXIT_REQUEST_ADDRESS,
+            ] {
+                if address != empty {
+                    database.insert_account_info(
+                        &address,
+                        AccountInfo::default().with_code(return_byte_code(0xaa)),
+                    );
+                }
+            }
+            let error = execute_block(
+                SpecId::AMSTERDAM,
+                BlockEnv::default(),
+                database,
+                core::iter::empty::<Recovered<TransactionSigned>>(),
+                None,
+            )
+            .expect_err("builder request contract without code");
+            assert_system_contract_empty(&error, empty);
+        }
+    }
+
+    fn assert_system_contract_empty(error: &BlockExecutionError, address: Address) {
+        assert_eq!(error.to_string(), format!("system contract {address} has no code"));
+        let BlockExecutionError::Validation(BlockValidationError::Other(inner)) = error else {
+            panic!("expected validation error, got {error}");
+        };
+        let empty =
+            inner.downcast_ref::<crate::SystemContractEmpty>().expect("system contract empty");
+        assert_eq!(empty.address, address);
+    }
+
     #[test]
     fn collects_deposit_requests_from_transaction_logs() {
         let deposit = DepositEvent {
