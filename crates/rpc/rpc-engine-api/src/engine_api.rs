@@ -1230,8 +1230,7 @@ where
         versioned_hashes: Vec<B256>,
         indices_bitarray: B128,
     ) -> EngineApiResult<Option<Vec<Option<BlobCellsAndProofsV1>>>> {
-        // Engine API bitvectors encode the lowest cell indices in the first byte.
-        let cell_mask = BlobCellMask::from_bits(u128::from_le_bytes(indices_bitarray.into()));
+        let cell_mask = BlobCellMask::new(indices_bitarray);
         let current_timestamp =
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs();
         if !self.inner.chain_spec.is_osaka_active_at_timestamp(current_timestamp) {

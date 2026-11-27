@@ -1,7 +1,7 @@
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
     without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
+    BlobTransactionCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -113,7 +113,7 @@ struct InMemoryBlobStoreInner {
     store: RwLock<B256Map<Arc<BlobTransactionSidecarVariant>>>,
     // Sidecars that keep only some cells, for transactions not in `store`. Locked after `store`
     // when both are held.
-    cells: RwLock<B256Map<Arc<BlobTxCellSidecar>>>,
+    cells: RwLock<B256Map<Arc<BlobTransactionCellSidecar>>>,
     // Sidecars rebuilt from `cells`.
     rebuilt: RebuiltSidecars,
     size_tracker: BlobStoreSize,
@@ -134,7 +134,7 @@ impl InMemoryBlobStoreInner {
     }
 
     // Returns the cell sidecars with a blob in `hashes`.
-    fn cells_matching(&self, hashes: &B256Set) -> Vec<(B256, Arc<BlobTxCellSidecar>)> {
+    fn cells_matching(&self, hashes: &B256Set) -> Vec<(B256, Arc<BlobTransactionCellSidecar>)> {
         self.cells
             .read()
             .iter()
@@ -144,7 +144,11 @@ impl InMemoryBlobStoreInner {
     }
 
     // Removes the cell sidecar of `tx` and returns its size.
-    fn remove_cells(&self, cells: &mut B256Map<Arc<BlobTxCellSidecar>>, tx: &B256) -> usize {
+    fn remove_cells(
+        &self,
+        cells: &mut B256Map<Arc<BlobTransactionCellSidecar>>,
+        tx: &B256,
+    ) -> usize {
         self.rebuilt.remove(tx);
         cells.remove(tx).map(|cells| cells.size()).unwrap_or_default()
     }
@@ -186,7 +190,11 @@ impl BlobStore for InMemoryBlobStore {
         Ok(())
     }
 
-    fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+    fn insert_cells(
+        &self,
+        tx: B256,
+        data: BlobTransactionCellSidecar,
+    ) -> Result<(), BlobStoreError> {
         let store = self.inner.store.read();
         let mut cells = self.inner.cells.write();
         if !store.contains_key(&tx) && !cells.contains_key(&tx) {
@@ -348,7 +356,12 @@ impl BlobStore for InMemoryBlobStore {
         cell_mask: BlobCellMask,
     ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
         let Some(sidecar) = self.inner.store.read().get(&tx).cloned() else {
-            return Ok(self.inner.cells.read().get(&tx).and_then(|cells| cells.get_cells(cell_mask)))
+            return Ok(self
+                .inner
+                .cells
+                .read()
+                .get(&tx)
+                .and_then(|cells| cells.matching_cells(cell_mask)))
         };
 
         let Some(sidecar) = sidecar.as_eip7594() else {

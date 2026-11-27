@@ -1,5 +1,5 @@
 use crate::blobstore::{
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTxCellSidecar, PooledBlobSidecar,
+    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobTransactionCellSidecar, PooledBlobSidecar,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -22,7 +22,11 @@ impl BlobStore for NoopBlobStore {
         Ok(())
     }
 
-    fn insert_cells(&self, _tx: B256, _data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+    fn insert_cells(
+        &self,
+        _tx: B256,
+        _data: BlobTransactionCellSidecar,
+    ) -> Result<(), BlobStoreError> {
         Ok(())
     }
 

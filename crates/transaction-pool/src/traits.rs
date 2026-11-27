@@ -2265,7 +2265,7 @@ mod tests {
         assert!(pooled_tx.blob_cell_availability.is_some());
         assert_eq!(
             pooled_tx.blob_cell_availability().map(BlobCellAvailability::get),
-            Some(BlobCellMask::from_bits(u128::MAX))
+            Some(BlobCellMask::ALL)
         );
         let expected_cost =
             U256::from(100) + U256::from(10 * 1000) + U256::from(5 * DATA_GAS_PER_BLOB);

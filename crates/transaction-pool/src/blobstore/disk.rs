@@ -3,7 +3,7 @@
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
     without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
+    BlobTransactionCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -271,7 +271,11 @@ impl BlobStore for DiskFileBlobStore {
         self.inner.insert_many(txs)
     }
 
-    fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+    fn insert_cells(
+        &self,
+        tx: B256,
+        data: BlobTransactionCellSidecar,
+    ) -> Result<(), BlobStoreError> {
         self.inner.insert_cells(tx, data)
     }
 
@@ -526,7 +530,7 @@ impl BlobStore for DiskFileBlobStore {
     ) -> Result<Option<Vec<Cell>>, BlobStoreError> {
         if self.inner.cell_sidecars.read().contains_key(&tx) {
             return Ok(match self.inner.read_one(tx)? {
-                Some(StoredSidecar::Cells(cells)) => cells.get_cells(cell_mask),
+                Some(StoredSidecar::Cells(cells)) => cells.matching_cells(cell_mask),
                 _ => None,
             })
         }
@@ -716,7 +720,11 @@ impl DiskFileBlobStoreInner {
     }
 
     // Writes a cell sidecar to disk, unless the transaction already has a sidecar.
-    fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+    fn insert_cells(
+        &self,
+        tx: B256,
+        data: BlobTransactionCellSidecar,
+    ) -> Result<(), BlobStoreError> {
         let path = self.blob_disk_file(tx);
         // The blob cache can outlive a deleted sidecar, so only the file counts.
         if path.is_file() {
@@ -1049,14 +1057,14 @@ struct CellSidecarFile {
 // A sidecar decoded from its blob file.
 enum StoredSidecar {
     Full(BlobTransactionSidecarVariant),
-    Cells(BlobTxCellSidecar),
+    Cells(BlobTransactionCellSidecar),
 }
 
 impl StoredSidecar {
     fn decode(data: &[u8]) -> alloy_rlp::Result<Self> {
         match data.split_first() {
             Some((&CELL_SIDECAR_TAG, mut cells)) => {
-                BlobTxCellSidecar::decode(&mut cells).map(Self::Cells)
+                BlobTransactionCellSidecar::decode(&mut cells).map(Self::Cells)
             }
             _ => BlobTransactionSidecarVariant::rlp_decode_fields(&mut &data[..]).map(Self::Full),
         }
@@ -1127,8 +1135,8 @@ mod tests {
     }
 
     // One cell of the blob in `eip7594_single_blob_sidecar`, with its placeholder proofs.
-    fn single_cell_sidecar() -> BlobTxCellSidecar {
-        BlobTxCellSidecar::new(
+    fn single_cell_sidecar() -> BlobTransactionCellSidecar {
+        BlobTransactionCellSidecar::new(
             vec![Bytes48::default()],
             vec![Bytes48::default(); CELLS_PER_EXT_BLOB],
             vec![Cell::default()],
@@ -1577,7 +1585,7 @@ mod tests {
             err.downcast_ref::<DiskFileBlobStoreError>(),
             Some(DiskFileBlobStoreError::WriteFile(failed, _, _)) if *failed == tx
         ));
-        assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
+        assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.matching_cells(cell_mask));
         // The full sidecar was indexed, but the cells cannot rebuild its blob.
         assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![false]);
     }
@@ -1599,7 +1607,7 @@ mod tests {
         // The cells outlive the eviction of the deleted sidecar.
         store.clear_cache();
         let cell_mask = BlobCellMask::from_bits(1);
-        assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.get_cells(cell_mask));
+        assert_eq!(store.get_cells(tx, cell_mask).unwrap(), cells.matching_cells(cell_mask));
     }
 
     #[test]
