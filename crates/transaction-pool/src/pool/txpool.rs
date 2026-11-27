@@ -1520,10 +1520,10 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Snapshot of [`Self::pending_fees`] recorded after the most recent all-transactions pass in
     /// [`Self::update`].
     ///
-    /// The all-transactions pass calls [`Self::update_txs`] over every entry in [`Self::txs`].
-    /// This field is initialized to the default fees because an empty pool trivially reflects
-    /// them. It is not necessarily the immediately preceding fee value: partial sender updates
-    /// and fee changes do not modify it.
+    /// The all-transactions pass calls [`Self::update_txs_sorted`] over every entry in
+    /// [`Self::txs`]. This field is initialized to the default fees because an empty pool
+    /// trivially reflects them. It is not necessarily the immediately preceding fee value: partial
+    /// sender updates and fee changes do not modify it.
     last_full_update_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
