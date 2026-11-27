@@ -719,6 +719,31 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let _ = (parent, beneficiary);
         None
     }
+
+    /// Returns whether engine prewarming loads the state that [`Self::tx_warm_targets`] reports
+    /// for each transaction into the execution cache, in parallel with prewarm execution.
+    ///
+    /// Defaults to `false`, in which case [`Self::tx_warm_targets`] is never called.
+    fn warms_tx_targets(&self) -> bool {
+        false
+    }
+
+    /// Calls `target` with each account, and the storage slots of that account, that executing
+    /// `tx` from `signer` is expected to read.
+    ///
+    /// Only called if [`Self::warms_tx_targets`] returns `true` and the execution cache is enabled,
+    /// for transactions that prewarming dispatches for speculative execution, before dispatching
+    /// them. It is not called for transactions that block execution already passed or that arrive
+    /// after prewarming stops. Targets are only loaded into the execution cache, so missing or
+    /// extra targets affect performance, not execution results.
+    fn tx_warm_targets(
+        &self,
+        tx: &TxTy<Self::Primitives>,
+        signer: Address,
+        target: &mut dyn FnMut(Address, &[B256]),
+    ) {
+        let _ = (tx, signer, target);
+    }
 }
 
 /// JIT backend controls exposed by an EVM configuration.
