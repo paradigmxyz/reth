@@ -3589,9 +3589,12 @@ mod tests {
                 let messages = builder.build();
                 if with_blob {
                     assert!(messages.full.is_none());
-                    assert_eq!(messages.pooled.unwrap().hashes().as_slice(), &[hash]);
+                    let [announcement] = &messages.pooled[..] else {
+                        panic!("expected one pooled announcement")
+                    };
+                    assert_eq!(announcement.hashes().as_slice(), &[hash]);
                 } else {
-                    assert!(messages.pooled.is_none());
+                    assert!(messages.pooled.is_empty());
                     let full = messages.full.unwrap();
                     assert_eq!(full.0.len(), 1);
                     assert_eq!(full.0[0].tx_hash(), &hash);
