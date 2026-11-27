@@ -99,6 +99,7 @@ default = [
     "keccak-cache-global",
     "asm-keccak",
     "gmp",
+    "bn254-mcl",
     "min-trace-logs",
     "portable",
 ]

@@ -236,7 +236,7 @@ maxperf: ## Builds `reth` with the most aggressive optimisations.
 
 .PHONY: maxperf-no-asm
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
-	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,portable,js-tracer,keccak-cache-global,gmp
+	VERGEN_IDEMPOTENT=0 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --no-default-features --features jemalloc,min-trace-logs,otlp,otlp-logs,portable,js-tracer,keccak-cache-global,gmp,bn254-mcl
 
 fmt:
 	cargo +nightly fmt
