@@ -8,7 +8,7 @@ use reth_tasks::{
     CancelOnDrop, Runtime,
 };
 use std::sync::Arc;
-use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{oneshot, AcquireError, OwnedSemaphorePermit, Semaphore, SemaphorePermit};
 
 use crate::EthApiTypes;
 
@@ -152,6 +152,19 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
         guard.clone().acquire_many_owned(permits_to_acquire)
     }
 
+    /// Tries to acquire a permit to run a short state read on the calling task.
+    ///
+    /// This is called before such a read. `Some` means the read may run directly on the calling
+    /// task while the permit is held. `None` means the read must go to the blocking pool, either
+    /// because the implementation does not allow inline reads (the default) or because the limit
+    /// of concurrent inline reads is reached.
+    ///
+    /// A read holding a permit can block its worker thread, so implementations must hand out
+    /// fewer permits than the runtime has worker threads.
+    fn try_acquire_inline_io(&self) -> Option<SemaphorePermit<'_>> {
+        None
+    }
+
     /// Executes the future on a new blocking task.
     ///
     /// Note: This is expected for futures that are dominated by blocking IO operations, for tracing
@@ -180,6 +193,26 @@ pub trait SpawnBlocking: EthApiTypes + 'static {
             // cancels the blocking task once the request is dropped
             let _request = request;
             rx.await.map_err(|_| EthApiError::InternalEthError)?
+        }
+    }
+
+    /// Executes a short state read on the calling task if possible, else on a blocking IO task.
+    ///
+    /// `f` runs directly on the calling task while a permit from [`Self::try_acquire_inline_io`]
+    /// is held, and goes through [`Self::spawn_blocking_io`] when no permit is available. Only use
+    /// this for reads that do a small, bounded number of state lookups, since an inline read
+    /// blocks its worker thread for its whole duration.
+    fn spawn_point_read<F, R>(&self, f: F) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        F: FnOnce(Self) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            if let Some(_permit) = self.try_acquire_inline_io() {
+                return f(self.clone())
+            }
+
+            self.spawn_blocking_io(f).await
         }
     }
 

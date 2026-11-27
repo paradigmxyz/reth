@@ -355,6 +355,8 @@ impl<N: NodePrimitives> OverlayManager<N> {
             self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
         self.inner.state_trie_overlays.retain(|key, _| self.live_state_reaches(key));
         self.inner.execution_overlays.retain(|key, _| self.live_state_reaches(key));
+        self.inner.state_trie_overlays.clear_unmanaged();
+        self.inner.execution_overlays.clear_unmanaged();
         let remaining_overlays =
             self.inner.state_trie_overlays.len() + self.inner.execution_overlays.len();
         let pruned_overlays = overlays_before.saturating_sub(remaining_overlays);
@@ -525,6 +527,11 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 OverlayCacheEntry::Computing(waiter) => Ok(Some(waiter.wait(metrics))),
             }
         }
+        if let Some(input) = cache.unmanaged(&key) {
+            metrics.record_cache_reuse();
+            span.record("cache_reused", true);
+            return Ok(Some(input))
+        }
         span.record("cache_reused", false);
 
         // Resolve the block path and any cached parent overlay before locking the child entry.
@@ -547,7 +554,10 @@ impl<N: NodePrimitives> OverlayManager<N> {
                 }
                 None => ComputeOverlayInput::MergeBlocks(blocks),
             };
-            return Ok(Some(Arc::new(compute(compute_input, span))))
+            metrics.record_cache_fill();
+            let input = Arc::new(compute(compute_input, span));
+            cache.set_unmanaged(key, Arc::clone(&input));
+            return Ok(Some(input))
         }
 
         enum CacheAction<T> {
@@ -772,11 +782,18 @@ struct OverlayCacheKey {
 
 struct OverlayCache<T> {
     entries: DashMap<OverlayCacheKey, OverlayCacheEntry<T>>,
+    /// The last overlay computed for a tip the in-memory state does not track, such as the
+    /// pending block.
+    ///
+    /// Such overlays stay out of `entries` so they neither pile up nor take the tracked parent
+    /// overlay they extend, but every state provider opened for the same pending block needs the
+    /// same overlay.
+    unmanaged: Mutex<Option<(OverlayCacheKey, Arc<T>)>>,
 }
 
 impl<T> Default for OverlayCache<T> {
     fn default() -> Self {
-        Self { entries: Default::default() }
+        Self { entries: Default::default(), unmanaged: Default::default() }
     }
 }
 
@@ -787,6 +804,25 @@ impl<T> OverlayCache<T> {
 
     fn retain(&self, mut keep: impl FnMut(&OverlayCacheKey, &OverlayCacheEntry<T>) -> bool) {
         self.entries.retain(|key, entry| keep(key, entry))
+    }
+
+    /// Returns the overlay last computed for an untracked tip, if it was computed for `key`.
+    fn unmanaged(&self, key: &OverlayCacheKey) -> Option<Arc<T>> {
+        self.unmanaged
+            .lock()
+            .as_ref()
+            .filter(|(unmanaged_key, _)| unmanaged_key == key)
+            .map(|(_, input)| Arc::clone(input))
+    }
+
+    /// Replaces the overlay kept for an untracked tip.
+    fn set_unmanaged(&self, key: OverlayCacheKey, input: Arc<T>) {
+        *self.unmanaged.lock() = Some((key, input));
+    }
+
+    /// Drops the overlay kept for an untracked tip.
+    fn clear_unmanaged(&self) {
+        self.unmanaged.lock().take();
     }
 
     /// Returns a ready entry without removing it from the cache.
@@ -1299,6 +1335,45 @@ mod tests {
         assert!(!manager.inner.state_trie_overlays.entries.contains_key(&child_key));
         assert!(manager.inner.execution_overlays.entries.contains_key(&parent_key));
         assert!(!manager.inner.execution_overlays.entries.contains_key(&child_key));
+    }
+
+    #[reth_concurrency::test]
+    fn reuses_last_overlay_for_unmanaged_block() {
+        let (manager, mut in_memory_state_writer) = overlay_manager_with_writer();
+        let blocks = test_blocks();
+        for block in &blocks[..2] {
+            in_memory_state_writer.insert_executed(block.clone());
+        }
+
+        let anchor_hash = blocks[0].recovered_block().parent_hash();
+        let parent_hash = blocks[1].recovered_block().hash();
+        let parent_state = manager.in_memory_state().state_by_hash(parent_hash).unwrap();
+        let child_state = BlockState::with_parent(blocks[2].clone(), Some(parent_state.clone()));
+        let cache_config = OverlayCacheConfig { precompute: false, write_to_cache: false };
+        manager.execution_overlay_for_parent(parent_hash, anchor_hash).unwrap();
+
+        let first = manager
+            .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
+            .unwrap();
+        let second = manager
+            .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
+            .unwrap();
+        assert!(Arc::ptr_eq(&first, &second));
+
+        // A different untracked tip replaces the kept overlay.
+        let sibling = TestBlockBuilder::eth()
+            .get_executed_block_with_number(blocks[2].block_number(), parent_hash);
+        assert_ne!(sibling.recovered_block().hash(), blocks[2].recovered_block().hash());
+        let sibling_state = BlockState::with_parent(sibling, Some(parent_state));
+        let sibling_overlay = manager
+            .execution_overlay_for_block_state(&sibling_state, anchor_hash, cache_config)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&first, &sibling_overlay));
+        let third = manager
+            .execution_overlay_for_block_state(&child_state, anchor_hash, cache_config)
+            .unwrap();
+        assert!(!Arc::ptr_eq(&first, &third));
+        assert_eq!(third.accounts().len(), first.accounts().len());
     }
 
     #[cfg(feature = "rayon")]

@@ -1,7 +1,10 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
@@ -32,9 +35,19 @@ use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
     BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
-use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
+use tokio::{
+    runtime::Handle,
+    sync::{broadcast, mpsc, Mutex, Semaphore, SemaphorePermit},
+};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
+
+/// Divisor applied to the runtime's worker thread count to size the semaphore for inline state
+/// reads, so that at most this fraction of the workers can be inside such a read at once.
+///
+/// The division rounds down: a runtime with a single worker gets no permit and never reads inline,
+/// because a read that blocks would stall the whole runtime.
+const INLINE_IO_WORKER_DIVISOR: usize = 2;
 
 /// `Eth` API implementation.
 ///
@@ -208,6 +221,11 @@ where
     fn blocking_io_task_guard(&self) -> &std::sync::Arc<tokio::sync::Semaphore> {
         self.inner.blocking_io_request_semaphore()
     }
+
+    #[inline]
+    fn try_acquire_inline_io(&self) -> Option<SemaphorePermit<'_>> {
+        self.inner.inline_io_request_semaphore().try_acquire().ok()
+    }
 }
 
 /// Container type `EthApi`
@@ -239,6 +257,11 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Semaphore to limit concurrent blocking IO requests (`eth_call`, `eth_estimateGas`, etc.)
     blocking_io_request_semaphore: Arc<Semaphore>,
+
+    /// Semaphore to limit concurrent state reads that run inline on the calling task.
+    ///
+    /// Sized on first use, see [`Self::inline_io_request_semaphore`].
+    inline_io_request_semaphore: OnceLock<Semaphore>,
 
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
@@ -312,6 +335,7 @@ where
             blocking_io_request_semaphore: Arc::new(Semaphore::new(
                 settings.max_blocking_io_requests,
             )),
+            inline_io_request_semaphore: OnceLock::new(),
             settings,
             raw_tx_sender,
             raw_tx_forwarder,
@@ -522,6 +546,19 @@ where
     #[inline]
     pub const fn blocking_io_request_semaphore(&self) -> &Arc<Semaphore> {
         &self.blocking_io_request_semaphore
+    }
+
+    /// Returns a reference to the semaphore limiting concurrent inline state reads.
+    ///
+    /// The semaphore is sized on first use from the worker count of the runtime that calls this,
+    /// which is the runtime polling the RPC handlers. That runtime can differ from the node's task
+    /// runtime, for example when the RPC servers run on their own runtime. Called outside a
+    /// runtime, it gets no permits and reads never run inline.
+    pub fn inline_io_request_semaphore(&self) -> &Semaphore {
+        self.inline_io_request_semaphore.get_or_init(|| {
+            let workers = Handle::try_current().map_or(0, |handle| handle.metrics().num_workers());
+            Semaphore::new(workers / INLINE_IO_WORKER_DIVISOR)
+        })
     }
 
     /// Returns whether to force upcasting EIP-4844 blob sidecars to EIP-7594 format.

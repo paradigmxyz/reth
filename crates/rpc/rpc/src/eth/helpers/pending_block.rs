@@ -3,7 +3,10 @@
 use crate::EthApi;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
+    helpers::{
+        pending_block::{PendingEnvBuilder, PendingStateSource},
+        LoadPendingBlock,
+    },
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
@@ -22,5 +25,15 @@ where
     #[inline]
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
         self.inner.pending_env_builder()
+    }
+
+    /// Returns the pool's pending block without opening its state.
+    ///
+    /// The state RPC opens the block's state itself, so a short read can open it on the calling
+    /// task instead of spending a blocking task on it.
+    async fn local_pending_block_or_state(
+        &self,
+    ) -> Result<Option<PendingStateSource<Self::Primitives>>, Self::Error> {
+        Ok(self.pool_pending_block().await?.map(PendingStateSource::Block))
     }
 }

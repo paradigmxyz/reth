@@ -81,7 +81,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         address: Address,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+        self.spawn_point_read_with_state(block_id.unwrap_or_default(), move |_, state| {
             Ok(state
                 .account_balance(&address)
                 .map_err(Self::Error::from_eth_err)?
@@ -96,7 +96,7 @@ pub trait EthState: LoadState + SpawnBlocking {
         index: JsonStorageKey,
         block_id: Option<BlockId>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
-        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+        self.spawn_point_read_with_state(block_id.unwrap_or_default(), move |_, state| {
             Ok(B256::from(
                 state
                     .storage(address, index.as_b256())
@@ -423,21 +423,59 @@ pub trait LoadState:
             };
 
             self.spawn_blocking_io(move |this| {
-                let state = match pending {
-                    Some(PendingStateSource::Block(pending)) => this
-                        .provider()
-                        .state_with_block_appended(
-                            pending.block().parent_hash(),
-                            pending.executed_block,
-                        )
-                        .or_else(|_| this.provider().state_by_block_id(BlockId::pending()))
-                        .map_err(Self::Error::from_eth_err)?,
-                    Some(PendingStateSource::State(state)) => state,
-                    None if at.is_latest() => this.latest_state()?,
-                    None => {
-                        this.provider().state_by_block_id(at).map_err(Self::Error::from_eth_err)?
-                    }
-                };
+                let state = open_state_at(&this, at, pending)?;
+                f(this, state)
+            })
+            .await
+        }
+    }
+
+    /// Executes `f` with the state at the given [`BlockId`], on the calling task if possible.
+    ///
+    /// For reads at the latest or pending block, `f` runs through
+    /// [`SpawnBlocking::spawn_point_read`], so it runs directly on the calling task while a permit
+    /// from [`SpawnBlocking::try_acquire_inline_io`] is held. This skips the round trip through
+    /// the blocking pool, which costs more than a short read. When no permit is available, or for
+    /// any other block, this falls back to the blocking pool.
+    ///
+    /// For pending reads, the pending-state source is resolved first, as in
+    /// [`Self::spawn_blocking_io_with_state`], so building a local pending block stays on the
+    /// blocking pool. Only opening its state runs inline.
+    ///
+    /// Inline reads run on an async worker thread and block it for their whole duration. That
+    /// covers more than the lookups in `f`: opening the state can wait for another thread, for
+    /// example while the overlay of the in-memory blocks is rebuilt after a new block, it can
+    /// compute the overlay of a new pending block, and a lookup that the in-memory blocks do not
+    /// cover reads the database, which can wait for disk. The permit only bounds how many workers
+    /// are blocked at once, so only use this for reads that do a small, bounded number of state
+    /// lookups.
+    fn spawn_point_read_with_state<F, R>(
+        &self,
+        at: BlockId,
+        f: F,
+    ) -> impl Future<Output = Result<R, Self::Error>> + Send
+    where
+        Self: SpawnBlocking,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let pending = if at.is_pending() {
+                let pending = self.local_pending_block_or_state().await.ok().flatten();
+                // Opening the pending block's state costs more than opening the latest state.
+                // Yielding once lets an idle worker steal the read instead of running it on the
+                // worker that just polled the request; without the yield, concurrent inline
+                // pending reads were slower than reads on the blocking pool.
+                tokio::task::yield_now().await;
+                pending
+            } else if at.is_latest() {
+                None
+            } else {
+                return self.spawn_blocking_io_with_state(at, f).await
+            };
+
+            self.spawn_point_read(move |this| {
+                let state = open_state_at(&this, at, pending)?;
                 f(this, state)
             })
             .await
@@ -583,7 +621,7 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         let at = block_id.unwrap_or_default();
-        self.spawn_blocking_io_with_state(at, move |this, state| {
+        self.spawn_point_read_with_state(at, move |this, state| {
             this.transaction_count_with_state(address, at, &state)
         })
     }
@@ -639,12 +677,33 @@ pub trait LoadState:
     where
         Self: SpawnBlocking,
     {
-        self.spawn_blocking_io_with_state(block_id.unwrap_or_default(), move |_, state| {
+        self.spawn_point_read_with_state(block_id.unwrap_or_default(), move |_, state| {
             Ok(state
                 .account_code(&address)
                 .map_err(Self::Error::from_eth_err)?
                 .unwrap_or_default()
                 .original_bytes())
         })
+    }
+}
+
+/// Opens the state at `at`, using the resolved local `pending` source for pending reads.
+///
+/// `pending` is ignored unless `at` is pending. A pending block whose state cannot be opened, or a
+/// missing pending source, falls back to the provider's pending state.
+fn open_state_at<T: LoadState>(
+    this: &T,
+    at: BlockId,
+    pending: Option<PendingStateSource<T::Primitives>>,
+) -> Result<StateProviderBox, T::Error> {
+    match pending {
+        Some(PendingStateSource::Block(pending)) => this
+            .provider()
+            .state_with_block_appended(pending.block().parent_hash(), pending.executed_block)
+            .or_else(|_| this.provider().state_by_block_id(BlockId::pending()))
+            .map_err(T::Error::from_eth_err),
+        Some(PendingStateSource::State(state)) => Ok(state),
+        None if at.is_latest() => this.latest_state(),
+        None => this.provider().state_by_block_id(at).map_err(T::Error::from_eth_err),
     }
 }
