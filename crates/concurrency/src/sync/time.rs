@@ -1,30 +1,31 @@
 //! Monotonic and system time using native clocks or a virtual clock in simulation.
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use crate::sync::deterministic::{self, Timer, Waiter};
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 pub use std::time::{Duration, SystemTimeError};
 
-/// Uses the native fast clock outside simulation and the virtual clock under `fuzz`.
-#[cfg(feature = "fuzz")]
+/// Uses the native fast clock outside simulation and the virtual clock under `fuzz` plus
+/// `--cfg dst`.
+#[cfg(all(feature = "fuzz", dst))]
 pub use self::Instant as FastInstant;
 
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use reth_primitives_traits::FastInstant;
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 /// A point on the simulated monotonic clock, reset for each runtime execution.
 ///
 /// Signed nanoseconds permit backdating before the execution origin and deadlines beyond one
 /// [`Duration::MAX`] of elapsed time. Arithmetic bounds do not depend on the host clock.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Instant(pub(crate) i128);
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Instant {
     /// Returns the current virtual time.
     pub fn now() -> Self {
@@ -63,7 +64,7 @@ impl Instant {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Add<Duration> for Instant {
     type Output = Self;
     fn add(self, rhs: Duration) -> Self {
@@ -71,7 +72,7 @@ impl Add<Duration> for Instant {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Sub<Duration> for Instant {
     type Output = Self;
     fn sub(self, rhs: Duration) -> Self {
@@ -79,7 +80,7 @@ impl Sub<Duration> for Instant {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Sub for Instant {
     type Output = Duration;
     fn sub(self, rhs: Self) -> Duration {
@@ -87,13 +88,13 @@ impl Sub for Instant {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl AddAssign<Duration> for Instant {
     fn add_assign(&mut self, rhs: Duration) {
         *self = *self + rhs;
     }
 }
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl SubAssign<Duration> for Instant {
     fn sub_assign(&mut self, rhs: Duration) {
         *self = *self - rhs;
@@ -105,9 +106,9 @@ impl SubAssign<Duration> for Instant {
 /// Simulation advances to the earliest timer only when every application task
 /// is blocked; it never sleeps an OS thread.
 pub fn sleep(duration: Duration) {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     std::thread::sleep(duration);
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     {
         let deadline = Instant::now() + duration;
         let waiter = Waiter::new();
@@ -123,7 +124,7 @@ pub fn sleep(duration: Duration) {
 ///
 /// The representation preserves native timestamp arithmetic and [`SystemTimeError`], but
 /// [`Self::now`] reads only the virtual clock, never the host wall clock.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[allow(
     clippy::disallowed_types,
@@ -132,10 +133,10 @@ pub fn sleep(duration: Duration) {
 pub struct SystemTime(std::time::SystemTime);
 
 /// The fixed origin of the simulated system clock.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub const UNIX_EPOCH: SystemTime = SystemTime::UNIX_EPOCH;
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl SystemTime {
     /// The fixed origin of the simulated system clock.
     pub const UNIX_EPOCH: Self = Self(std::time::UNIX_EPOCH);
@@ -168,7 +169,7 @@ impl SystemTime {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Add<Duration> for SystemTime {
     type Output = Self;
 
@@ -177,7 +178,7 @@ impl Add<Duration> for SystemTime {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Sub<Duration> for SystemTime {
     type Output = Self;
 
@@ -186,14 +187,14 @@ impl Sub<Duration> for SystemTime {
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl AddAssign<Duration> for SystemTime {
     fn add_assign(&mut self, rhs: Duration) {
         self.0 += rhs;
     }
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl SubAssign<Duration> for SystemTime {
     fn sub_assign(&mut self, rhs: Duration) {
         self.0 -= rhs;
@@ -204,7 +205,7 @@ impl SubAssign<Duration> for SystemTime {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     use crate::sync::Runtime;
 
     #[test]
@@ -234,7 +235,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     #[test]
     fn system_time_tracks_virtual_time_and_resets_between_executions() {
         for _ in 0..2 {
@@ -251,7 +252,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     #[test]
     fn native_system_time_is_the_standard_type() {
         let timestamp: std::time::SystemTime = SystemTime::now();

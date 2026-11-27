@@ -16,7 +16,7 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_primitives::{Address, B256};
-use parking_lot::RwLock;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor, EvmTypesFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeader, TxTy};
 use reth_provider::{
@@ -273,7 +273,7 @@ mod tests {
         handle.speculation.read().as_ref().map(|s| Arc::clone(&s.results))
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn keeps_results_of_the_same_head() {
         let handle =
             TestHandle::spawn(&Runtime::test(), Arc::new(NoPool), EthEvmConfig::mainnet(), true);
@@ -287,7 +287,7 @@ mod tests {
         assert!(!Arc::ptr_eq(&results, &recorded(&handle).unwrap()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn offers_no_seeds_without_results() {
         let handle =
             TestHandle::spawn(&Runtime::test(), Arc::new(NoPool), EthEvmConfig::mainnet(), true);
@@ -297,7 +297,7 @@ mod tests {
         assert!(handle.seeds(parent.hash(), &evm_env).is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn records_no_results_with_eip8037() {
         let chain_spec = ChainSpecBuilder::mainnet().amsterdam_activated().build();
         let evm_config = EthEvmConfig::new(Arc::new(chain_spec));

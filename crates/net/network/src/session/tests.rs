@@ -645,3 +645,16 @@ async fn inbound_capacity_rejection_preserves_outbound_attempt() {
         }
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn silent_rejected_inbound_releases_disconnect_slot() {
+    let sessions = session_manager();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let _remote = TcpStream::connect(listener.local_addr().unwrap()).await.unwrap();
+    let (stream, _) = listener.accept().await.unwrap();
+    sessions.try_disconnect_incoming_connection(stream, DisconnectReason::TooManyPeers);
+    tokio::time::sleep(HANDSHAKE_TIMEOUT - Duration::from_secs(1)).await;
+    assert_eq!(Arc::strong_count(&sessions.disconnections_counter.0), 2);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(Arc::strong_count(&sessions.disconnections_counter.0), 1);
+}

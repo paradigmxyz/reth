@@ -7,7 +7,10 @@ use crate::tree::{
     TxPoolPrewarmCacheSnapshot as Snapshot,
 };
 use alloy_primitives::B256;
-use crossbeam_channel::{Receiver, RecvTimeoutError, TryRecvError};
+use reth_concurrency::sync::{
+    channel::{Receiver, RecvTimeoutError, TryRecvError},
+    time::Instant,
+};
 use reth_evm::{cached::CachedReads, database::StateProviderDatabase, ConfigureEvm, Evm, EvmEnv};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -16,10 +19,7 @@ use reth_provider::{
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayStateProviderFactory;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{sync::Arc, time::Duration};
 use tracing::{debug, trace};
 
 /// Maximum interval between snapshot publications and delay when no transaction is ready.
@@ -354,19 +354,19 @@ mod tests {
     use crate::tree::payload_processor::reuse::{PoolResults, POOL_BENEFICIARY};
     use alloy_consensus::{transaction::Recovered, Signed, TxLegacy};
     use alloy_primitives::{Address, Signature, TxKind};
-    use crossbeam_channel::{unbounded, Sender};
     use evm2::BaseEvmTypes;
-    use parking_lot::{Mutex, RwLock};
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
+        channel::{unbounded, Sender},
+        parking_lot::{Mutex, RwLock},
+        thread::{self, JoinHandle},
+    };
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::EvmEnvFor;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_provider::test_utils::MockEthProvider;
     use reth_stages_api::{StageCheckpoint, StageId};
-    use std::{
-        collections::{HashMap, VecDeque},
-        sync::atomic::{AtomicUsize, Ordering},
-        thread::{self, JoinHandle},
-    };
+    use std::collections::{HashMap, VecDeque};
 
     /// Upper bound on any single wait; failures surface as panics well before CI timeouts.
     const WAIT_LIMIT: Duration = Duration::from_secs(5);

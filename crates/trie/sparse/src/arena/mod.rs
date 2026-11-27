@@ -21,7 +21,9 @@ use alloc::{borrow::Cow, boxed::Box, vec::Vec};
 use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::TrieMask;
 use core::{cmp::Reverse, mem};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator};
+use reth_concurrency::sync::rayon::iter::{
+    IntoParallelIterator, IntoParallelRefMutIterator, ParallelIterator,
+};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     BranchNodeMasks, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNode,
@@ -3169,7 +3171,7 @@ mod tests {
     use alloy_primitives::{map::B256Map, B256, U256};
     use rand::{seq::SliceRandom, Rng, SeedableRng};
     use reth_trie::test_utils::TrieTestHarness;
-    use reth_trie_common::ProofV2Target;
+    use reth_trie_common::{ProofV2Target, RlpNode};
     use std::collections::BTreeMap;
     use tracing::{info, trace};
 
@@ -3179,12 +3181,6 @@ mod tests {
 
     #[test]
     fn pruning_pops_cursor_before_reusing_node_slot() {
-        use super::{
-            ArenaCursor, ArenaSparseNode, ArenaSparseNodeBranch, ArenaSparseNodeState, BranchChild,
-            NextResult, NodeArena,
-        };
-        use reth_trie_common::RlpNode;
-
         let mut arena = NodeArena::new();
         let rlp = RlpNode::word_rlp(&B256::repeat_byte(1));
         let state = ArenaSparseNodeState::Cached { rlp_node: rlp.clone(), epoch: epoch(0) };

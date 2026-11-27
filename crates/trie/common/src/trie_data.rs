@@ -9,7 +9,10 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::fmt;
-use reth_primitives_traits::sync::OnceLock;
+use reth_concurrency::sync::OnceLock;
+
+#[cfg(feature = "rayon")]
+use reth_concurrency::sync::rayon;
 
 /// Container for sorted trie data: hashed state and trie updates.
 ///
@@ -265,8 +268,9 @@ mod tests {
 
     use super::*;
     use alloy_primitives::{B256, U256};
+    use reth_concurrency::sync::thread;
     use reth_primitives_traits::Account;
-    use std::{thread, time::Duration};
+    use std::time::Duration;
 
     fn empty_pending() -> (LazyTrieData, LazyTrieDataProducer) {
         LazyTrieData::pending(

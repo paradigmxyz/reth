@@ -7,9 +7,9 @@ use syn::{parse_macro_input, spanned::Spanned, Error, ItemFn};
 /// Marks a test that runs inside `reth_concurrency::sync::Runtime::run`.
 ///
 /// Expands to a `#[test]` whose body moves into a `Runtime::run` closure, so the test runs
-/// inline by default and under simulation with the `fuzz` feature. Other attributes, such as
-/// `#[should_panic]`, are kept. Inside `proptest!`, it replaces `#[test]` and runs every case,
-/// including input generation, in one runtime.
+/// inline by default and under simulation with both the `fuzz` feature and `--cfg dst`. Other
+/// attributes, such as `#[should_panic]`, are kept. Inside `proptest!`, it replaces `#[test]` and
+/// runs every case, including input generation, in one runtime.
 #[proc_macro_attribute]
 pub fn test(args: TokenStream, item: TokenStream) -> TokenStream {
     if !args.is_empty() {

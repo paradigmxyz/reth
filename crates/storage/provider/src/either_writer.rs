@@ -15,7 +15,7 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
-use rayon::slice::ParallelSliceMut;
+use reth_concurrency::sync::rayon::prelude::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
     models::{AccountBeforeTx, StorageBeforeTx},
