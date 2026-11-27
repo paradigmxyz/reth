@@ -186,6 +186,13 @@ where
     ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(?path, ?check_parent_path),
+        ret,
+    )]
     #[inline]
     fn should_retain<'a>(
         &self,
@@ -335,6 +342,12 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(child_path = ?self.last_child_path()),
+    )]
     #[inline]
     fn commit_last_child<'a>(
         &mut self,
@@ -363,6 +376,8 @@ where
                 hash_mask_bit,
                 tree_mask_bit,
             });
+        } else {
+            trace!(target: TRACE_TARGET, "Leaving uncommitted child on stack");
         }
 
         Ok(())
@@ -524,6 +539,7 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn pop_branch<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -612,6 +628,12 @@ where
     ///
     /// It is expected that this method is "driven" by `next_uncached_key_range`, which decides
     /// which ranges of keys need to be calculated based on what cached trie data is available.
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(?lower_bound, ?upper_bound),
+    )]
     fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &mut VE,
@@ -953,6 +975,7 @@ where
     ///
     /// Once returned the `branch_stack` will be in the correct state to start calculating leaves
     /// for the given range, if any.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range<'a>(
         &mut self,
         targets: &mut Option<TargetsCursor<'a>>,
@@ -1181,6 +1204,16 @@ where
     /// Calculates trie nodes and retains proofs for targeted nodes within a sub-trie. The
     /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
     /// `upper_bound` is exclusive, None indicates unbounded.
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(
+            parent_prefix=?sub_trie_targets.parent_prefix,
+            lower_bound=?sub_trie_targets.lower_bound,
+            upper_bound=?sub_trie_targets.upper_bound,
+        ),
+    )]
     fn proof_subtrie<'a>(
         &mut self,
         value_encoder: &mut VE,
