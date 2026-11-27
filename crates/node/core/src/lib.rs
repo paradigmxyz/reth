@@ -8,6 +8,9 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+// Used via Cargo features to enforce compile-time max-level filtering alongside tracing.
+use log as _;
+
 pub mod args;
 pub mod cli;
 pub mod dirs;
