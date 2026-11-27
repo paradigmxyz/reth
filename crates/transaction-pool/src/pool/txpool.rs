@@ -1673,7 +1673,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 let range = TransactionId::new(*sender, 0)..=TransactionId::new(*sender, u64::MAX);
                 Self::update_sender_txs(
                     pending_fees,
-                    false,
                     Some(info),
                     &mut updates,
                     self.txs.range_mut(range),
@@ -1696,7 +1695,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
     #[inline]
     fn update_sender_txs<'a, I>(
         pending_fees: PendingFees,
-        fees_changed: bool,
         sender_info: Option<&SenderInfo>,
         updates: &mut Vec<PoolUpdate>,
         mut txs: I,
@@ -1737,9 +1735,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
 
             tx.state.insert(TxState::NO_PARKED_ANCESTORS);
-            if fees_changed {
-                Self::update_tx_fees(pending_fees, tx);
-            }
+            Self::update_tx_fees(pending_fees, tx);
             Self::record_subpool_update(updates, tx);
 
             let Some((_, next_tx)) = txs.next() else { return };
@@ -1774,9 +1770,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                 }
 
-                if fees_changed {
-                    Self::update_tx_fees(pending_fees, tx);
-                }
+                Self::update_tx_fees(pending_fees, tx);
                 Self::record_subpool_update(updates, tx);
                 has_parked_ancestor = !tx.state.is_pending();
 
@@ -1868,9 +1862,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             }
 
             tx.state.insert(TxState::NO_PARKED_ANCESTORS);
-            if fees_changed {
-                Self::update_tx_fees(pending_fees, tx);
-            }
+            Self::update_tx_fees(pending_fees, tx);
             Self::record_subpool_update(updates, tx);
 
             next_item = txs.next();
@@ -1920,9 +1912,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     cur_tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                 }
 
-                if fees_changed {
-                    Self::update_tx_fees(pending_fees, cur_tx);
-                }
+                Self::update_tx_fees(pending_fees, cur_tx);
                 Self::record_subpool_update(updates, cur_tx);
                 has_parked_ancestor = !cur_tx.state.is_pending();
 
@@ -5826,6 +5816,129 @@ mod tests {
             // Untracked senders should not accumulate in sender_info when enforce_tracked_nonce is
             // false.
             assert_eq!(pool.all_transactions.sender_info.len(), 1);
+        }
+    }
+
+    #[test]
+    fn update_accounts_gap_close_rechecks_fee_eligibility_with_unchanged_fees() {
+        // Test both the per-sender lookup path (1 changed sender out of many) and the full
+        // sorted-merge path (all senders changed) when pending fees have not changed since the
+        // previous full update.
+        for use_full_merge in [false, true] {
+            // Case 1: base fee rises while txs are nonce-gapped, then update_accounts closes the
+            // gap at unchanged fees -> nonce 1 must move to BaseFee (not Pending), nonce 2 stays
+            // Queued parked behind nonce 1, and both have ENOUGH_FEE_CAP_BLOCK cleared.
+            let mut f = MockTransactionFactory::default();
+            let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+            pool.all_transactions.pending_fees.base_fee = 100;
+
+            let sender_addr = Address::with_last_byte(0x11);
+            let tx1 = f.validated(
+                MockTransaction::eip1559()
+                    .with_sender(sender_addr)
+                    .with_nonce(1)
+                    .set_gas_price(150)
+                    .inc_limit(),
+            );
+            let tx2 = f.validated(
+                MockTransaction::eip1559()
+                    .with_sender(sender_addr)
+                    .with_nonce(2)
+                    .set_gas_price(150)
+                    .inc_limit(),
+            );
+            let id1 = *tx1.id();
+            let id2 = *tx2.id();
+            let sender = tx1.sender_id();
+
+            pool.add_transaction(tx1, U256::MAX, 0, None).unwrap();
+            pool.add_transaction(tx2, U256::MAX, 0, None).unwrap();
+
+            // Add background senders so that a 1-sender update uses update_sender_txs when
+            // use_full_merge is false.
+            let mut extra_senders = Vec::new();
+            for i in 0..20u8 {
+                let bg = f.validated(
+                    MockTransaction::eip1559()
+                        .with_sender(Address::with_last_byte(0x40 + i))
+                        .with_nonce(0)
+                        .set_gas_price(500)
+                        .inc_limit(),
+                );
+                let bg_sender = bg.sender_id();
+                pool.add_transaction(bg, U256::MAX, 0, None).unwrap();
+                extra_senders.push(bg_sender);
+            }
+
+            // Sync fees at base_fee = 200 while sender's txs are still nonce-gapped.
+            pool.all_transactions.pending_fees.base_fee = 200;
+            pool.update_accounts(std::iter::empty());
+            assert_eq!(pool.all_transactions.last_full_update_fees.base_fee, 200);
+            assert!(pool
+                .all_transactions
+                .get(&id1)
+                .unwrap()
+                .state
+                .contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            // Close the nonce gap with unchanged fees.
+            let mut changed = vec![(sender, SenderInfo { state_nonce: 1, balance: U256::MAX })];
+            if use_full_merge {
+                for bg in &extra_senders {
+                    changed.push((*bg, SenderInfo { state_nonce: 0, balance: U256::MAX }));
+                }
+            }
+            let outcome = pool.update_accounts(changed);
+            assert!(outcome.promoted.is_empty(), "underpriced tx must not promote to Pending");
+
+            let meta1 = pool.all_transactions.get(&id1).unwrap();
+            let meta2 = pool.all_transactions.get(&id2).unwrap();
+            assert_eq!(meta1.subpool, SubPool::BaseFee);
+            assert!(!meta1.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+            assert_eq!(meta2.subpool, SubPool::Queued);
+            assert!(!meta2.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            // Case 2: base fee drops while a tx is nonce-gapped, then update_accounts closes the
+            // gap at unchanged fees -> tx must promote to Pending with ENOUGH_FEE_CAP_BLOCK set.
+            let sender2_addr = Address::with_last_byte(0x22);
+            let tx3 = f.validated(
+                MockTransaction::eip1559()
+                    .with_sender(sender2_addr)
+                    .with_nonce(1)
+                    .set_gas_price(150)
+                    .inc_limit(),
+            );
+            let id3 = *tx3.id();
+            let sender2 = tx3.sender_id();
+            pool.add_transaction(tx3, U256::MAX, 0, None).unwrap();
+            assert!(!pool
+                .all_transactions
+                .get(&id3)
+                .unwrap()
+                .state
+                .contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            pool.all_transactions.pending_fees.base_fee = 100;
+            pool.update_accounts(std::iter::empty());
+            assert_eq!(pool.all_transactions.last_full_update_fees.base_fee, 100);
+            assert!(!pool
+                .all_transactions
+                .get(&id3)
+                .unwrap()
+                .state
+                .contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            let mut changed2 = vec![(sender2, SenderInfo { state_nonce: 1, balance: U256::MAX })];
+            if use_full_merge {
+                for bg in &extra_senders {
+                    changed2.push((*bg, SenderInfo { state_nonce: 0, balance: U256::MAX }));
+                }
+            }
+            let outcome2 = pool.update_accounts(changed2);
+            assert_eq!(outcome2.promoted.len(), 1);
+            let meta3 = pool.all_transactions.get(&id3).unwrap();
+            assert_eq!(meta3.subpool, SubPool::Pending);
+            assert!(meta3.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
         }
     }
 }
