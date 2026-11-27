@@ -329,6 +329,9 @@ impl PrefixSet {
         }
 
         let Some(keys) = self.keys.as_deref() else { return false };
+        if &keys[self.index] >= range.start && &keys[self.index] < range.end {
+            return true;
+        }
         let idx = Self::lower_bound(&mut self.index, keys, range.start);
         idx < keys.len() && &keys[idx] < range.end
     }
