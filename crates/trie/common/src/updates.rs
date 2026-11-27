@@ -159,17 +159,19 @@ impl TrieUpdates {
 
     /// Converts trie updates into [`TrieUpdatesSorted`].
     pub fn into_sorted(mut self) -> TrieUpdatesSorted {
-        let mut account_nodes = self
-            .account_nodes
-            .drain()
-            .map(|(path, node)| {
-                // Updated nodes take precedence over removed nodes.
+        let mut account_nodes =
+            Vec::with_capacity(self.account_nodes.len() + self.removed_nodes.len());
+        let has_removed = !self.removed_nodes.is_empty();
+        for (path, node) in self.account_nodes.drain() {
+            // Updated nodes take precedence over removed nodes.
+            if has_removed {
                 self.removed_nodes.remove(&path);
-                (path, Some(node))
-            })
-            .collect::<Vec<_>>();
-
-        account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
+            }
+            account_nodes.push((path, Some(node)));
+        }
+        if has_removed {
+            account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
+        }
         account_nodes.sort_unstable_by_key(|a| a.0);
 
         let storage_tries = self
@@ -327,17 +329,19 @@ impl StorageTrieUpdates {
 
     /// Convert storage trie updates into [`StorageTrieUpdatesSorted`].
     pub fn into_sorted(mut self) -> StorageTrieUpdatesSorted {
-        let mut storage_nodes = self
-            .storage_nodes
-            .into_iter()
-            .map(|(path, node)| {
-                // Updated nodes take precedence over removed nodes.
+        let mut storage_nodes =
+            Vec::with_capacity(self.storage_nodes.len() + self.removed_nodes.len());
+        let has_removed = !self.removed_nodes.is_empty();
+        for (path, node) in self.storage_nodes {
+            // Updated nodes take precedence over removed nodes.
+            if has_removed {
                 self.removed_nodes.remove(&path);
-                (path, Some(node))
-            })
-            .collect::<Vec<_>>();
-
-        storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
+            }
+            storage_nodes.push((path, Some(node)));
+        }
+        if has_removed {
+            storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
+        }
         storage_nodes.sort_unstable_by_key(|a| a.0);
 
         StorageTrieUpdatesSorted { storage_nodes }
