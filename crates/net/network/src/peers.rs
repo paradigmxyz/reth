@@ -696,11 +696,25 @@ impl PeersManager {
             // ACK, transport, and Hello timeout errors can precede the first authenticated frame.
             // The outer timeout carries no handshake phase, so it is also treated conservatively.
             // Back off the attempt without penalizing that identity or its discovery record.
-            if self.peers.get(peer_id).is_some_and(|peer| peer.state.is_pending_out()) {
+            if let Some(peer) = self.peers.get_mut(peer_id) &&
+                peer.state.is_pending_out()
+            {
+                // Basic peers back off longer after each consecutive failure so that repeatedly
+                // failing peers don't keep taking precedence over untried candidates.
+                let failures = if peer.is_trusted() ||
+                    peer.is_static() ||
+                    self.trusted_peer_ids.contains(peer_id)
+                {
+                    0
+                } else {
+                    peer.unauthenticated_dial_failures =
+                        peer.unauthenticated_dial_failures.saturating_add(1);
+                    peer.unauthenticated_dial_failures - 1
+                };
                 self.on_outgoing_pending_session_gracefully_closed(peer_id);
                 self.backoff_peer_until(
                     *peer_id,
-                    self.backoff_durations.backoff_until(BackoffKind::Low, 0),
+                    self.backoff_durations.backoff_until(BackoffKind::Low, failures),
                 );
                 self.fill_outbound_slots();
             }
@@ -4601,6 +4615,56 @@ mod tests {
         assert!(until >= before + Duration::from_secs(1));
         assert!(until <= after + Duration::from_secs(1));
         assert_eq!(peers.peers[&peer_id].severe_backoff_counter, 3);
+    }
+
+    #[tokio::test]
+    async fn test_unauthenticated_dial_failures_escalate_backoff() {
+        let mut config = PeersConfig::test();
+        config.backoff_durations.low = Duration::from_secs(10);
+        config.backoff_durations.max = Duration::from_secs(60 * 60);
+        let addr = "8.8.8.8:30303".parse::<SocketAddr>().unwrap();
+        let backoff_after_failure = |peers: &mut PeersManager, peer_id: PeerId| {
+            peers.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::PendingOut;
+            peers.connection_info.inc_pending_out();
+            let before = std::time::Instant::now();
+            peers.on_outgoing_pending_session_dropped(
+                &addr,
+                &peer_id,
+                &PendingSessionHandshakeError::Timeout,
+            );
+            peers.backed_off_peers[&peer_id].saturating_duration_since(before).as_secs()
+        };
+
+        let mut peers = PeersManager::new(config.clone());
+        let peer_id = PeerId::random();
+        peers.add_peer_kind(peer_id, Some(PeerKind::Basic), PeerAddr::from_tcp(addr), None);
+        assert_eq!(backoff_after_failure(&mut peers, peer_id), 10);
+        assert_eq!(backoff_after_failure(&mut peers, peer_id), 20);
+        assert_eq!(backoff_after_failure(&mut peers, peer_id), 30);
+        let peer = &peers.peers[&peer_id];
+        assert_eq!(peer.reputation, DEFAULT_REPUTATION);
+        assert_eq!(peer.severe_backoff_counter, 0);
+
+        // An established session resets the escalation.
+        peers.peers.get_mut(&peer_id).unwrap().state = PeerConnectionState::PendingOut;
+        peers.connection_info.inc_pending_out();
+        peers.on_active_outgoing_established(peer_id);
+        peers.on_active_session_gracefully_closed(peer_id);
+        assert_eq!(backoff_after_failure(&mut peers, peer_id), 10);
+
+        for (kind, trusted_id) in
+            [(PeerKind::Static, false), (PeerKind::Trusted, false), (PeerKind::Basic, true)]
+        {
+            let mut peers = PeersManager::new(config.clone());
+            let peer_id = PeerId::random();
+            peers.add_peer_kind(peer_id, Some(kind), PeerAddr::from_tcp(addr), None);
+            if trusted_id {
+                // DNS-resolved trusted IDs keep their discovered kind.
+                peers.trusted_peer_ids.insert(peer_id);
+            }
+            assert_eq!(backoff_after_failure(&mut peers, peer_id), 10);
+            assert_eq!(backoff_after_failure(&mut peers, peer_id), 10);
+        }
     }
 
     #[tokio::test]

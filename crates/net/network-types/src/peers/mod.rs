@@ -39,6 +39,11 @@ pub struct Peer {
     /// Counts number of times the peer was backed off due to a severe
     /// [`BackoffKind`](crate::BackoffKind).
     pub severe_backoff_counter: u8,
+    /// Counts outbound dial failures before authentication since the last established session.
+    ///
+    /// Only used to space out retries; it never affects reputation or bans. Reset once a session
+    /// is established in either direction.
+    pub unauthenticated_dial_failures: u8,
 }
 
 // === impl Peer ===
@@ -62,6 +67,7 @@ impl Peer {
     /// Marks this peer as connected.
     pub fn mark_connected(&mut self) {
         self.connected_at = Some(Instant::now());
+        self.unauthenticated_dial_failures = 0;
     }
 
     /// Clears the current connection timestamp.
@@ -87,6 +93,7 @@ impl Peer {
             kind: Default::default(),
             backed_off: false,
             severe_backoff_counter: 0,
+            unauthenticated_dial_failures: 0,
         }
     }
 
