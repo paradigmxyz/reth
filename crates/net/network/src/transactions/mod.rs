@@ -2111,7 +2111,7 @@ enum PooledTransactionsHashesBuilder {
     Eth66(NewPooledTransactionHashes66),
     Eth68(NewPooledTransactionHashes68),
     // One announcement per cell mask, since an eth/72 announcement has a single mask.
-    Eth72(Vec<NewPooledTransactionHashes72>),
+    Eth72(SmallVec<[NewPooledTransactionHashes72; 1]>),
 }
 
 // === impl PooledTransactionsHashesBuilder ===
@@ -2220,7 +2220,9 @@ impl PooledTransactionsHashesBuilder {
                 Self::Eth68(NewPooledTransactionHashes68::with_capacity(capacity))
             }
             EthVersion::Eth72 | EthVersion::Eth73 => {
-                Self::Eth72(vec![NewPooledTransactionHashes72::with_capacity(capacity)])
+                Self::Eth72(SmallVec::from_buf([NewPooledTransactionHashes72::with_capacity(
+                    capacity,
+                )]))
             }
         }
     }
