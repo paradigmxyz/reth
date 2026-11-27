@@ -1,18 +1,18 @@
 //! Rayon iterator APIs, evaluated serially under the deterministic scheduler.
 //!
-//! With `fuzz`, adapter construction remains lazy and terminal operations drive
+//! With `fuzz` plus `--cfg dst`, adapter construction remains lazy and terminal operations drive
 //! Rayon's producers and consumers on the caller. Serial partitions do not reproduce
 //! worker schedules, parallel callback ordering, cancellation races, or partition
 //! counts. Compute callbacks must not depend on concurrent execution.
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use deterministic::*;
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use rayon::iter::*;
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use rayon::slice::ParallelSliceMut;
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 mod deterministic {
     use rayon::iter::plumbing::{
         Consumer, Folder, Producer, ProducerCallback, Reducer, UnindexedConsumer,

@@ -1,17 +1,15 @@
 //! Implements a state provider that tracks latency metrics.
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::{Gauge, Histogram};
+use reth_concurrency::sync::{
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+    time::FastInstant as Instant,
+};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Account, Bytecode, FastInstant as Instant};
+use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::EvmStateProvider;
-use std::{
-    sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 /// Nanoseconds per second
 const NANOS_PER_SEC: u32 = 1_000_000_000;

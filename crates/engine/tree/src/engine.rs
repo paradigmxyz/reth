@@ -6,8 +6,8 @@ use crate::{
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
 use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::Sender;
 use futures::{Stream, StreamExt};
+use reth_concurrency::sync::channel::Sender;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;

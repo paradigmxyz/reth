@@ -36,15 +36,11 @@ use evm2::{
     utils::WordExt,
     EvmFeatures, EvmTypes, Inspector, InspectorConfig, OpcodeSet, TxResultWithState, Version,
 };
-use parking_lot::{Mutex, RwLock};
-use std::{
-    cell::RefCell,
-    rc::Rc,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+use reth_concurrency::sync::{
+    atomic::{AtomicUsize, Ordering},
+    parking_lot::{Mutex, RwLock},
 };
+use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 /// Balances above this are compared exactly, so that applying balance changes cannot overflow.
 const MAX_REBASED_BALANCE: U256 = U256::from_limbs([u64::MAX, u64::MAX, 0, 0]);

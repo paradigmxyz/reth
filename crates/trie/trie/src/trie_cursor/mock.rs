@@ -1,4 +1,3 @@
-use parking_lot::{Mutex, MutexGuard};
 use std::{collections::BTreeMap, sync::Arc};
 use tracing::instrument;
 
@@ -8,6 +7,7 @@ use crate::{
     BranchNodeCompact, Nibbles,
 };
 use alloy_primitives::{map::B256Map, B256};
+use reth_concurrency::sync::parking_lot::{Mutex, MutexGuard};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::updates::TrieUpdates;
 

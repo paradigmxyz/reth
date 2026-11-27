@@ -1,5 +1,9 @@
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
+use reth_concurrency::sync::{
+    channel::mpsc::{self, Receiver},
+    rayon,
+};
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -21,7 +25,6 @@ use std::{
     collections::BTreeSet,
     fmt::Debug,
     ops::{Range, RangeInclusive},
-    sync::mpsc::{self, Receiver},
 };
 use tracing::*;
 

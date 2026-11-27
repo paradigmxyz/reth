@@ -201,15 +201,13 @@ impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut + DbTx {}
 mod tests {
     use super::DbTxPruneExt;
     use crate::PruneLimiter;
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_provider::{DBProvider, DatabaseProviderFactory};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
+    use std::sync::Arc;
 
     struct CountingIter {
         data: Vec<u64>,
