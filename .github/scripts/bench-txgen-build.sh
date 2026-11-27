@@ -29,9 +29,11 @@ fi
 # (llvm/llvm-project#228522) ships in Rust 1.100; build with beta until then.
 BENCH_RUST_TOOLCHAIN="${BENCH_RUST_TOOLCHAIN:-beta}"
 
-EXTRA_FEATURES=""
+EXTRA_FEATURES="min-debug-logs"
+WORKSPACE_ARG=""
 if [ "${BENCH_TRACY:-off}" != "off" ]; then
-  EXTRA_FEATURES="tracy,tracy-client/ondemand"
+  EXTRA_FEATURES="${EXTRA_FEATURES},tracy,tracy-client/ondemand"
+  WORKSPACE_ARG="--workspace"
 fi
 
 install_toolchain() {
@@ -44,18 +46,16 @@ install_toolchain() {
 
 build_node_binary() {
   local features_arg=""
-  local workspace_arg=""
 
   cd "$SOURCE_DIR"
   if [ -n "$EXTRA_FEATURES" ]; then
     features_arg="--features ${EXTRA_FEATURES}"
-    workspace_arg="--workspace"
   fi
 
   # shellcheck disable=SC2086
   RUSTUP_TOOLCHAIN="$BENCH_RUST_TOOLCHAIN" \
     RUSTFLAGS="-C target-cpu=native -C force-frame-pointers=yes" \
-    cargo build --locked --profile profiling $NODE_PKG $workspace_arg $features_arg
+    cargo build --locked --profile profiling $NODE_PKG $WORKSPACE_ARG $features_arg
 }
 
 case "$MODE" in
