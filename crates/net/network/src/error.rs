@@ -338,6 +338,14 @@ mod tests {
     }
 
     #[test]
+    fn ecies_unreadable_stream_is_not_banned() {
+        let err = PendingSessionHandshakeError::Ecies(ECIESErrorImpl::UnreadableStream.into());
+
+        assert!(!err.is_fatal_protocol_error());
+        assert!(!err.merits_discovery_ban());
+    }
+
+    #[test]
     fn test_should_backoff() {
         let err = EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
             P2PHandshakeError::Disconnected(DisconnectReason::TooManyPeers),
