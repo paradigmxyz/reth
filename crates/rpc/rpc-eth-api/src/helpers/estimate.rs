@@ -60,8 +60,8 @@ pub trait EstimateCall: Call {
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.version_mut().features.remove(EvmFeatures::BASE_FEE_CHECK);
 
-        // Disable additional fee charges (e.g. L2 operator fees) for gas estimation,
-        // consistent with `prepare_call_env` for `eth_call`.
+        // Disable fee charges, including additional ones such as L2 operator fees, and the balance
+        // check: estimation only measures gas usage.
         evm_env.version_mut().features.remove(
             EvmFeatures::FEE_CHARGE | EvmFeatures::BALANCE_CHECK | EvmFeatures::BALANCE_TOP_UP,
         );

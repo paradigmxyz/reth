@@ -453,14 +453,14 @@ fn transaction_request_to_evm2(
     evm_env: &impl EvmEnv,
 ) -> Result<RecoveredTxEnvelope, EthTxEnvError> {
     let tx_type = request.minimal_tx_type();
-    let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
+    let CallFees { gas_price, max_fee_per_blob_gas, .. } =
         normalize_transaction_request(&mut request, evm_env)?;
     let TransactionRequest {
         from,
         to,
         gas_price: _,
-        max_fee_per_gas: _,
-        max_priority_fee_per_gas: _,
+        max_fee_per_gas,
+        max_priority_fee_per_gas,
         gas,
         value,
         input,
@@ -482,9 +482,10 @@ fn transaction_request_to_evm2(
     let value = value.unwrap_or_default();
     let access_list = access_list.unwrap_or_default();
     let gas_price = gas_price.saturating_to();
-    // Preserve flat pricing when the RPC request has no priority fee.
-    let max_priority_fee_per_gas =
-        max_priority_fee_per_gas.map(|fee| fee.saturating_to()).unwrap_or(gas_price);
+    // Keep the requested fee cap, which the sender must be able to fund. A flat `gasPrice` sets
+    // both the cap and the priority fee.
+    let max_fee_per_gas = max_fee_per_gas.unwrap_or(gas_price);
+    let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or(gas_price);
 
     let tx = match tx_type {
         TxType::Legacy => TxEnvelope::Legacy(TxLegacy {
@@ -510,7 +511,7 @@ fn transaction_request_to_evm2(
             chain_id,
             nonce,
             gas_limit,
-            max_fee_per_gas: gas_price,
+            max_fee_per_gas,
             max_priority_fee_per_gas,
             to,
             value,
@@ -521,7 +522,7 @@ fn transaction_request_to_evm2(
             chain_id,
             nonce,
             gas_limit,
-            max_fee_per_gas: gas_price,
+            max_fee_per_gas,
             max_priority_fee_per_gas,
             to: to.to().copied().ok_or(EthTxEnvError::BlobTransactionIsCreate)?,
             value,
@@ -535,7 +536,7 @@ fn transaction_request_to_evm2(
                 chain_id,
                 nonce,
                 gas_limit,
-                max_fee_per_gas: gas_price,
+                max_fee_per_gas,
                 max_priority_fee_per_gas,
                 to: to.to().copied().ok_or(EthTxEnvError::AuthorizationListInvalidFields)?,
                 value,
