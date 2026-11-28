@@ -803,7 +803,11 @@ pub trait Call:
             let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                if let Some((bal, tx_index)) = bal.zip(tx_info.index) {
+                // A cached BAL reproduces account and storage writes, not executor-local state
+                // initialized during pre-execution. Chains that need that state replay the prefix.
+                if let Some((bal, tx_index)) = bal.zip(tx_info.index) &&
+                    !this.evm_config().requires_prefix_replay()
+                {
                     attach_bal_before_tx(&mut db, &bal, tx_index as usize);
 
                     let mut executor = this.block_executor(&block, &mut db, evm_env)?;
@@ -819,19 +823,7 @@ pub trait Call:
                 }
 
                 let block_txs = block.transactions_recovered();
-
-                let ctx = this
-                    .evm_config()
-                    .context_for_block(block.sealed_block())
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?;
-                let changes = this
-                    .evm_config()
-                    .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
-                    .map_err(Self::Error::from_eth_err)?;
-                db.commit_source(&reth_execution_types::BundleSource(&changes));
-
-                let mut executor = this.block_executor(&block, &mut db, evm_env)?;
+                let mut executor = this.executor_with_pre_execution(&block, &mut db, evm_env)?;
                 this.replay_transactions_until_with_executor(
                     &mut executor,
                     block_txs,
@@ -878,13 +870,33 @@ pub trait Call:
         Ok(())
     }
 
+    /// Creates a block executor for `block` on `db` and applies its pre-execution changes.
+    ///
+    /// Pre-execution runs on the returned executor, through
+    /// [`ConfigureEvm::apply_executor_pre_block_changes`], so executor-local state it initializes
+    /// is visible to the transactions executed afterwards. The account and storage writes stay in
+    /// the executor. Callers that only need a detached [`BundleState`] use
+    /// [`ConfigureEvm::pre_block_state_changes`].
+    fn executor_with_pre_execution<'a>(
+        &'a self,
+        block: &'a RecoveredBlock<BlockTy<Self::Primitives>>,
+        db: &'a mut StateCacheDb,
+        evm_env: EvmEnvFor<Self::Evm>,
+    ) -> Result<BlockExecutorFor<'a, Self::Evm>, Self::Error> {
+        let mut executor = self.block_executor(block, db, evm_env)?;
+        self.evm_config()
+            .apply_executor_pre_block_changes(&mut executor)
+            .map_err(Self::Error::from_eth_err)?;
+        Ok(executor)
+    }
+
     /// Creates a block executor for `block` on `db` with the given EVM environment.
     ///
     /// Replaying a block's own transactions through the executor rather than a bare EVM includes
     /// the changes the executor applies on top of each EVM result, so replayed results agree with
-    /// the block's receipts and state. The executor does not apply the block's pre-execution
-    /// changes: callers apply them to `db` first or position `db` with the block's BAL, see
-    /// [`attach_bal_before_tx`].
+    /// the block's receipts and state. This executor has not applied the block's pre-execution
+    /// changes: callers apply them with [`Self::executor_with_pre_execution`] or position `db`
+    /// with the block's BAL, see [`attach_bal_before_tx`].
     fn block_executor<'a>(
         &'a self,
         block: &'a RecoveredBlock<BlockTy<Self::Primitives>>,

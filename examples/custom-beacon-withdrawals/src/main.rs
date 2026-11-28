@@ -298,6 +298,10 @@ impl<'a> BlockExecutor for CustomBlockExecutor<'a> {
         self.inner.apply_pre_execution_changes()
     }
 
+    fn bundle_state(&self) -> BundleState {
+        self.inner.bundle_state()
+    }
+
     fn into_state(self) -> BundleState {
         self.inner.into_state()
     }

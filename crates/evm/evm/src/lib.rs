@@ -644,8 +644,39 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Ok(self.create_block_builder(evm, evm_env, parent, ctx))
     }
 
+    /// Applies pre-block changes to an existing executor.
+    ///
+    /// [`Self::pre_block_state_changes`] runs this on a temporary executor and returns its state.
+    /// RPC replay runs it on the executor that then executes the block's transactions, so
+    /// executor-local state initialized by [`BlockExecutor::apply_pre_execution_changes`] survives.
+    /// Chains that customize pre-block execution override this method: the default calls
+    /// [`BlockExecutor::apply_pre_execution_changes`].
+    #[cfg(feature = "std")]
+    fn apply_executor_pre_block_changes(
+        &self,
+        executor: &mut BlockExecutorFor<'_, Self>,
+    ) -> Result<(), BlockExecutionError> {
+        executor.apply_pre_execution_changes()
+    }
+
+    /// Returns whether RPC replay must execute pre-block changes and earlier transactions on one
+    /// executor even when a block access list is cached.
+    ///
+    /// A cached block access list reproduces account and storage writes. It does not reproduce
+    /// executor-local state initialized in [`BlockExecutor::apply_pre_execution_changes`] or
+    /// accumulated across earlier transactions. Return `true` when later transactions depend on
+    /// that state.
+    fn requires_prefix_replay(&self) -> bool {
+        false
+    }
+
     /// Applies block-level state changes required before transaction execution using the configured
     /// block executor.
+    ///
+    /// The returned state is detached from the executor. Callers that execute transactions
+    /// afterwards and need executor-local pre-block state should call
+    /// [`Self::apply_executor_pre_block_changes`] on that executor instead of committing this
+    /// state and creating another one.
     #[cfg(feature = "std")]
     fn pre_block_state_changes<'a, DB>(
         &'a self,
@@ -660,7 +691,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let factory = self.block_executor_factory();
         let evm = factory.evm_with_env(db, evm_env);
         let mut executor = factory.create_executor(evm, ctx);
-        executor.apply_pre_execution_changes()?;
+        self.apply_executor_pre_block_changes(&mut executor)?;
         Ok(executor.into_state())
     }
 

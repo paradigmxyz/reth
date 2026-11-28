@@ -1,7 +1,7 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
 use super::{Call, LoadBlock, LoadState, LoadTransaction};
-use crate::{FromEthApiError, FromEvmError};
+use crate::FromEvmError;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
 use alloy_eip7928::{bal::DecodedBal, BlockAccessIndex};
 use alloy_primitives::B256;
@@ -11,10 +11,10 @@ use evm2_inspectors::tracing::{
     TraceLimitBehavior, TraceLimits, TracingInspector, TracingInspectorConfig,
 };
 use futures::Future;
-use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockExecutor, BlockTransactionResult},
-    ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor, TxResultWithStateFor,
+    BlockExecutorFor, ConfigureEvm, Database, Evm, EvmEnvFor, EvmTypesFor, TxEnvFor,
+    TxResultWithStateFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
 use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
@@ -191,10 +191,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
 
     /// Positions the state of `db` right before the transaction at the target index.
     ///
-    /// If the block's cached BAL is given, it is attached to the database at the target index and
-    /// no transactions are executed, see [`attach_bal_before_tx`]. Otherwise all transactions
-    /// before the target transaction are executed through the block executor, see
-    /// [`Call::block_executor`], and their changes are written to the _runtime_ db
+    /// If the block's cached BAL is given and the chain does not
+    /// [`ConfigureEvm::requires_prefix_replay`], it is attached to the database at the target
+    /// index and no transactions are executed, see [`attach_bal_before_tx`]. Otherwise
+    /// pre-execution and the transactions before the target run on one block executor, see
+    /// [`Self::apply_pre_execution_changes`], and their changes are written to the _runtime_ db
     /// ([`StateCacheDb`]).
     ///
     /// If the target index is greater than or equal to the block's transaction count, all
@@ -206,15 +207,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         target_tx_index: usize,
         bal: Option<&DecodedBal<Arc<EvmBal>>>,
     ) -> Result<(), Self::Error> {
-        if let Some(bal) = bal {
+        // A cached BAL reproduces account and storage writes, not executor-local pre-block state.
+        if let Some(bal) = bal.filter(|_| !self.evm_config().requires_prefix_replay()) {
             attach_bal_before_tx(db, bal, target_tx_index);
             return Ok(())
         }
 
-        self.apply_pre_execution_changes(block, db)?;
-
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut executor = self.block_executor(block, db, evm_env)?;
+        let mut executor = self.apply_pre_execution_changes(block, db, evm_env)?;
         self.replay_transactions_until_with_executor(
             &mut executor,
             block.transactions_recovered(),
@@ -230,10 +230,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
     /// state right before the transaction.
     ///
     /// The transaction is executed through the block executor, see [`Call::block_executor`]. If
-    /// the block's cached BAL is given, the state is positioned by attaching the BAL at the target
-    /// index, see [`attach_bal_before_tx`], and the executor is told the transaction's position
-    /// with [`BlockExecutor::set_block_access_index`]. Otherwise all transactions before the
-    /// target transaction are replayed through the executor without inspection first.
+    /// the block's cached BAL is given and the chain does not
+    /// [`ConfigureEvm::requires_prefix_replay`], the state is positioned by attaching the BAL at
+    /// the target index, see [`attach_bal_before_tx`], and the executor is told the transaction's
+    /// position with [`BlockExecutor::set_block_access_index`]. Otherwise pre-execution and the
+    /// transactions before the target run on one executor, without inspection, first.
     ///
     /// Returns [`EthApiError::InvalidParams`] if the block has no transaction at that index.
     #[expect(clippy::type_complexity)]
@@ -256,26 +257,25 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             .into())
         };
 
-        if let Some(bal) = bal {
-            // the BAL also covers the block's pre-execution changes
-            attach_bal_before_tx(db, bal, target_tx_index);
-        } else {
-            self.apply_pre_execution_changes(block, db)?;
-        }
-
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let mut executor = self.block_executor(block, db, evm_env.clone())?;
-
-        if bal.is_some() {
+        // A cached BAL reproduces account and storage writes, not executor-local pre-block state.
+        let bal = bal.filter(|_| !self.evm_config().requires_prefix_replay());
+        let mut executor = if let Some(bal) = bal {
+            // the BAL also covers the block's pre-execution account and storage changes
+            attach_bal_before_tx(db, bal, target_tx_index);
+            let mut executor = self.block_executor(block, db, evm_env.clone())?;
             executor
                 .set_block_access_index(BlockAccessIndex::from_tx_index(target_tx_index as u64));
+            executor
         } else {
+            let mut executor = self.apply_pre_execution_changes(block, db, evm_env.clone())?;
             self.replay_transactions_until_with_executor(
                 &mut executor,
                 block.transactions_recovered(),
                 target_tx_index,
             )?;
-        }
+            executor
+        };
         let (inspector, result) = executor
             .inspect_transaction_without_commit(target_tx, inspector)
             .map(|(inspector, output)| (inspector, output.into_result()))
@@ -379,8 +379,6 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let block_timestamp = block.timestamp();
                 let base_fee = block.base_fee_per_gas();
 
-                this.apply_pre_execution_changes(&block, &mut db)?;
-
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
                 let max_transactions = highest_index.map_or_else(
@@ -393,7 +391,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
                 let tx_count = max_transactions.min(block.body().transaction_count());
 
                 let mut results = Vec::new();
-                let mut executor = this.block_executor(&block, &mut db, evm_env)?;
+                let mut executor = this.apply_pre_execution_changes(&block, &mut db, evm_env)?;
 
                 for (idx, tx) in block.transactions_recovered().take(max_transactions).enumerate() {
                     if is_cancelled() {
@@ -515,28 +513,22 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         TracingInspector::new(config).with_limits(self.trace_limits())
     }
 
-    /// Applies chain-specific state transitions required before executing a block.
+    /// Applies chain-specific state transitions on the executor that replays `block`.
     ///
-    /// Note: This should only be called when tracing an entire block vs individual transactions.
-    /// When tracing transactions on top of an already committed block state, those transitions are
-    /// already applied.
-    fn apply_pre_execution_changes(
-        &self,
-        block: &RecoveredBlock<ProviderBlock<Self::Provider>>,
-        db: &mut StateCacheDb,
-    ) -> Result<reth_trie_common::bundle_state::BundleState, Self::Error> {
-        let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
-        let ctx = self
-            .evm_config()
-            .context_for_block(block.sealed_block())
-            .map_err(RethError::other)
-            .map_err(Self::Error::from_eth_err)?;
-        let changes = self
-            .evm_config()
-            .pre_block_state_changes(&mut *db, evm_env, ctx)
-            .map_err(Self::Error::from_eth_err)?;
-        db.commit_source(&reth_execution_types::BundleSource(&changes));
-        Ok(changes)
+    /// The returned executor is the one that runs the block's transactions. Pre-execution goes
+    /// through [`Call::executor_with_pre_execution`], which calls
+    /// [`ConfigureEvm::apply_executor_pre_block_changes`], so executor-local pre-block state
+    /// survives and a chain's pre-block customization still runs.
+    ///
+    /// Call this when the database is the parent state. When tracing on top of an already
+    /// committed block, those transitions are already applied.
+    fn apply_pre_execution_changes<'a>(
+        &'a self,
+        block: &'a RecoveredBlock<ProviderBlock<Self::Provider>>,
+        db: &'a mut StateCacheDb,
+        evm_env: EvmEnvFor<Self::Evm>,
+    ) -> Result<BlockExecutorFor<'a, Self::Evm>, Self::Error> {
+        self.executor_with_pre_execution(block, db, evm_env)
     }
 }
 

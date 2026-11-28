@@ -174,6 +174,10 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
+    fn bundle_state(&self) -> reth_evm::BundleState {
+        self.block_state().clone().into_bundle()
+    }
+
     fn into_state(self) -> reth_evm::BundleState {
         self.inner.into_state()
     }
@@ -581,6 +585,10 @@ where
             self.apply_segment_boundary()?;
         }
         Ok(())
+    }
+
+    fn bundle_state(&self) -> reth_evm::BundleState {
+        self.inner.bundle_state()
     }
 
     fn into_state(self) -> reth_evm::BundleState {

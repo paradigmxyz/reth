@@ -44,9 +44,11 @@ use std::sync::Arc;
 const SETTLEMENT: U256 = U256::from_limbs([1_000_000_000, 0, 0, 0]);
 
 /// Traces and intermediate roots of a block's transactions include the changes the block executor
-/// applies on top of the EVM result, so they agree with the committed state, both when the replay
-/// executes the transactions before the target and when it positions the state with the block's
-/// BAL.
+/// applies on top of the EVM result, so they agree with the committed state.
+///
+/// The credit is executor-local state initialized during pre-execution. A cached BAL reproduces
+/// account and storage writes but not that state, so this executor requires prefix replay and the
+/// traces still include the credit when a BAL is cached.
 #[tokio::test]
 async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
@@ -128,7 +130,7 @@ async fn replays_include_block_executor_settlement() -> eyre::Result<()> {
     assert_eq!(roots.len(), 2);
     assert_eq!(roots.last(), Some(&state_root));
 
-    // With the block's BAL cached, only the target transaction is executed.
+    // The BAL is cached, and replay still runs pre-execution on the transaction executor.
     let _: serde_json::Value = client.request("eth_getBlockAccessList", (block_hash,)).await?;
     assert!(cache.get_recovered_block_and_maybe_bal(block_hash).await?.unwrap().1.is_some());
     assert_eq!(trace_transactions().await?, diffs);
@@ -262,6 +264,10 @@ impl ConfigureEvm for SettlingEvmConfig {
     {
         self.inner.evm_with_precompile_cache(db, evm_env, cache_map, metrics_enabled)
     }
+
+    fn requires_prefix_replay(&self) -> bool {
+        true
+    }
 }
 
 impl ConfigureEngineEvm<ExecutionData> for SettlingEvmConfig {
@@ -320,6 +326,7 @@ impl BlockExecutorFactory for SettlingExecutorFactory {
                 self.inner.chain_spec().as_ref(),
                 self.inner.receipt_builder(),
             ),
+            settlement: U256::ZERO,
         }
     }
 
@@ -339,8 +346,12 @@ type InnerExecutor<'a> = EthBlockExecutor<'a, BaseEvmTypes, &'a RethReceiptBuild
 
 /// Ethereum block executor that credits `SETTLEMENT` to the sender in each transaction's detached
 /// state, like a chain settling a per-transaction refund outside the EVM.
+///
+/// The amount is executor-local state. Canonical execution sets it during pre-execution and keeps
+/// this executor for the transactions.
 struct SettlingExecutor<'a> {
     inner: InnerExecutor<'a>,
+    settlement: U256,
 }
 
 impl<'a> BlockExecutor for SettlingExecutor<'a> {
@@ -385,7 +396,13 @@ impl<'a> BlockExecutor for SettlingExecutor<'a> {
     }
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
-        self.inner.apply_pre_execution_changes()
+        self.inner.apply_pre_execution_changes()?;
+        self.settlement = SETTLEMENT;
+        Ok(())
+    }
+
+    fn bundle_state(&self) -> BundleState {
+        self.inner.bundle_state()
     }
 
     fn into_state(self) -> BundleState {
@@ -416,7 +433,7 @@ impl<'a> BlockExecutor for SettlingExecutor<'a> {
             .expect("every transaction loads its sender");
         let original = account.original.cloned();
         let mut settled = account.current.cloned().expect("the sender exists after paying fees");
-        settled.balance += SETTLEMENT;
+        settled.balance += self.settlement;
         result.pending_state.insert_account(sender, original, Some(settled));
 
         Ok(EthTransactionResultWithState::new(result, tx_type, blob_gas_used))
