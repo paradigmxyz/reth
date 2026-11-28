@@ -1,8 +1,7 @@
 //! Prometheus recorder
 
+use crate::prometheus::{PrometheusBuilder, PrometheusHandle};
 use eyre::WrapErr;
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-use metrics_util::layers::{PrefixLayer, Stack};
 use std::sync::{atomic::AtomicBool, OnceLock};
 
 /// Installs the Prometheus recorder as the global recorder.
@@ -109,17 +108,14 @@ impl PrometheusRecorder {
 
     /// Installs Prometheus as the metrics recorder with a custom builder.
     ///
+    /// Metric names are prefixed with `reth`, replacing any prefix set on `builder`.
+    ///
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
     pub fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
-        let recorder = builder.build_recorder();
+        let recorder = builder.with_prefix("reth").build_recorder();
         let handle = recorder.handle();
-
-        // Build metrics stack
-        Stack::new(recorder)
-            .push(PrefixLayer::new("reth"))
-            .install()
-            .wrap_err("Couldn't set metrics recorder.")?;
+        metrics::set_global_recorder(recorder).wrap_err("Couldn't set metrics recorder.")?;
 
         Ok(Self::new(handle))
     }
@@ -132,7 +128,7 @@ mod tests {
     // may not be able to communicate with each other through the global recorder.
     //
     // This test ensures that `metrics-process` dependency plays well with the current
-    // `metrics-exporter-prometheus` dependency version.
+    // `metrics` dependency version.
     #[test]
     fn process_metrics() {
         let recorder = install_prometheus_recorder();
