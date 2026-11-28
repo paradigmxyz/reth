@@ -460,7 +460,7 @@ Returns traces matching given filter.
 
 Filters are objects with the following properties:
 
--   `fromBlock`: Returns traces from the given block (a number, hash, or a tag like `latest`).
+-   `fromBlock`: Returns traces from the given block: a number or one of the `earliest`, `latest`, `safe` and `finalized` tags. `pending` is rejected.
 -   `toBlock`: Returns traces to the given block.
 -   `blockHash`: Returns traces from the block with this hash. Cannot be combined with `fromBlock` or `toBlock`.
 -   `fromAddress`: Sent from these addresses

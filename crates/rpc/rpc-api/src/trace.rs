@@ -1,4 +1,4 @@
-use alloy_eips::BlockId;
+use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_primitives::{map::HashSet, Bytes, B256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockOverrides};
 use alloy_rpc_types_trace::{
@@ -9,6 +9,7 @@ use alloy_rpc_types_trace::{
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_rpc_eth_api::CallManyRequest;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::value::RawValue;
 
 /// Ethereum trace API
 #[rpc(server, namespace = "trace")]
@@ -75,9 +76,13 @@ pub trait TraceApi<TxReq> {
 
     /// Returns traces matching given filter.
     ///
-    /// This is similar to `eth_getLogs` but for traces. Omitted range bounds default to latest.
+    /// This is similar to `eth_getLogs` but for traces. Omitted range bounds default to latest,
+    /// and a bound may also be one of the `earliest`, `latest`, `safe` and `finalized` tags.
     #[method(name = "filter")]
-    async fn trace_filter(&self, filter: TraceFilter) -> RpcResult<Vec<LocalizedTransactionTrace>>;
+    async fn trace_filter(
+        &self,
+        filter: TraceFilterRequest,
+    ) -> RpcResult<Vec<LocalizedTransactionTrace>>;
 
     /// Returns the transaction trace at the given `traceAddress` path.
     ///
@@ -150,6 +155,99 @@ impl<'de> Deserialize<'de> for TraceAddressIndex {
     }
 }
 
+/// The parameter of `trace_filter`: a [`TraceFilter`] whose `fromBlock` and `toBlock` may also be
+/// a block tag.
+///
+/// [`TraceFilter`] types its bounds as block numbers, so a bound given as one of the tags
+/// `earliest`, `latest`, `safe`, `finalized` or `pending` is taken out before the rest is parsed as
+/// a [`TraceFilter`], and its `from_block` or `to_block` is then `None`. Numeric bounds are parsed
+/// by [`TraceFilter`] as before. The server resolves the tags; it rejects `pending`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TraceFilterRequest {
+    /// The filter, without the bounds given as tags.
+    pub filter: TraceFilter,
+    /// The `fromBlock` bound, when given as a tag.
+    pub from_tag: Option<BlockNumberOrTag>,
+    /// The `toBlock` bound, when given as a tag.
+    pub to_tag: Option<BlockNumberOrTag>,
+}
+
+impl From<TraceFilter> for TraceFilterRequest {
+    fn from(filter: TraceFilter) -> Self {
+        Self { filter, from_tag: None, to_tag: None }
+    }
+}
+
+impl<'de> Deserialize<'de> for TraceFilterRequest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Members are kept as their raw JSON text, so the rest is parsed by TraceFilter exactly as
+        // it would be without the tags.
+        let mut members = deserializer.deserialize_map(UniqueKeysVisitor)?;
+        let mut take_tag = |key: &str| {
+            let index = members.iter().position(|(name, _)| name == key)?;
+            // A string bound is decoded first, so an escaped spelling of a tag is a tag too.
+            let bound = serde_json::from_str::<String>(members[index].1.get()).ok()?;
+            let tag = match bound.as_str() {
+                "earliest" => BlockNumberOrTag::Earliest,
+                "latest" => BlockNumberOrTag::Latest,
+                "safe" => BlockNumberOrTag::Safe,
+                "finalized" => BlockNumberOrTag::Finalized,
+                "pending" => BlockNumberOrTag::Pending,
+                _ => return None,
+            };
+            members.remove(index);
+            Some(tag)
+        };
+        let from_tag = take_tag("fromBlock");
+        let to_tag = take_tag("toBlock");
+        let mut json = String::from("{");
+        for (index, (name, value)) in members.iter().enumerate() {
+            if index > 0 {
+                json.push(',');
+            }
+            json.push_str(&serde_json::to_string(name).map_err(de::Error::custom)?);
+            json.push(':');
+            json.push_str(value.get());
+        }
+        json.push('}');
+        let filter = serde_json::from_str(&json).map_err(de::Error::custom)?;
+        Ok(Self { filter, from_tag, to_tag })
+    }
+}
+
+/// The members of a [`TraceFilter`] object.
+const TRACE_FILTER_FIELDS: &[&str] =
+    &["fromBlock", "toBlock", "blockHash", "fromAddress", "toAddress", "mode", "after", "count"];
+
+/// Collects a JSON object's members as raw JSON, rejecting a repeated member as [`TraceFilter`]'s
+/// typed decoder does.
+struct UniqueKeysVisitor;
+
+impl<'de> de::Visitor<'de> for UniqueKeysVisitor {
+    type Value = Vec<(String, Box<RawValue>)>;
+
+    fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter.write_str("a trace filter object")
+    }
+
+    fn visit_map<A: de::MapAccess<'de>>(self, mut access: A) -> Result<Self::Value, A::Error> {
+        let mut members = Vec::<(String, Box<RawValue>)>::new();
+        while let Some(key) = access.next_key::<String>()? {
+            // Unknown members are rejected here, as TraceFilter rejects them, which also bounds the
+            // members collected and the duplicate check.
+            if !TRACE_FILTER_FIELDS.contains(&key.as_str()) {
+                return Err(de::Error::unknown_field(&key, TRACE_FILTER_FIELDS));
+            }
+            let value = access.next_value::<Box<RawValue>>()?;
+            if members.iter().any(|(name, _)| *name == key) {
+                return Err(de::Error::custom(format_args!("duplicate field `{key}`")))
+            }
+            members.push((key, value));
+        }
+        Ok(members)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -185,5 +283,38 @@ mod tests {
             serde_json::from_value::<TraceAddressIndex>(json!(overflow)).unwrap_err().to_string(),
             "number too large to fit in target type"
         );
+    }
+
+    #[test]
+    fn trace_filter_request_rejects_duplicate_members() {
+        for json in [
+            r#"{"blockHash":"0x0000000000000000000000000000000000000000000000000000000000000001","blockHash":null,"fromBlock":"latest"}"#,
+            r#"{"fromBlock":"latest","fromBlock":"0x1"}"#,
+            r#"{"toBlock":"0x1","toBlock":"0x2"}"#,
+        ] {
+            let err = serde_json::from_str::<TraceFilterRequest>(json).unwrap_err();
+            assert!(err.to_string().starts_with("duplicate field"), "{json}: {err}");
+        }
+        let request =
+            serde_json::from_str::<TraceFilterRequest>(r#"{"fromBlock":"safe","toBlock":"0x2"}"#)
+                .unwrap();
+        assert_eq!(request.from_tag, Some(BlockNumberOrTag::Safe));
+        assert_eq!(request.filter.to_block, Some(2));
+    }
+
+    #[test]
+    fn trace_filter_request_rejects_raw_value_marker() {
+        let json =
+            r#"{"blockHash":{"$serde_json::private::RawValue":"null"},"fromBlock":"latest"}"#;
+        assert!(serde_json::from_str::<TraceFilterRequest>(json).is_err());
+    }
+
+    #[test]
+    fn trace_filter_request_member_names() {
+        let request =
+            serde_json::from_str::<TraceFilterRequest>(r#"{"fromBlock":"latest"}"#).unwrap();
+        assert_eq!(request.from_tag, Some(BlockNumberOrTag::Latest));
+        let err = serde_json::from_str::<TraceFilterRequest>(r#"{"unknown":0}"#).unwrap_err();
+        assert!(err.to_string().starts_with("unknown field `unknown`"), "{err}");
     }
 }
