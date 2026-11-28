@@ -231,7 +231,7 @@ where
                 next_log_index,
                 meta,
             }],
-            block.sealed_block(),
+            block,
         )
         .map(|mut receipts| receipts.pop())
         .transpose()

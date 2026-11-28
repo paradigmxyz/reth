@@ -2,12 +2,12 @@
 
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
-    BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize, BlobTxCellSidecar,
-    PooledBlobSidecar, RebuiltSidecars,
+    without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
+    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant, Cell},
+    eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
 };
@@ -331,6 +331,28 @@ impl BlobStore for DiskFileBlobStore {
 
     fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.inner.get_one(tx)
+    }
+
+    fn get_without_blobs(
+        &self,
+        tx: B256,
+    ) -> Result<Option<BlobTransactionSidecarEip7594>, BlobStoreError> {
+        // The blob cache can outlive a deleted sidecar, so cells stored since are read from disk.
+        if !self.inner.cell_sidecars.read().contains_key(&tx) {
+            // Cloned out, so the proofs aren't copied under the lock.
+            let cached = self.inner.blob_cache.lock().get(&tx).cloned();
+            if let Some(sidecar) = cached {
+                return Ok(sidecar.as_eip7594().map(without_blobs))
+            }
+        }
+        Ok(self.inner.read_one(tx)?.and_then(|stored| match stored {
+            StoredSidecar::Cells(cells) => Some(cells.without_blobs()),
+            // Caches full sidecars like `get`, so repeated requests don't hit the disk.
+            full => self
+                .inner
+                .full_sidecar(tx, full)
+                .and_then(|sidecar| sidecar.as_eip7594().map(without_blobs)),
+        }))
     }
 
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError> {
@@ -1396,6 +1418,20 @@ mod tests {
     }
 
     #[test]
+    fn disk_get_without_blobs_can_fallback_to_disk() {
+        let (store, _dir) = tmp_store();
+
+        let tx_hash = TxHash::random();
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let expected = sidecar.as_eip7594().map(without_blobs);
+        store.insert(tx_hash, sidecar.into()).unwrap();
+        store.clear_cache();
+
+        assert_eq!(store.get_without_blobs(tx_hash).unwrap(), expected);
+        assert!(store.is_cached(&tx_hash));
+    }
+
+    #[test]
     fn disk_get_blobs_v4_can_fallback_to_disk() {
         let (store, _dir) = tmp_store();
 
@@ -1549,8 +1585,8 @@ mod tests {
     #[test]
     fn disk_cells_are_stored_over_a_deleted_cached_sidecar() {
         let (store, _dir) = tmp_store();
-        let (sidecar, _, _) = eip7594_single_blob_sidecar();
-        let tx = TxHash::random();
+        // A legacy sidecar, which has no body to serve without blobs.
+        let (tx, sidecar) = rng_blobs(1).pop().unwrap();
         store.insert(tx, sidecar.into()).unwrap();
         store.delete(tx).unwrap();
         store.cleanup();
@@ -1558,6 +1594,8 @@ mod tests {
 
         let cells = single_cell_sidecar();
         store.insert_cells(tx, cells.clone()).unwrap();
+        // The stale cache entry doesn't hide the cells.
+        assert_eq!(store.get_without_blobs(tx).unwrap(), Some(cells.without_blobs()));
         // The cells outlive the eviction of the deleted sidecar.
         store.clear_cache();
         let cell_mask = BlobCellMask::from_bits(1);

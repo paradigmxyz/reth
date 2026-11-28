@@ -30,7 +30,7 @@ pub mod broadcast;
 pub use broadcast::*;
 
 pub mod cells;
-pub use cells::CellMasks;
+pub use cells::{encode_cell_mask, CellMasks};
 
 pub mod transactions;
 pub use transactions::*;
