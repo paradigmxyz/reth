@@ -8,6 +8,7 @@ pub use nybbles::Nibbles;
 /// In depth-first ordering:
 /// - Descendants come before their ancestors (children before parents)
 /// - Siblings are ordered lexicographically
+#[inline]
 pub fn depth_first_cmp(a: &Nibbles, b: &Nibbles) -> Ordering {
     if a.len() == b.len() {
         return a.cmp(b)

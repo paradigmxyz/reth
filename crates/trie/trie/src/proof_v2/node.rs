@@ -40,58 +40,52 @@ pub(crate) enum ProofTrieBranchChild<RF> {
     },
 }
 
+/// Result of converting a branch child into its RLP node, mask bits, and reusable child buffer.
+pub(crate) type ChildIntoRlpResult =
+    Result<(RlpNode, bool, bool, Option<Vec<RlpNode>>), StateProofError>;
+
 impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// Converts this child into its RLP node representation.
     ///
     /// This potentially also returns an `RlpNode` buffer which can be re-used for other
     /// [`ProofTrieBranchChild`]s.
+    /// Converts this child into its RLP node representation, also returning its
+    /// `(hash_mask_bit, tree_mask_bit)` contribution and any reusable `RlpNode` buffer.
+    #[inline]
     pub(crate) fn into_rlp(
         self,
         buf: &mut Vec<u8>,
-    ) -> Result<(RlpNode, Option<Vec<RlpNode>>), StateProofError> {
+        leaf_value_buf: &mut Vec<u8>,
+    ) -> ChildIntoRlpResult {
         match self {
             Self::Leaf { short_key, value } => {
-                // RLP encode the value itself
-                value.encode(buf)?;
-                let value_enc_len = buf.len();
-
-                // Determine the required buffer size for the encoded leaf
-                let leaf_enc_len = LeafNodeRef::new(&short_key, buf).length();
-
-                // We want to re-use buf for the encoding of the leaf node as well. To do this we
-                // will keep appending to it, leaving the already encoded value in-place. First we
-                // must ensure the buffer is big enough, then we'll split.
-                buf.resize(value_enc_len + leaf_enc_len, 0);
-
-                // SAFETY we have just resized the above to be greater than `value_enc_len`, so it
-                // must be in-bounds.
-                let (value_buf, mut leaf_buf) =
-                    unsafe { buf.split_at_mut_unchecked(value_enc_len) };
-
-                // Encode the leaf into the right side of the split buffer, and return the RlpNode.
-                LeafNodeRef::new(&short_key, value_buf).encode(&mut leaf_buf);
-                Ok((RlpNode::from_rlp(&buf[value_enc_len..]), None))
+                leaf_value_buf.clear();
+                value.encode(leaf_value_buf)?;
+                LeafNodeRef::new(&short_key, leaf_value_buf).encode(buf);
+                Ok((RlpNode::from_rlp(buf), false, false, None))
             }
-            Self::Branch { node, short_key, .. } => {
+            Self::Branch { node, short_key, masks } => {
                 node.encode(buf);
+                let tree_mask_bit = masks.is_some_and(|m| !m.is_empty());
+                let is_hash = buf.len() >= 32;
                 let branch_rlp = RlpNode::from_rlp(buf);
                 if short_key.is_empty() {
-                    return Ok((branch_rlp, Some(node.stack)));
+                    return Ok((branch_rlp, is_hash, tree_mask_bit, Some(node.stack)));
                 }
                 buf.clear();
                 ExtensionNodeRef::new(&short_key, branch_rlp.as_slice()).encode(buf);
-                Ok((RlpNode::from_rlp(buf), Some(node.stack)))
+                Ok((RlpNode::from_rlp(buf), false, tree_mask_bit, Some(node.stack)))
             }
-            Self::RlpNode { node, short_key, hash_mask_bit, .. } => {
+            Self::RlpNode { node, short_key, hash_mask_bit, tree_mask_bit } => {
                 if short_key.is_empty() {
-                    return Ok((node, None))
+                    return Ok((node, hash_mask_bit, tree_mask_bit, None))
                 }
 
                 // Only branch hashes sourced from a cached hash mask can have an external short
                 // key. Other committed nodes already encode their key internally.
                 debug_assert!(hash_mask_bit);
                 ExtensionNodeRef::new(&short_key, node.as_slice()).encode(buf);
-                Ok((RlpNode::from_rlp(buf), None))
+                Ok((RlpNode::from_rlp(buf), false, tree_mask_bit, None))
             }
         }
     }
@@ -154,6 +148,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     }
 
     /// Returns the child's short key.
+    #[inline]
     pub(crate) const fn short_key(&self) -> &Nibbles {
         match self {
             Self::Leaf { short_key, .. } |
@@ -163,6 +158,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     }
 
     /// Returns this child's hash and tree mask contributions.
+    #[inline]
     pub(crate) fn mask_bits(&self) -> (bool, bool) {
         match self {
             Self::Leaf { .. } => (false, false),
@@ -181,12 +177,24 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     /// # Panics
     ///
     /// - If the given len is longer than the short key
+    #[inline]
     pub(crate) fn trim_short_key_prefix(&mut self, len: usize) {
         match self {
             Self::Leaf { short_key, .. } |
             Self::Branch { short_key, .. } |
             Self::RlpNode { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) const fn set_short_key(&mut self, new_short_key: Nibbles) {
+        match self {
+            Self::Leaf { short_key, .. } |
+            Self::Branch { short_key, .. } |
+            Self::RlpNode { short_key, .. } => {
+                *short_key = new_short_key;
             }
         }
     }
@@ -209,6 +217,7 @@ pub(crate) struct ProofTrieBranch {
 /// # Panics
 ///
 /// Panics if the given `len` is greater than the length of the `Nibbles`.
+#[inline]
 pub(crate) fn trim_nibbles_prefix(n: &Nibbles, len: usize) -> Nibbles {
     debug_assert!(n.len() >= len);
     n.slice_unchecked(len, n.len())
@@ -258,7 +267,7 @@ mod tests {
                 short_key: key,
                 masks,
             };
-            let (rlp, freed) = child.into_rlp(&mut Vec::new()).unwrap();
+            let (rlp, _, _, freed) = child.into_rlp(&mut Vec::new(), &mut Vec::new()).unwrap();
             assert_eq!(rlp, RlpNode::from_rlp(&alloy_rlp::encode(extension)));
             assert_eq!(freed.unwrap().len(), 2);
         }
