@@ -192,8 +192,11 @@ where
             config,
             executor: self.executor.clone(),
             deadline,
-            // ticks immediately
-            interval: tokio::time::interval(self.config.interval),
+            // The first build is spawned below, so the first tick is due one interval later.
+            interval: tokio::time::interval_at(
+                tokio::time::Instant::now() + self.config.interval,
+                self.config.interval,
+            ),
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
