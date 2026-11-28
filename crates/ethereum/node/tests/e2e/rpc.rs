@@ -333,6 +333,53 @@ async fn test_debug_trace_chain_subscription() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_debug_trace_block_exceeds_max_response_size() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_max_response_size = 1.into();
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider_with_wallet(wallet.signer(0));
+
+    // The init code logs 600 KB of zero memory, which `callTracer` writes as 1.2 MB of hex. Unlike
+    // the default struct logger, the tracer does not stop at the response size. The receipt holds
+    // the log too, so it is too big to fetch.
+    let init_code = bytes!("620927c06000a000");
+    let _ = provider
+        .send_transaction(
+            TransactionRequest::default().with_deploy_code(init_code).with_gas_limit(10_000_000),
+        )
+        .await?;
+    node.advance_block().await?;
+
+    let with_log = CallConfig { with_log: Some(true), ..Default::default() };
+    let err = provider
+        .debug_trace_block_by_number(
+            BlockNumberOrTag::Latest,
+            GethDebugTracingOptions::call_tracer(with_log),
+        )
+        .await
+        .unwrap_err();
+    let err = err.as_error_resp().unwrap();
+    assert_eq!(err.code, -32008);
+    assert_eq!(err.message, "Response is too big");
+
+    let traces = provider
+        .debug_trace_block_by_number(
+            BlockNumberOrTag::Latest,
+            GethDebugTracingOptions::call_tracer(CallConfig::default()),
+        )
+        .await?;
+    assert_eq!(traces.len(), 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_debug_trace_eip8037_gas() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

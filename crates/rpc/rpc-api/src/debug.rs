@@ -9,7 +9,7 @@ use alloy_rpc_types_trace::{
     geth::{GethDebugTracingCallOptions, GethDebugTracingOptions},
 };
 use evm2_inspectors::tracing::DebugTrace;
-use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use jsonrpsee::{core::RpcResult, proc_macros::rpc, ResponseStream};
 use reth_rpc_eth_api::CallManyRequest;
 use reth_trie_common::{updates::TrieUpdates, ExecutionWitnessMode, HashedPostState};
 
@@ -82,22 +82,30 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
     /// the block that is already present in the database. For the second parameter see
     /// [`GethDebugTracingOptions`].
-    #[method(name = "traceBlockByHash")]
+    ///
+    /// The result is a list of [`TraceResult`]s, one per transaction. If the list exceeds 1 MiB,
+    /// HTTP sends each one as soon as its transaction is traced, so it aborts the response if a
+    /// later transaction fails.
+    #[method(name = "traceBlockByHash", streaming)]
     async fn debug_trace_block_by_hash(
         &self,
         block: B256,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>>;
+    ) -> RpcResult<ResponseStream>;
 
     /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
     /// [`BlockNumberOrTag`] and will replay the block that is already present in the database.
     /// For the second parameter see [`GethDebugTracingOptions`].
-    #[method(name = "traceBlockByNumber")]
+    ///
+    /// The result is a list of [`TraceResult`]s, one per transaction. If the list exceeds 1 MiB,
+    /// HTTP sends each one as soon as its transaction is traced, so it aborts the response if a
+    /// later transaction fails.
+    #[method(name = "traceBlockByNumber", streaming)]
     async fn debug_trace_block_by_number(
         &self,
         block: BlockNumberOrTag,
         opts: Option<GethDebugTracingOptions>,
-    ) -> RpcResult<Vec<TraceResult<DebugTrace, String>>>;
+    ) -> RpcResult<ResponseStream>;
 
     /// The `debug_traceTransaction` debugging method will attempt to run the transaction in the
     /// exact same manner as it was executed on the network. It will replay any transaction that

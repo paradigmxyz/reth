@@ -289,13 +289,19 @@ where
                 // The call is polled first, so one that answers at once doesn't have to register
                 // for the close of the connection.
                 biased;
-                rp = handle_rpc_call(
-                    data,
-                    is_single,
-                    batch_requests_config,
-                    max_request_body_size,
-                    &*rpc_service,
-                ) => rp,
+                // WebSocket sends a response as one message, so a streamed one is buffered.
+                rp = async {
+                    handle_rpc_call(
+                        data,
+                        is_single,
+                        batch_requests_config,
+                        max_request_body_size,
+                        &*rpc_service,
+                    )
+                    .await
+                    .buffer()
+                    .await
+                } => rp,
                 _ = sink.closed() => return,
             };
 

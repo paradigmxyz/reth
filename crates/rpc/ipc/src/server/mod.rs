@@ -358,6 +358,8 @@ where
                 )
                 .await
             };
+            // IPC writes a response as one message, so a streamed one is buffered.
+            let rp = rp.buffer().await;
             drop(conn);
 
             (rp.is_method_call() || rp.is_batch()).then(|| rp.into_json())

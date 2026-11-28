@@ -37,13 +37,13 @@ use crate::{
     middleware::rpc::RpcServiceBuilder, BatchRequestConfig, RegisterMethodError, RpcModule,
     ServerBuilder, ServerConfig, ServerHandle,
 };
-use jsonrpsee_core::RpcResult;
+use jsonrpsee_core::{server::ResponseStream, RpcResult};
 use jsonrpsee_test_utils::{
     helpers::*,
     mocks::{Id, StatusCode},
     TimeoutFutureExt,
 };
-use jsonrpsee_types::ErrorObjectOwned;
+use jsonrpsee_types::{ErrorCode, ErrorObjectOwned};
 use serde_json::Value as JsonValue;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -550,12 +550,23 @@ async fn can_set_the_max_response_size() {
     let server = ServerBuilder::with_config(config).build(addr).await.unwrap();
     let mut module = RpcModule::new(());
     module.register_method("anything", |_p, _cx| "a".repeat(101)).unwrap();
+    module
+        .register_streaming_method("stream_error", |_, _| async move {
+            Err(ErrorObjectOwned::owned(1, "a".repeat(101), None::<()>))
+        })
+        .unwrap();
     let addr = server.local_addr().unwrap();
     let uri = to_http_uri(addr);
     let handle = server.start(module);
 
     // Oversized response.
     let req = r#"{"jsonrpc":"2.0", "method":"anything", "id":1}"#;
+    let response =
+        http_request(req.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
+    assert_eq!(response.body, oversized_response(Id::Num(1), 100));
+
+    // Oversized error of a streaming method.
+    let req = r#"{"jsonrpc":"2.0", "method":"stream_error", "id":1}"#;
     let response =
         http_request(req.into(), uri.clone()).with_default_timeout().await.unwrap().unwrap();
     assert_eq!(response.body, oversized_response(Id::Num(1), 100));
@@ -1022,6 +1033,113 @@ async fn rpc_middleware_is_built_once_per_connection() {
         assert_eq!(responses.matches("HTTP/1.1 200 OK").count(), 2);
         assert_eq!(built.load(Ordering::SeqCst), connections);
     }
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+/// First part of the streaming methods, `[` and a number past the 1 MiB that the server buffers.
+fn first_part() -> String {
+    format!("[{}", "1".repeat(1024 * 1024))
+}
+
+/// Starts a server with `stream_parts`, which sends [`first_part`], waits for `release`, and then
+/// sends `,2]`, and `stream_fails`, which sends [`first_part`] and then fails.
+async fn streaming_server(release: Arc<Notify>) -> (SocketAddr, ServerHandle) {
+    let server = ServerBuilder::default().build("127.0.0.1:0").await.unwrap();
+    let addr = server.local_addr().unwrap();
+    let mut module = RpcModule::new(release);
+    module
+        .register_streaming_method("stream_parts", |_, release| async move {
+            RpcResult::Ok(ResponseStream::new(move |sink| async move {
+                sink.send(first_part().into()).map_err(|_| ErrorCode::InternalError)?;
+                release.notified().await;
+                sink.send(",2]".into()).map_err(|_| ErrorCode::InternalError)
+            }))
+        })
+        .unwrap();
+    module
+        .register_streaming_method("stream_fails", |_, _| async move {
+            RpcResult::Ok(ResponseStream::new(move |sink| async move {
+                sink.send(first_part().into()).map_err(|_| ErrorCode::InternalError)?;
+                Err(ErrorCode::InternalError)
+            }))
+        })
+        .unwrap();
+    (addr, server.start(module))
+}
+
+/// Sends a call to `method` with HTTP `version` on a raw connection, so the test sees the framing.
+async fn raw_call(addr: SocketAddr, version: &str, method: &str) -> TcpStream {
+    let mut client = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
+    let body = format!(r#"{{"jsonrpc":"2.0","method":"{method}","id":1}}"#);
+    let request = format!(
+        "POST / {version}\r\nhost: localhost\r\ncontent-type: application/json\r\n\
+         connection: close\r\ncontent-length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    client.write_all(request.as_bytes()).with_default_timeout().await.unwrap().unwrap();
+    client
+}
+
+/// Reads from `client` until the bytes read so far contain `needle`.
+async fn read_until(client: &mut TcpStream, response: &mut Vec<u8>, needle: &[u8]) {
+    while !response.windows(needle.len()).any(|window| window == needle) {
+        let mut buf = [0; 1024];
+        let n = client.read(&mut buf).with_default_timeout().await.unwrap().unwrap();
+        assert_ne!(n, 0, "connection closed before {:?}", String::from_utf8_lossy(needle));
+        response.extend_from_slice(&buf[..n]);
+    }
+}
+
+#[tokio::test]
+async fn http_streaming_method_sends_parts_as_produced() {
+    init_logger();
+    let release = Arc::new(Notify::new());
+    let (addr, handle) = streaming_server(release.clone()).await;
+
+    let mut client = raw_call(addr, "HTTP/1.1", "stream_parts").await;
+    let mut response = Vec::new();
+    // The first part arrives while the producer still waits.
+    read_until(&mut client, &mut response, br#"{"jsonrpc":"2.0","id":1,"result":[1"#).await;
+    let head = String::from_utf8(response.clone()).unwrap();
+    assert!(head.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(head.contains("transfer-encoding: chunked\r\n"), "{head}");
+
+    release.notify_one();
+    client.read_to_end(&mut response).with_default_timeout().await.unwrap().unwrap();
+    let body_start = response.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
+    let body = String::from_utf8(response[body_start..].to_vec()).unwrap();
+    let chunks: Vec<_> = body.split("\r\n").collect();
+    // Chunks alternate between their size and their data, and the body ends with an empty chunk.
+    let data: String = chunks.iter().skip(1).step_by(2).copied().collect();
+    assert_eq!(data, format!(r#"{{"jsonrpc":"2.0","id":1,"result":{},2]}}"#, first_part()));
+    assert!(body.ends_with("\r\n0\r\n\r\n"), "{body}");
+
+    handle.stop().unwrap();
+    handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test]
+async fn http_streaming_method_aborts_after_failure() {
+    init_logger();
+    let (addr, handle) = streaming_server(Arc::new(Notify::new())).await;
+
+    let mut client = raw_call(addr, "HTTP/1.1", "stream_fails").await;
+    let mut response = Vec::new();
+    // hyper closes the connection without the empty chunk that ends a complete body. It may not
+    // flush the parts before that either, and a reset is a valid way to close it too.
+    let _ = client.read_to_end(&mut response).with_default_timeout().await.unwrap();
+    let response = String::from_utf8(response).unwrap();
+    assert!(!response.ends_with("0\r\n\r\n"), "{response}");
+
+    // HTTP/1.0 can't show the abort, so it gets the error instead.
+    let mut client = raw_call(addr, "HTTP/1.0", "stream_fails").await;
+    let mut response = String::new();
+    client.read_to_string(&mut response).with_default_timeout().await.unwrap().unwrap();
+    let error = r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"Internal error"}}"#;
+    let length = format!("content-length: {}\r\n", error.len());
+    assert!(response.contains(&length) && response.ends_with(error), "{response}");
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();

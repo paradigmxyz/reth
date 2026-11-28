@@ -311,6 +311,15 @@ pub fn reject_too_big_batch_response(limit: usize) -> ErrorObjectOwned {
     )
 }
 
+/// Helper to get a `JSON-RPC` error object when the maximum response size has been exceeded.
+pub fn reject_too_big_response(limit: usize) -> ErrorObjectOwned {
+    ErrorObjectOwned::owned(
+        OVERSIZED_RESPONSE_CODE,
+        OVERSIZED_RESPONSE_MSG,
+        Some(format!("Exceeded max limit of {limit}")),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::{ErrorCode, ErrorObject};
