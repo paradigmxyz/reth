@@ -518,8 +518,9 @@ impl Decodable for Ping {
         let mut this =
             Self { from, to: Decodable::decode(b)?, expire: Decodable::decode(b)?, enr_sq: None };
 
-        // only decode the ENR sequence if there's more data in the datagram to decode else skip
-        if b.has_remaining() {
+        // only decode the ENR sequence if the list has more items, anything after the list is
+        // ignored per EIP-8
+        if started_len - b.len() < rlp_head.payload_length {
             this.enr_sq = Some(Decodable::decode(b)?);
         }
 
@@ -601,8 +602,9 @@ impl Decodable for Pong {
             enr_sq: None,
         };
 
-        // only decode the ENR sequence if there's more data in the datagram to decode else skip
-        if b.has_remaining() {
+        // only decode the ENR sequence if the list has more items, anything after the list is
+        // ignored per EIP-8
+        if started_len - b.len() < rlp_head.payload_length {
             this.enr_sq = Some(Decodable::decode(b)?);
         }
 
@@ -1081,6 +1083,38 @@ mod tests {
                 },
             ];
             assert_matches!(decoded.msg, Message::Neighbours(Neighbours { nodes, expire: 1136239445 }) if nodes == expected_nodes);
+        }
+
+        // checks that data after the RLP list is ignored according to eip-8, also when the list
+        // has no `enr_seq`
+        #[test]
+        fn eip8_decode_ping_pong_with_trailing_data() {
+            let mut rng = rand::rng();
+            let junk = [0x01, 0x02, 0x03];
+
+            let ping = Ping {
+                from: rng_endpoint(&mut rng),
+                to: rng_endpoint(&mut rng),
+                expire: 1136239445,
+                enr_sq: None,
+            };
+            let mut buf = alloy_rlp::encode(&ping);
+            buf.extend_from_slice(&junk);
+            let mut slice = buf.as_slice();
+            assert_eq!(Ping::decode(&mut slice).unwrap(), ping);
+            assert_eq!(slice, junk);
+
+            let pong = Pong {
+                to: rng_endpoint(&mut rng),
+                echo: B256::random(),
+                expire: 1136239445,
+                enr_sq: None,
+            };
+            let mut buf = alloy_rlp::encode(&pong);
+            buf.extend_from_slice(&junk);
+            let mut slice = buf.as_slice();
+            assert_eq!(Pong::decode(&mut slice).unwrap(), pong);
+            assert_eq!(slice, junk);
         }
 
         // checks that junk data at the end of the packet is discarded according to eip-8, even
