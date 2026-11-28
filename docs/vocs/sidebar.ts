@@ -129,6 +129,10 @@ export const sidebar: SidebarItem[] = [
                         text: "Profiling",
                         link: "/run/faq/profiling"
                     },
+                    {
+                        text: "Transparent Huge Pages",
+                        link: "/run/faq/hugepages"
+                    },
                 ]
             }
         ]
