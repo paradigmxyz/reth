@@ -152,9 +152,10 @@ impl SessionError for EthStreamError {
                         P2PStreamError::EmptyProtocolMessage |
                         P2PStreamError::ParseSharedCapability(_) |
                         P2PStreamError::CapabilityNotShared |
+                        // `UselessPeer` is not fatal here: peer rotation sends it to healthy
+                        // peers on established sessions.
                         P2PStreamError::Disconnected(
-                            DisconnectReason::UselessPeer |
-                                DisconnectReason::IncompatibleP2PProtocolVersion |
+                            DisconnectReason::IncompatibleP2PProtocolVersion |
                                 DisconnectReason::ProtocolBreach
                         ) |
                         P2PStreamError::MismatchedProtocolVersion { .. }
@@ -188,13 +189,13 @@ impl SessionError for EthStreamError {
         if let Some(err) = self.as_disconnected() {
             return match err {
                 DisconnectReason::TooManyPeers |
+                DisconnectReason::UselessPeer |
                 DisconnectReason::AlreadyConnected |
                 DisconnectReason::PingTimeout |
                 DisconnectReason::DisconnectRequested |
                 DisconnectReason::TcpSubsystemError => Some(BackoffKind::Low),
 
                 DisconnectReason::ProtocolBreach |
-                DisconnectReason::UselessPeer |
                 DisconnectReason::IncompatibleP2PProtocolVersion |
                 DisconnectReason::NullNodeIdentity |
                 DisconnectReason::ClientQuitting |
@@ -268,7 +269,11 @@ impl SessionError for PendingSessionHandshakeError {
 
     fn is_fatal_protocol_error(&self) -> bool {
         match self {
-            Self::Eth(eth) => eth.is_fatal_protocol_error(),
+            // During session setup, `UselessPeer` means the remote has no use for us at all.
+            Self::Eth(eth) => {
+                eth.is_fatal_protocol_error() ||
+                    eth.as_disconnected() == Some(DisconnectReason::UselessPeer)
+            }
             Self::Ecies(err) => matches!(
                 err.inner(),
                 ECIESErrorImpl::TagCheckDecryptFailed |
@@ -334,6 +339,18 @@ mod tests {
             )),
         ));
 
+        assert!(err.is_fatal_protocol_error());
+    }
+
+    #[test]
+    fn test_useless_peer_fatal_only_while_pending() {
+        let err = EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+            DisconnectReason::UselessPeer,
+        ));
+        assert!(!err.is_fatal_protocol_error());
+        assert_eq!(err.should_backoff(), Some(BackoffKind::Low));
+
+        let err = PendingSessionHandshakeError::Eth(err);
         assert!(err.is_fatal_protocol_error());
     }
 
