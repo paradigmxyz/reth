@@ -470,6 +470,34 @@ mod tests {
     }
 
     #[test]
+    fn set_full_marks_every_cell_for_every_clone() {
+        let availability = BlobCellAvailability::new(BlobCellMask::from_bits(1));
+        let shared = availability.clone();
+        availability.set_full();
+        assert!(shared.is_full());
+    }
+
+    #[test]
+    fn stores_only_join_blobs_from_the_data_columns() {
+        let (_, all) = fixture();
+        let hash = all.versioned_hashes().next().unwrap();
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+
+        for TestStore { store, _dir, .. } in stores(&half) {
+            let tx = B256::random();
+            store.insert_cells(tx, half.clone()).unwrap();
+            assert_eq!(store.get(tx).unwrap(), None);
+            assert_eq!(store.has_versioned_hashes(&[hash]).unwrap(), vec![false]);
+            assert_eq!(store.get_by_versioned_hashes_v3(&[hash]).unwrap(), vec![None]);
+            // The kept cells are still served.
+            assert_eq!(
+                store.get_cells(tx, BlobCellMask::from_bits(1)).unwrap(),
+                Some(vec![all.cells()[0], all.cells()[CELLS_PER_EXT_BLOB]])
+            );
+        }
+    }
+
+    #[test]
     fn stores_join_blobs_from_the_data_columns() {
         let (full, all) = fixture();
         let hash = all.versioned_hashes().next().unwrap();

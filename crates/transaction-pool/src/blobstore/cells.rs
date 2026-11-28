@@ -596,4 +596,45 @@ pub(crate) mod tests {
             Err(alloy_rlp::Error::Custom("cell sidecar counts do not match"))
         );
     }
+
+    #[test]
+    fn extend_rebuilds_all_cells_from_the_data_columns() {
+        let (full, all) = fixture();
+        let data = subset(BlobCellMask::from_bits(u64::MAX.into()));
+        assert_eq!(&data.extend(settings()).unwrap(), all);
+        assert_eq!(data.to_full().as_ref(), Some(full));
+        assert_eq!(&all.extend(settings()).unwrap(), all);
+    }
+
+    #[test]
+    fn extend_recovers_all_cells_from_any_half() {
+        let (_, all) = fixture();
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+        assert_eq!(&half.extend(settings()).unwrap(), all);
+        // Without the data columns the blobs can't be joined.
+        assert_eq!(half.to_full(), None);
+    }
+
+    #[test]
+    fn extend_rejects_a_bad_proof_of_a_rebuilt_cell() {
+        let (_, all) = fixture();
+        let mask = BlobCellMask::from_bits(u64::MAX.into());
+        let mut proofs = all.proofs().to_vec();
+        // A valid proof of another cell of the second blob, for a column that isn't kept.
+        proofs[2 * CELLS_PER_EXT_BLOB - 1] = proofs[2 * CELLS_PER_EXT_BLOB - 2];
+        let cells = BlobTxCellSidecar::new(
+            all.commitments().to_vec(),
+            proofs,
+            all.get_cells(mask).unwrap(),
+            mask,
+        )
+        .unwrap();
+
+        // The kept cells match their proofs, so only the extension catches it.
+        cells.validate(&all.versioned_hashes().collect::<Vec<_>>(), settings()).unwrap();
+        assert!(matches!(
+            cells.extend(settings()),
+            Err(BlobTransactionValidationError::InvalidProof)
+        ));
+    }
 }

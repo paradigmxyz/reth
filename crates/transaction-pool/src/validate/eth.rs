@@ -1633,8 +1633,8 @@ mod tests {
         eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
-        eip4844::{env_settings::EnvKzgSettings, Blob},
-        eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, Cell},
+        eip4844::{env_settings::EnvKzgSettings, Blob, BlobTransactionValidationError},
+        eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, Cell, CELLS_PER_EXT_BLOB},
         eip7702::Authorization,
     };
     use alloy_primitives::{hex, Address, Bytes, Signature, B256, U256};
@@ -2535,12 +2535,25 @@ mod tests {
     #[test]
     fn validate_blob_tx_fetched_as_cells() {
         let settings = EnvKzgSettings::Default.get();
-        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default()]).unwrap();
+        // A non-zero blob, so its cell proofs differ.
+        let mut blob = Blob::default();
+        blob[31] = 1;
+        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![blob]).unwrap();
         let all = BlobTxCellSidecar::from_full(&full, settings).unwrap();
         let mask = BlobCellMask::from_bits(0b101);
         let kept = |cells| {
             BlobTxCellSidecar::new(all.commitments().to_vec(), all.proofs().to_vec(), cells, mask)
                 .unwrap()
+        };
+        let data_columns = |proofs| {
+            let data = BlobCellMask::from_bits(u64::MAX.into());
+            BlobTxCellSidecar::new(
+                all.commitments().to_vec(),
+                proofs,
+                all.get_cells(data).unwrap(),
+                data,
+            )
+            .unwrap()
         };
         let body = PooledTransactionVariant::Eip4844(
             TxEip4844WithSidecar {
@@ -2576,6 +2589,23 @@ mod tests {
             validate(kept(bad)),
             Err(InvalidPoolTransactionError::Eip4844(
                 Eip4844PoolTransactionError::InvalidEip4844Blob(_)
+            ))
+        ));
+
+        // Enough cells to rebuild the blob are extended to all of them.
+        let sidecar = validate(data_columns(all.proofs().to_vec())).unwrap().unwrap();
+        assert_eq!(sidecar.cells(), Some(&all));
+        assert!(sidecar.availability().is_full());
+
+        // A wrong proof of a column that isn't kept is caught once its cell is rebuilt.
+        let mut proofs = all.proofs().to_vec();
+        proofs[CELLS_PER_EXT_BLOB - 1] = proofs[CELLS_PER_EXT_BLOB - 2];
+        assert!(matches!(
+            validate(data_columns(proofs)),
+            Err(InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::InvalidEip4844Blob(
+                    BlobTransactionValidationError::InvalidProof
+                )
             ))
         ));
     }
