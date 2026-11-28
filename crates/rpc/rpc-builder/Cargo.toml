@@ -86,3 +86,5 @@ alloy-rpc-types-mev.workspace = true
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }
 reqwest.workspace = true
+metrics-exporter-prometheus.workspace = true
+metrics-util.workspace = true
