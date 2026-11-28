@@ -10,15 +10,21 @@ use crate::tree::{
 };
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::B256;
-use crossbeam_channel::{Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use prewarm::PrewarmMetrics;
-use rayon::prelude::*;
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicUsize},
+    channel,
+    channel::{mpsc, Receiver, Sender},
+    rayon::prelude::*,
+    time::FastInstant as Instant,
+    OnceLock,
+};
 use reth_evm::{
     precompile_cache::PrecompileCacheMap, ConfigureEvm, ConvertTx, EvmEnv, EvmTypesFor,
     ExecutableTxFor, ExecutableTxIterator, ExecutableTxParts, ExecutableTxTuple, SpecFor, TxEnvFor,
     WithTxEnv,
 };
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory, HistoryReader,
     PruneCheckpointReader, StageCheckpointReader, StorageChangeSetReader, StorageSettingsCache,
@@ -34,13 +40,7 @@ pub use reth_trie_parallel::{
         StateRootUpdateStream,
     },
 };
-use std::{
-    ops::Not,
-    sync::{
-        atomic::{AtomicBool, AtomicUsize},
-        mpsc, Arc, OnceLock,
-    },
-};
+use std::{num::NonZeroUsize, ops::Not, sync::Arc};
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
 pub mod bal;
@@ -74,8 +74,8 @@ type IteratorExecuteTxReceiver<Evm, I> = ExecuteTxReceiver<
 
 type RecoveredTx<TxEnv, Recovered> = WithTxEnv<TxEnv, Recovered>;
 type IndexedTxResult<Tx, Err> = (usize, Result<Tx, Err>);
-type IndexedTxReceiver<Tx, Err> = CrossbeamReceiver<IndexedTxResult<Tx, Err>>;
-type IndexedTxSender<Tx, Err> = CrossbeamSender<IndexedTxResult<Tx, Err>>;
+type IndexedTxReceiver<Tx, Err> = Receiver<IndexedTxResult<Tx, Err>>;
+type IndexedTxSender<Tx, Err> = Sender<IndexedTxResult<Tx, Err>>;
 type PrewarmTxReceiver<TxEnv, Recovered> = mpsc::Receiver<(usize, RecoveredTx<TxEnv, Recovered>)>;
 type ExecuteTxReceiver<TxEnv, Recovered, Err> =
     IndexedTxReceiver<RecoveredTx<TxEnv, Recovered>, Err>;
@@ -117,6 +117,8 @@ where
     /// Dedicated blocking pool for warming the BAL read-set, created lazily on the first BAL block
     /// (see [`Self::bal_prewarm_pool`]). Its threads exit when the processor is dropped.
     bal_prewarm_pool: OnceLock<Arc<bal_prewarm_pool::BalPrewarmPool>>,
+    /// Number of BAL read-set prewarm workers for this engine.
+    bal_prewarm_threads: usize,
 }
 
 impl<Evm> PayloadProcessor<Evm>
@@ -147,6 +149,9 @@ where
             disable_bal_batch_io: config.disable_bal_batch_io(),
             reuse_prewarm_results: config.prewarm_reuse(),
             bal_prewarm_pool: OnceLock::new(),
+            bal_prewarm_threads: config
+                .bal_prewarm_threads()
+                .map_or(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS, NonZeroUsize::get),
         }
     }
 
@@ -154,9 +159,7 @@ where
     /// first use (only the BAL parallel execution path calls this).
     fn bal_prewarm_pool(&self) -> Arc<bal_prewarm_pool::BalPrewarmPool> {
         self.bal_prewarm_pool
-            .get_or_init(|| {
-                bal_prewarm_pool::BalPrewarmPool::new(bal_prewarm_pool::DEFAULT_BAL_PREWARM_THREADS)
-            })
+            .get_or_init(|| bal_prewarm_pool::BalPrewarmPool::new(self.bal_prewarm_threads))
             .clone()
     }
 
@@ -269,7 +272,7 @@ where
     ) -> (Option<IteratorPrewarmTxReceiver<Evm, I>>, IteratorExecuteTxReceiver<Evm, I>) {
         let (prewarm_tx, prewarm_rx) =
             prewarm_transactions.then(|| mpsc::sync_channel(transaction_count)).unzip();
-        let (execute_tx, execute_rx) = crossbeam_channel::bounded(transaction_count);
+        let (execute_tx, execute_rx) = channel::bounded(transaction_count);
         let parent_span = Span::current();
 
         if transaction_count == 0 {
@@ -689,7 +692,7 @@ pub struct CacheTaskHandle<R, H: evm2::EvmTypes> {
     /// The shared cache the task operates with.
     saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
+    to_prewarm_task: Option<mpsc::Sender<PrewarmTaskEvent<R>>>,
     /// Shared counter tracking the next transaction index to be executed by the main execution
     /// loop. Prewarm workers skip transactions below this index.
     executed_tx_index: Arc<AtomicUsize>,
@@ -756,13 +759,14 @@ mod tests {
         test_runner::{Config, TestRunner},
     };
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::{channel::RecvTimeoutError, Mutex};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_execution_cache::CachedStatus;
     use reth_trie_common::bundle_state::BundleState;
     use std::{
         collections::HashSet,
         process::Command,
-        sync::{atomic::Ordering, Arc, Mutex},
+        sync::{atomic::Ordering, Arc},
     };
     use tracing_subscriber::{
         filter::LevelFilter, layer::SubscriberExt, registry::LookupSpan, Registry,
@@ -795,7 +799,7 @@ mod tests {
         )
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn transaction_conversion_preserves_results() {
         for (count, bal) in [(10, false), (200, false), (200, true)] {
             let processor = test_processor();
@@ -819,7 +823,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn transaction_conversion_stops_on_error() {
         for (count, bal, fail_at) in
             [(10, false, 0), (10, true, 0), (200, false, 0), (200, false, 4), (200, false, 20)]
@@ -841,7 +845,7 @@ mod tests {
             loop {
                 match receiver.recv_timeout(std::time::Duration::from_secs(10)) {
                     Ok(tx) => results.push(tx),
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Disconnected) => break,
                     Err(err) => panic!("conversion did not terminate: {err}"),
                 }
             }
@@ -854,7 +858,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn bal_transaction_conversion_preserves_all_error_slots() {
         let count = 200;
         let processor = test_processor();
@@ -880,7 +884,7 @@ mod tests {
         assert_eq!(indices, (0..count).collect::<Vec<_>>());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn dropping_payload_handle_stops_transaction_conversion() {
         for (count, bal, pause_at) in
             [(10, false, 0), (1000, false, 0), (1000, false, 4), (1000, true, 0)]
@@ -888,8 +892,8 @@ mod tests {
             let processor = test_processor();
             let calls = Arc::new(super::AtomicUsize::new(0));
             let converted = calls.clone();
-            let (started_tx, started_rx) = crossbeam_channel::unbounded();
-            let (release_tx, release_rx) = crossbeam_channel::bounded::<()>(0);
+            let (started_tx, started_rx) = channel::unbounded();
+            let (release_tx, release_rx) = channel::bounded::<()>(0);
             let (_, receiver) = processor.spawn_tx_iterator(
                 ((0..count).collect::<Vec<_>>(), move |idx| {
                     converted.fetch_add(1, Ordering::Relaxed);
@@ -922,7 +926,7 @@ mod tests {
             loop {
                 match started_rx.recv_timeout(std::time::Duration::from_secs(10)) {
                     Ok(()) => {}
-                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                    Err(RecvTimeoutError::Disconnected) => break,
                     Err(err) => panic!("conversion did not terminate: {err}"),
                 }
             }
@@ -935,7 +939,7 @@ mod tests {
         SavedCache::new(hash, execution_cache)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_cache_allows_single_checkout() {
         let execution_cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(1u8);
@@ -954,7 +958,7 @@ mod tests {
         assert!(third.is_some(), "third checkout should succeed after guard is dropped");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_cache_checkout_releases_on_drop() {
         let execution_cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(2u8);
@@ -971,7 +975,7 @@ mod tests {
         assert!(retry.is_some(), "checkout should succeed after guard drop");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_cache_mismatch_parent_clears_and_returns() {
         let execution_cache = PayloadExecutionCache::default();
         let hash = B256::repeat_byte(3u8);
@@ -992,7 +996,7 @@ mod tests {
         assert!(original.is_some(), "canonical chain gets cache back via mismatch+clear");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn execution_cache_update_after_release_succeeds() {
         let execution_cache = PayloadExecutionCache::default();
         let initial = B256::repeat_byte(5u8);
@@ -1011,7 +1015,7 @@ mod tests {
         assert!(new_checkout.is_some(), "new checkout should succeed after release and update");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn on_inserted_executed_block_populates_cache() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
@@ -1040,7 +1044,7 @@ mod tests {
         assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn cache_for_executes_without_cache_while_stored_cache_is_in_use() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
@@ -1065,7 +1069,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn on_inserted_executed_block_skips_on_parent_mismatch() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
@@ -1100,7 +1104,7 @@ mod tests {
         assert!(cached3.is_none(), "New block cache should not be created on mismatch");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn on_inserted_executed_block_does_not_mutate_checked_out_parent_cache() {
         let payload_processor = PayloadProcessor::new(
             reth_tasks::Runtime::test(),
@@ -1169,7 +1173,7 @@ mod tests {
     /// 5. Prewarm drops without calling `save_cache` (fork block was invalid).
     /// 6. Canonical block 5 (parent = block 4) must get a cache with correct hash and no stale fork
     ///    data.
-    #[test]
+    #[reth_concurrency::test]
     fn fork_prewarm_dropped_without_save_does_not_corrupt_cache() {
         let execution_cache = PayloadExecutionCache::default();
 
@@ -1244,18 +1248,23 @@ mod tests {
         let level = level.parse::<LevelFilter>().unwrap();
         tracing::subscriber::set_global_default(tracing_subscriber::registry().with(level))
             .unwrap();
-        let processor = test_processor();
+        reth_concurrency::sync::Runtime::new().run(move || {
+            let processor = test_processor();
 
-        // Exercise both sides of the sequential cutoff and the first parallel window, as well
-        // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
-        for count in [0, 1, 29, 30, 68, 69] {
-            for bal in [false, true] {
-                assert_conversion_spans(&processor, count, bal, level);
+            // Exercise both sides of the sequential cutoff and the first parallel window, as well
+            // as randomly sized blocks. BAL execution bypasses the sequential prefetch/windowing.
+            for count in [0, 1, 29, 30, 68, 69] {
+                for bal in [false, true] {
+                    assert_conversion_spans(&processor, count, bal, level);
+                }
             }
-        }
+        });
         TestRunner::new(Config::with_cases(32))
             .run(&(0..200usize, any::<bool>()), |(count, bal)| {
-                assert_conversion_spans(&processor, count, bal, level);
+                reth_concurrency::sync::Runtime::new().run(move || {
+                    let processor = test_processor();
+                    assert_conversion_spans(&processor, count, bal, level);
+                });
                 Ok(())
             })
             .unwrap();
@@ -1288,7 +1297,7 @@ mod tests {
                     assert!(tx.is_ok());
                     indices.push(idx);
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                Err(RecvTimeoutError::Disconnected) => break,
                 Err(err) => panic!("conversion did not terminate: {err}"),
             }
         }

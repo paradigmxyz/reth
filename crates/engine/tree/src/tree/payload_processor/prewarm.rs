@@ -28,14 +28,20 @@ use alloy_eips::eip4895::Withdrawal;
 use alloy_primitives::keccak256;
 use evm2::evm::Database;
 use metrics::{Counter, Gauge, Histogram};
-use rayon::prelude::*;
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    channel::mpsc::{self, channel, Receiver, Sender},
+    rayon::prelude::*,
+    thread,
+    time::FastInstant as Instant,
+};
 use reth_evm::{
     database::StateProviderDatabase, precompile_cache::PrecompileCacheMap, ConfigureEvm,
     Evm as EvmInstance, EvmEnv, EvmEnvFor, EvmFor, EvmTypesFor, ExecutableTxFor, RecoveredTx,
     SpecFor,
 };
 use reth_metrics::Metrics;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, ChangeSetReader, DatabaseProviderFactory,
     DatabaseProviderROFactory, EvmStateProvider, EvmStateProviderBox, HistoryReader,
@@ -45,14 +51,7 @@ use reth_provider::{
 use reth_storage_overlay::OverlayStateProviderFactory;
 use reth_tasks::{Runtime, WorkerStatefulPool};
 use reth_trie_common::MultiProofTargetsV2;
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-        mpsc::{self, channel, Receiver, Sender},
-        Arc,
-    },
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 use tokio::sync::oneshot;
 use tracing::{debug, debug_span, instrument, trace, trace_span, warn, Span};
 
@@ -312,7 +311,7 @@ where
             rounds = 0;
             window_len = REFRESH_WINDOW;
             while results.predicted().generation() == generation && !ctx.should_stop() {
-                std::thread::sleep(REFRESH_POLL_INTERVAL);
+                thread::sleep(REFRESH_POLL_INTERVAL);
             }
         }
     }
@@ -534,6 +533,8 @@ where
     ///    state-root job before account reads finish.
     /// 2. Storage prefetch on the prewarming pool to populate the execution cache, unless BAL batch
     ///    I/O is disabled.
+    ///
+    /// Completion uses native Tokio in all builds and does not yield to the fuzz scheduler.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
     fn run_bal_prewarm(
         &self,
@@ -1043,6 +1044,10 @@ mod tests {
     use alloy_primitives::{Address, Signature, TxKind, B256, U256};
     use evm2::{evm::EmptyDB, BaseEvmTypes};
     use reth_chainspec::ChainSpec;
+    use reth_concurrency::sync::{
+        channel,
+        thread::{JoinHandle, ThreadId},
+    };
     use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
     use reth_evm::{execute::WithTxEnv, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
@@ -1053,7 +1058,7 @@ mod tests {
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
     use std::time::Duration;
 
-    #[test]
+    #[reth_concurrency::test]
     fn terminate_event_stops_transaction_execution() {
         let terminate_execution = Arc::new(AtomicBool::new(false));
         let ctx = PrewarmContext {
@@ -1093,7 +1098,7 @@ mod tests {
         assert!(terminate_execution.load(Ordering::Relaxed));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rebuilds_evm_for_each_prewarm_run() {
         let caller = Address::repeat_byte(1);
         let provider = MockEthProvider::default();
@@ -1156,7 +1161,7 @@ mod tests {
         assert!(!state.account_changes().any(|a| a.address == Address::repeat_byte(0xa)));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn transaction_prewarm_releases_worker_cache_before_cache_task_finishes() {
         let runtime = Runtime::test();
         let saved = SavedCache::new(B256::ZERO, crate::tree::ExecutionCache::new(1_000));
@@ -1199,7 +1204,7 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while saved.usage_count() != 2 {
             assert!(Instant::now() < deadline, "worker state outlived transaction prewarming");
-            std::thread::yield_now();
+            thread::yield_now();
         }
         assert!(task.ctx.saved_cache.is_some());
     }
@@ -1273,7 +1278,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_releases_warm_cache_before_duration_metric() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -1309,7 +1314,7 @@ mod tests {
         drop(release_tx);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_blocks_reuse_while_execution_cache_is_cloned() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -1333,7 +1338,7 @@ mod tests {
 
     // EIP-7702 bytecode preserves its owned buffer, letting us observe actual cache destruction.
     struct CacheDropProbe {
-        started: Sender<std::thread::ThreadId>,
+        started: Sender<ThreadId>,
         inspected: Receiver<()>,
         result: Sender<bool>,
     }
@@ -1346,7 +1351,7 @@ mod tests {
 
     impl Drop for CacheDropProbe {
         fn drop(&mut self) {
-            let _ = self.started.send(std::thread::current().id());
+            let _ = self.started.send(thread::current().id());
             // A timeout turns destruction under the mutex into a failure instead of a deadlock.
             let unlocked = self.inspected.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
             let _ = self.result.send(unlocked);
@@ -1357,12 +1362,12 @@ mod tests {
         saved: &SavedCache,
         execution_cache: &PayloadExecutionCache,
         expect_saved_cache: bool,
-    ) -> (Receiver<bool>, std::thread::JoinHandle<std::thread::ThreadId>) {
+    ) -> (Receiver<bool>, JoinHandle<ThreadId>) {
         let (started_tx, started_rx) = mpsc::channel();
         let (inspected_tx, inspected_rx) = mpsc::channel();
         let (result_tx, result_rx) = mpsc::channel();
         let cache = execution_cache.clone();
-        let reader = std::thread::spawn(move || {
+        let reader = thread::spawn(move || {
             let drop_thread = started_rx.recv().unwrap();
             // Waiting for the mutex must return while the removed cache is still being dropped.
             cache.wait_for_availability();
@@ -1383,7 +1388,7 @@ mod tests {
         (result_rx, reader)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_freeing_waits_for_validator_cache_references() {
         let runtime = Runtime::test();
         let execution_cache = PayloadExecutionCache::default();
@@ -1401,7 +1406,7 @@ mod tests {
                 prewarm_results: None,
                 cache_metrics: None,
             },
-            transactions: crossbeam_channel::never::<(usize, Result<(), ()>)>(),
+            transactions: channel::never::<(usize, Result<(), ()>)>(),
             _span: Span::none(),
         };
         // The validator keeps this ExecutionCache clone after calling terminate_caching.
@@ -1416,7 +1421,7 @@ mod tests {
                 PrewarmMode::Skipped,
                 actions_tx,
             );
-            std::thread::current().id()
+            thread::current().id()
         });
         let prewarm_thread = *prewarm.get();
 
@@ -1429,7 +1434,7 @@ mod tests {
         drop(validator_cache);
         assert!(dropped.try_recv().expect("last ExecutionCache drop must free the cache"));
         let drop_thread = reader.join().unwrap();
-        assert_eq!(drop_thread, std::thread::current().id());
+        assert_eq!(drop_thread, thread::current().id());
         assert_ne!(drop_thread, prewarm_thread);
     }
 
@@ -1481,7 +1486,7 @@ mod tests {
                 result.try_recv().expect("removed cache must be destroyed before save returns"),
                 "cache mutex must be unlocked during destruction"
             );
-            assert_eq!(reader.join().unwrap(), std::thread::current().id());
+            assert_eq!(reader.join().unwrap(), thread::current().id());
         }
         execution_cache.update_with_guard(|slot| {
             if expect_saved_cache {
@@ -1498,32 +1503,32 @@ mod tests {
         drop(release_tx);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_replaced_allocation_after_unlock() {
         assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, false);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_invalid_allocations_after_unlock() {
         assert_save_cache_drops_removed_caches(CacheSlot::Distinct, false, false);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_allocations_after_unlock_on_insert_error() {
         assert_save_cache_drops_removed_caches(CacheSlot::Distinct, true, true);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_shared_allocation_after_unlock_on_invalid_block() {
         assert_save_cache_drops_removed_caches(CacheSlot::Shared, false, false);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_drops_shared_allocation_after_unlock_on_insert_error() {
         assert_save_cache_drops_removed_caches(CacheSlot::Shared, true, true);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn save_cache_handles_empty_slot() {
         for (valid, insert_error) in [(true, false), (false, false), (true, true)] {
             assert_save_cache_drops_removed_caches(CacheSlot::Empty, valid, insert_error);

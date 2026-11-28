@@ -154,6 +154,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     if !validation || !evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
                         evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
                     }
+                    // The EIP-8037 total transaction gas cap applies in neither mode, see
+                    // <https://github.com/ethereum/execution-apis/blob/main/docs-api/docs/ethsimulatev1-notes.mdx>.
+                    evm_env.version_mut().tx_total_gas_cap = u64::MAX;
 
                     if !validation {
                         // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
@@ -464,6 +467,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
 
     /// Creates [`AccessListResult`] for the [`RpcTxReq`] at the given
     /// [`BlockId`].
+    ///
+    /// Waits for a blocking IO permit, which the blocking task holds until both executions are
+    /// done, even if the returned future is dropped.
     fn create_access_list_with(
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
@@ -474,46 +480,69 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
     where
         Self: Trace,
     {
-        self.spawn_with_state_at_block(at, |this, mut db| {
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let (evm_env, mut tx_env) = this.prepare_call_env(
-                evm_env,
-                request,
-                &mut db,
-                EvmOverrides::state(state_override),
-            )?;
-            let chain_id = evm_env.chain_id();
+        async move {
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
 
-            let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
+            self.spawn_with_state_at_block(at, move |this, mut db| {
+                let _permit = permit;
+                let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+                let tx_gas_limit_cap = evm_env.version().tx_gas_limit_cap;
+                let (mut evm_env, mut tx_env) = this.prepare_call_env(
+                    evm_env,
+                    request,
+                    &mut db,
+                    EvmOverrides::state(state_override),
+                )?;
+                // The access list is used to send a transaction, so under EIP-8037 keep the
+                // execution gas cap that the transaction will run with, like geth does. The total
+                // gas cap stays lifted, also like geth, so with an RPC gas cap above `2^32 - 1`
+                // this can return an access list for a gas limit no transaction can have.
+                if evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
+                    evm_env.version_mut().tx_gas_limit_cap = tx_gas_limit_cap;
+                }
+                let chain_id = evm_env.chain_id();
 
-            // EIP-7702 authorities are warmed during authorization processing, so listing them
-            // would only add access list cost.
-            let inspector =
-                AccessListInspector::new(initial).with_excluded_from_tx(tx_env.inner(), chain_id);
-            let (inspector, result) = evm
-                .transact_with_inspector(&tx_env, inspector)
-                .map_err(Self::Error::from_evm_err)?;
-            let access_list = inspector.into_access_list();
-            let gas_used = result.result.tx_gas_used();
-            if let Err(err) = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result.result) {
-                return Ok(AccessListResult {
-                    access_list,
-                    gas_used: U256::from(gas_used),
-                    error: Some(err.to_string()),
-                });
-            }
+                let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
 
-            tx_env.inner_mut().set_access_list(access_list.clone());
+                // EIP-7702 authorities are warmed during authorization processing, so listing them
+                // would only add access list cost.
+                let inspector = AccessListInspector::new(initial)
+                    .with_excluded_from_tx(tx_env.inner(), chain_id);
+                let (inspector, result) = evm
+                    .transact_with_inspector(&tx_env, inspector)
+                    .map_err(Self::Error::from_evm_err)?;
+                let access_list = inspector.into_access_list();
+                let gas_used = result.result.tx_gas_used();
+                if let Err(err) =
+                    Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result.result)
+                {
+                    return Ok(AccessListResult {
+                        access_list,
+                        gas_used: U256::from(gas_used),
+                        error: Some(err.to_string()),
+                    });
+                }
 
-            // Transact again to get the exact gas used with the returned access list.
-            let result = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
-            let gas_used = result.tx_gas_used();
-            let error = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result)
-                .err()
-                .map(|e| e.to_string());
+                if is_cancelled() {
+                    return Err(EthApiError::InternalEthError.into())
+                }
 
-            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
-        })
+                tx_env.inner_mut().set_access_list(access_list.clone());
+
+                // Transact again to get the exact gas used with the returned access list.
+                let result = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
+                let gas_used = result.tx_gas_used();
+                let error = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result)
+                    .err()
+                    .map(|e| e.to_string());
+
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            })
+            .await
+        }
     }
 }
 
@@ -543,7 +572,7 @@ pub trait Call:
         self.eth_api_settings().compute_state_root_for_eth_simulate
     }
 
-    /// Returns the maximum memory the EVM can allocate per RPC request.
+    /// Returns the maximum memory the EVM can allocate per call frame in an RPC request.
     fn evm_memory_limit(&self) -> u64 {
         self.eth_api_settings().evm_memory_limit
     }
@@ -799,7 +828,6 @@ pub trait Call:
                 let changes = this
                     .evm_config()
                     .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
-                    .map_err(|err| EthApiError::EvmCustom(err.to_string()))
                     .map_err(Self::Error::from_eth_err)?;
                 db.commit_source(&reth_execution_types::BundleSource(&changes));
 
@@ -905,6 +933,8 @@ pub trait Call:
     ///  - `disable_eip3607` is set to `true`
     ///  - `disable_base_fee` is set to `true`
     ///  - `nonce` is set to `None`
+    ///  - the EIP-7825 and EIP-8037 transaction gas caps are lifted, mirroring geth's
+    ///    `SkipGasLimitCapCheck` and `SkipExecutionGasCapCheck`
     ///
     /// In addition, this changes the block's gas limit to the configured [`Self::call_gas_limit`].
     #[expect(clippy::type_complexity)]
@@ -934,12 +964,13 @@ pub trait Call:
         // <https://github.com/ethereum/go-ethereum/blob/ee8e83fa5f6cb261dad2ed0a7bbcde4930c41e6c/internal/ethapi/api.go#L985>
         evm_env.version_mut().features.remove(evm2::EvmFeatures::BASE_FEE_CHECK);
 
-        // Disable EIP-7825 transaction gas limit to support larger transactions. Under Amsterdam's
-        // EIP-8037 it only caps execution gas, the rest going to the state gas reservoir, so keep
-        // it to execute the call like a transaction.
-        if !evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
-            evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
-        }
+        // Disable the EIP-7825 transaction gas cap and, under Amsterdam's EIP-8037, the total
+        // transaction gas cap, so the whole gas limit, bounded by the RPC gas cap, is available for
+        // execution. Calls never go into a block, so the caps that keep a single transaction from
+        // filling one don't apply. Mirrors geth's `SkipGasLimitCapCheck` and
+        // `SkipExecutionGasCapCheck`.
+        evm_env.version_mut().tx_gas_limit_cap = u64::MAX;
+        evm_env.version_mut().tx_total_gas_cap = u64::MAX;
 
         // Disable additional fee charges, e.g. opstack operator fee charge
         // See:
@@ -982,9 +1013,7 @@ pub trait Call:
             }
         } else {
             // cap request's gas limit to call gas limit
-            tx_env
-                .inner_mut()
-                .set_gas_limit(self.call_gas_limit().min(evm_env.version().tx_gas_caps().0));
+            tx_env.inner_mut().set_gas_limit(self.call_gas_limit());
         }
 
         // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>

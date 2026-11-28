@@ -747,14 +747,12 @@ mod tests {
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::{
-        collections::BTreeMap,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::collections::BTreeMap;
 
     fn test_evm() -> Evm<'static, BaseEvmTypes> {
         Evm::new(
@@ -1027,7 +1025,7 @@ mod tests {
 
     /// Hashing each block's changes once gives the same state as hashing the cumulative bundle
     /// again after every block, without reading the parent storage of destroyed accounts again.
-    #[test]
+    #[reth_concurrency::test]
     fn simulated_state_reads_parent_storage_once() {
         let wiped = Address::with_last_byte(1);
         let emptied = Address::with_last_byte(2);

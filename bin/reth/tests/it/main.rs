@@ -6,6 +6,7 @@ use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_eth::TransactionRequest;
 use std::{fs, path::Path, process::Command};
 
+mod db;
 mod download;
 
 const RETH: &str = env!("CARGO_BIN_EXE_reth");
@@ -154,6 +155,31 @@ fn dump_genesis_help() {
 fn db_help() {
     let stdout = reth_ok(&["db", "--help"]);
     assert!(stdout.contains("stats"), "stdout: {stdout}");
+}
+
+#[test]
+fn migrate_v2_and_reopen_at_nonzero_genesis() {
+    let genesis_json = reth_ok(&["dump-genesis", "--chain", "dev"]);
+    let genesis: serde_json::Value = serde_json::from_str(&genesis_json).unwrap();
+
+    for block in [500_000, 500_010] {
+        let tempdir = tempfile::tempdir().unwrap();
+        let chain_path = tempdir.path().join("genesis.json");
+        let datadir_path = tempdir.path().join("data");
+        let chain = chain_path.to_str().unwrap();
+        let datadir = datadir_path.to_str().unwrap();
+
+        let mut genesis = genesis.clone();
+        genesis["number"] = format!("0x{block:x}").into();
+        fs::write(&chain_path, serde_json::to_vec(&genesis).unwrap()).unwrap();
+
+        reth_ok(&["init", "--chain", chain, "--datadir", datadir, "--storage.v2=false"]);
+        reth_ok(&["db", "--chain", chain, "--datadir", datadir, "migrate-v2"]);
+        // Opening for write runs the static-file consistency check used on startup.
+        reth_ok(&["init", "--chain", chain, "--datadir", datadir]);
+        let settings = reth_ok(&["db", "--chain", chain, "--datadir", datadir, "settings", "get"]);
+        assert!(settings.contains("storage_v2: true"), "block {block}: {settings}");
+    }
 }
 
 #[test]

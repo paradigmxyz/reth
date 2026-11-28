@@ -1,24 +1,21 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
-use crossbeam_channel::Sender as CrossbeamSender;
+use reth_concurrency::sync::{
+    channel::{mpsc, Sender},
+    thread::JoinHandle,
+    time::FastInstant as Instant,
+};
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ProviderNodeTypes, BalProvider, BlockExecutionWriter, BlockHashReader,
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksInput,
 };
 use reth_prune::{PrunerError, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
-use reth_tasks::spawn_os_thread;
-use std::{
-    sync::{
-        mpsc::{Receiver, SendError, Sender},
-        Arc,
-    },
-    thread::JoinHandle,
-    time::Duration,
-};
+use reth_tasks::spawn_thread;
+use std::{sync::Arc, time::Duration};
 use thiserror::Error;
 use tracing::{debug, error, instrument, warn};
 
@@ -38,8 +35,8 @@ pub struct PersistenceResult {
 /// This is meant to be a spawned service that listens for various incoming persistence operations,
 /// performing those actions on disk, and returning the result in a channel.
 ///
-/// This should be spawned in its own thread with [`std::thread::spawn`], since this performs
-/// blocking I/O operations in an endless loop.
+/// This should be spawned in its own thread with [`reth_concurrency::sync::thread::spawn`], since
+/// this performs blocking I/O operations in an endless loop.
 #[derive(Debug)]
 pub struct PersistenceService<N>
 where
@@ -48,7 +45,7 @@ where
     /// The provider factory to use
     provider: ProviderFactory<N>,
     /// Incoming requests
-    incoming: Receiver<PersistenceAction<N::Primitives>>,
+    incoming: mpsc::Receiver<PersistenceAction<N::Primitives>>,
     /// The pruner
     pruner: PrunerWithFactory<ProviderFactory<N>>,
     /// metrics
@@ -70,7 +67,7 @@ where
     /// Create a new persistence service
     pub fn new(
         provider: ProviderFactory<N>,
-        incoming: Receiver<PersistenceAction<N::Primitives>>,
+        incoming: mpsc::Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
     ) -> Self {
@@ -181,6 +178,11 @@ where
             .iter()
             .map(|block| block.recovered_block().num_hash())
             .collect::<Vec<_>>();
+        // BALs live outside the main database and have no startup recovery. Flush them before the
+        // main commit, so that a crash or a flush error never leaves a persisted block without
+        // its BAL. A BAL for a block that is not persisted afterwards is harmless.
+        self.provider.bal_store().flush(&canonical_blocks)?;
+
         let provider_rw = self.provider.database_provider_rw()?;
         let last_state_trie_block = if let Some(block) = input.state_trie_blocks().last() {
             // Newly written static-file headers are not readable until commit finalizes their
@@ -211,10 +213,6 @@ where
         }
 
         provider_rw.commit()?;
-        // BALs live outside the main database and are intentionally flushed last.
-        let _ = self.provider.bal_store().flush(&canonical_blocks).inspect_err(|err| {
-            warn!(target: "engine::persistence", last=?last_block, ?err, "Failed to flush BAL store");
-        });
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
         let elapsed = start_time.elapsed();
@@ -265,13 +263,13 @@ pub enum PersistenceError {
 #[derive(Debug)]
 pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
     /// Advances the block-data and state/trie persistence frontiers described by the input.
-    SaveBlocks(SaveBlocksInput<N>, CrossbeamSender<PersistenceResult>),
+    SaveBlocks(SaveBlocksInput<N>, Sender<PersistenceResult>),
 
     /// Removes block data above the given block number from the database.
     ///
     /// This will first update checkpoints from the database, then remove actual block data from
     /// static files.
-    RemoveBlocksAbove(u64, CrossbeamSender<PersistenceResult>),
+    RemoveBlocksAbove(u64, Sender<PersistenceResult>),
 
     /// Update the persisted finalized block on disk
     SaveFinalizedBlock(u64),
@@ -284,18 +282,18 @@ pub enum PersistenceAction<N: NodePrimitives = EthPrimitives> {
 #[derive(Debug, Clone)]
 pub struct PersistenceHandle<N: NodePrimitives = EthPrimitives> {
     /// The channel used to communicate with the persistence service
-    sender: Sender<PersistenceAction<N>>,
+    sender: mpsc::Sender<PersistenceAction<N>>,
     /// Guard that joins the service thread when all handles are dropped.
     /// Uses `Arc` so the handle remains `Clone`.
     _service_guard: Arc<ServiceGuard>,
 }
 
 impl<T: NodePrimitives> PersistenceHandle<T> {
-    /// Create a new [`PersistenceHandle`] from a [`Sender<PersistenceAction>`].
+    /// Create a new [`PersistenceHandle`] from a [`mpsc::Sender<PersistenceAction>`].
     ///
     /// This is intended for testing purposes where you want to mock the persistence service.
     /// For production use, prefer [`spawn_service`](Self::spawn_service).
-    pub fn new(sender: Sender<PersistenceAction<T>>) -> Self {
+    pub fn new(sender: mpsc::Sender<PersistenceAction<T>>) -> Self {
         Self { sender, _service_guard: Arc::new(ServiceGuard(None)) }
     }
 
@@ -313,12 +311,12 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         N: ProviderNodeTypes,
     {
         // create the initial channels
-        let (db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (db_service_tx, db_service_rx) = mpsc::channel();
 
         // spawn the persistence service
         let db_service =
             PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
-        let join_handle = spawn_os_thread("persistence", || {
+        let join_handle = spawn_thread("persistence", || {
             if let Err(err) = db_service.run() {
                 error!(target: "engine::persistence", ?err, "Persistence service failed");
             }
@@ -335,7 +333,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn send_action(
         &self,
         action: PersistenceAction<T>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.sender.send(action)
     }
 
@@ -347,8 +345,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_blocks(
         &self,
         input: SaveBlocksInput<T>,
-        tx: CrossbeamSender<PersistenceResult>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        tx: Sender<PersistenceResult>,
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveBlocks(input, tx))
     }
 
@@ -359,7 +357,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_finalized_block_number(
         &self,
         finalized_block: u64,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveFinalizedBlock(finalized_block))
     }
 
@@ -370,7 +368,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn save_safe_block_number(
         &self,
         safe_block: u64,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::SaveSafeBlock(safe_block))
     }
 
@@ -382,8 +380,8 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
     pub fn remove_blocks_above(
         &self,
         block_num: u64,
-        tx: CrossbeamSender<PersistenceResult>,
-    ) -> Result<(), SendError<PersistenceAction<T>>> {
+        tx: Sender<PersistenceResult>,
+    ) -> Result<(), mpsc::SendError<PersistenceAction<T>>> {
         self.send_action(PersistenceAction::RemoveBlocksAbove(block_num, tx))
     }
 }
@@ -415,14 +413,15 @@ mod tests {
     use alloy_eips::NumHash;
     use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, B256, U256};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_concurrency::sync::{channel, thread};
     use reth_db::{models::ShardedKey, tables, BlockNumberList};
     use reth_db_common::init::init_genesis;
     use reth_exex_types::FinishedExExHeight;
     use reth_provider::{
         providers::{BlockchainProvider, ProviderFactoryBuilder, ReadOnlyConfig},
         test_utils::{create_test_provider_factory, MockNodeTypes},
-        AccountReader, BalConfig, BalStore, BalStoreHandle, ChainSpecProvider, HeaderProvider,
-        InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
+        AccountReader, BalConfig, BalStore, BalStoreHandle, BlockNumReader, ChainSpecProvider,
+        HeaderProvider, InMemoryBalStore, ProviderError, ProviderResult, RawBal, RocksDBBalStore,
         RocksDBProviderFactory, StateProviderFactory, StorageSettingsCache,
     };
     use reth_prune::Pruner;
@@ -455,7 +454,29 @@ mod tests {
         SaveBlocksInput::new(blocks, prev_tip, prev_tip, new_tip, new_tip)
     }
 
-    #[test]
+    /// A BAL store whose flush and prune both fail.
+    #[derive(Debug)]
+    struct FailingBalStore;
+
+    impl BalStore for FailingBalStore {
+        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
+            Ok(())
+        }
+
+        fn flush(&self, _blocks: &[NumHash]) -> ProviderResult<()> {
+            Err(ProviderError::other(std::io::Error::other("BAL store flush failed")))
+        }
+
+        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
+            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
+        }
+
+        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
+            Ok(vec![None; block_hashes.len()])
+        }
+    }
+
+    #[reth_concurrency::test]
     fn test_pruner_prunes_bal_store() {
         reth_tracing::init_test_tracing();
 
@@ -477,7 +498,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
@@ -489,24 +510,24 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_pruner_ignores_bal_store_prune_error() {
         reth_tracing::init_test_tracing();
 
-        let provider = create_test_provider_factory()
-            .with_bal_store(BalStoreHandle::new(FailingPruneBalStore));
+        let provider =
+            create_test_provider_factory().with_bal_store(BalStoreHandle::new(FailingBalStore));
         let (_finished_exex_height_tx, finished_exex_height_rx) =
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 0, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let mut service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
         service.maybe_run_pruner(2).unwrap();
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_remove_blocks_above_requires_tip_header() {
         let provider = create_test_provider_factory();
         init_genesis(&provider).unwrap();
@@ -515,7 +536,7 @@ mod tests {
             tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
         let pruner =
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
-        let (_db_service_tx, db_service_rx) = std::sync::mpsc::channel();
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let service = PersistenceService::new(provider, db_service_rx, pruner, sync_metrics_tx);
 
@@ -525,24 +546,7 @@ mod tests {
         ));
     }
 
-    #[derive(Debug)]
-    struct FailingPruneBalStore;
-
-    impl BalStore for FailingPruneBalStore {
-        fn insert(&self, _num_hash: NumHash, _bal: RawBal) -> ProviderResult<()> {
-            Ok(())
-        }
-
-        fn prune(&self, _tip: BlockNumber) -> ProviderResult<usize> {
-            Err(ProviderError::other(std::io::Error::other("BAL store prune failed")))
-        }
-
-        fn get_by_hashes(&self, block_hashes: &[BlockHash]) -> ProviderResult<Vec<Option<Bytes>>> {
-            Ok(vec![None; block_hashes.len()])
-        }
-    }
-
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_single_block() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -553,7 +557,7 @@ mod tests {
         let block_hash = executed.recovered_block().hash();
 
         let blocks = full_save_input(vec![executed]);
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
 
         handle.save_blocks(blocks, tx).unwrap();
 
@@ -563,7 +567,7 @@ mod tests {
         assert_eq!(result.last_state_trie_block, result.last_block);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_flushes_bal_store() {
         reth_tracing::init_test_tracing();
         let provider = create_test_provider_factory();
@@ -588,7 +592,7 @@ mod tests {
             pruner,
             sync_metrics_tx,
         );
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
 
         handle.save_blocks(full_save_input(vec![executed]), tx).unwrap();
 
@@ -598,7 +602,73 @@ mod tests {
         assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
     }
 
-    #[test]
+    #[reth_concurrency::test]
+    fn test_save_blocks_does_not_commit_on_bal_flush_error() {
+        reth_tracing::init_test_tracing();
+        let provider =
+            create_test_provider_factory().with_bal_store(BalStoreHandle::new(FailingBalStore));
+        init_genesis(&provider).unwrap();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+
+        assert!(matches!(
+            service.on_save_blocks(full_save_input(vec![executed])),
+            Err(PersistenceError::ProviderError(_))
+        ));
+        assert_eq!(provider.last_block_number().unwrap(), 0);
+    }
+
+    #[reth_concurrency::test]
+    fn test_save_blocks_retries_after_commit_failure_with_flushed_bal() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory();
+        let bal_store = BalStoreHandle::new(RocksDBBalStore::new(provider.rocksdb_provider()));
+        let provider = provider.with_bal_store(bal_store);
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+        let (_db_service_tx, db_service_rx) = mpsc::channel();
+        let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
+        let mut service =
+            PersistenceService::new(provider.clone(), db_service_rx, pruner, sync_metrics_tx);
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(1, B256::random());
+        let num_hash = executed.recovered_block().num_hash();
+        let raw_bal = Bytes::from_static(&[0xc0]);
+        provider.bal_store().insert(num_hash, RawBal::new(raw_bal.clone())).unwrap();
+
+        // Without genesis, the unadvanced state/trie frontier at block 0 has no header, so the
+        // save fails after the BAL flush and before the commit, like a crash between the two.
+        assert!(matches!(
+            service.on_save_blocks(SaveBlocksInput::new(vec![executed.clone()], 0, 0, 1, 0)),
+            Err(PersistenceError::ProviderError(ProviderError::HeaderNotFound(_)))
+        ));
+        let persisted_store = RocksDBBalStore::new(provider.rocksdb_provider());
+        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal.clone()));
+        assert!(provider.header(num_hash.hash).unwrap().is_none());
+
+        // The leftover BAL does not get in the way of persisting the block again.
+        init_genesis(&provider).unwrap();
+        let result = service.on_save_blocks(full_save_input(vec![executed])).unwrap();
+        assert_eq!(result.last_block, num_hash);
+        assert_eq!(provider.last_block_number().unwrap(), 1);
+        assert_eq!(persisted_store.get_by_hash(num_hash.hash).unwrap(), Some(raw_bal));
+    }
+
+    #[reth_concurrency::test]
     fn test_save_blocks_multiple_blocks() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -606,14 +676,14 @@ mod tests {
         let mut test_block_builder = TestBlockBuilder::eth();
         let blocks = test_block_builder.get_executed_blocks(1..6).collect::<Vec<_>>();
         let last_hash = blocks.last().unwrap().recovered_block().hash();
-        let (tx, rx) = crossbeam_channel::bounded(1);
+        let (tx, rx) = channel::bounded(1);
 
         handle.save_blocks(full_save_input(blocks), tx).unwrap();
         let result = rx.recv().unwrap();
         assert_eq!(last_hash, result.last_block.hash);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_multiple_calls() {
         reth_tracing::init_test_tracing();
         let handle = default_persistence_handle();
@@ -623,7 +693,7 @@ mod tests {
         for range in ranges {
             let blocks = test_block_builder.get_executed_blocks(range).collect::<Vec<_>>();
             let last_hash = blocks.last().unwrap().recovered_block().hash();
-            let (tx, rx) = crossbeam_channel::bounded(1);
+            let (tx, rx) = channel::bounded(1);
 
             handle.save_blocks(full_save_input(blocks), tx).unwrap();
 
@@ -639,7 +709,7 @@ mod tests {
     /// a single commit. Both read committed state, so the pruner didn't see the
     /// new entries and its batch overwrote them. The fix commits `save_blocks`
     /// first, then runs the pruner against committed state in a separate provider.
-    #[test]
+    #[reth_concurrency::test]
     fn test_save_blocks_then_prune_preserves_new_history() {
         reth_tracing::init_test_tracing();
 
@@ -678,6 +748,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(all(feature = "fuzz", dst), ignore = "native directory watcher")]
     fn test_read_only_consistency_across_reorg() {
         reth_tracing::init_test_tracing();
 
@@ -771,7 +842,7 @@ mod tests {
         // reorg thread is on
         #[expect(clippy::redundant_clone)]
         let pf = provider_factory.clone();
-        let reorg_handle = std::thread::spawn(move || {
+        let reorg_handle = thread::spawn(move || {
             let provider_rw = pf.database_provider_rw().unwrap();
             let frontiers = provider_rw.remove_block_and_execution_above(1).unwrap();
             assert_eq!(frontiers.partial_state_trie, 1);
@@ -784,7 +855,7 @@ mod tests {
         });
 
         // Give the reorg thread time to start and block on wait_for_pre_commit_readers.
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        thread::sleep(Duration::from_millis(100));
 
         // The pre-reorg provider still holds its MDBX snapshot — it must still see
         // the OLD block 2 from before the reorg.

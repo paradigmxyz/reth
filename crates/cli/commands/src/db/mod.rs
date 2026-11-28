@@ -173,6 +173,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                 db_exec!(self.env, tool, N, AccessRights::RW, {
                     tool.drop(db_path, static_files_path, exex_wal_path)?;
+                    // Close RocksDB before removing its directory.
+                    drop(tool);
+                    reth_fs_util::remove_dir_all(data_dir.rocksdb())?;
                 });
             }
             Subcommands::Clear(command) => {

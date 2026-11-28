@@ -12,10 +12,7 @@ use reth_trie::{
     updates::TrieUpdates, HashedPostStateSorted, HashedStorageSorted, StateRoot, StateRootProgress,
     TrieInputSorted,
 };
-use std::{
-    collections::HashSet,
-    ops::{Bound, RangeBounds, RangeInclusive},
-};
+use std::{collections::HashSet, ops::RangeInclusive};
 use tracing::{debug, instrument};
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
@@ -95,6 +92,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot};
     /// use reth_trie_db::{DatabaseStateRoot, LegacyKeyAdapter};
     ///
+    /// # reth_concurrency::sync::Runtime::new().run(|| {
     /// // Initialize the database
     /// let db = create_test_rw_db();
     ///
@@ -111,6 +109,7 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ///     reth_trie_db::DatabaseTrieCursorFactory<_, LegacyKeyAdapter>,
     ///     reth_trie_db::DatabaseHashedCursorFactory<_>,
     /// > as DatabaseStateRoot<_>>::overlay_root(&tx, &hashed_state.into_sorted());
+    /// # });
     /// ```
     ///
     /// # Returns
@@ -145,7 +144,7 @@ pub trait DatabaseHashedPostState: Sized {
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader),
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<HashedPostStateSorted, ProviderError>;
 }
 
@@ -264,55 +263,38 @@ impl<'a, TX: DbTx, A: crate::TrieTableAdapter> DatabaseStateRoot<'a, TX>
 impl DatabaseHashedPostState for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
-    /// Reads MDBX data directly into Vecs, using `HashSet`s only to track seen keys.
-    /// This avoids intermediate `HashMap` allocations since MDBX data is already sorted.
+    /// Reads changesets one block at a time, so memory grows with the number of distinct changed
+    /// keys rather than with the number of changeset rows in the range. `HashSet`s track seen
+    /// keys; changeset rows are already sorted, so no intermediate `HashMap` is needed.
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Addresses are always keccak256-hashed.
     /// - Storage keys are always plain and are hashed via `keccak256`.
     /// - Returns keys already ordered for trie iteration.
-    #[instrument(target = "trie::db", skip(provider), fields(range))]
+    #[instrument(target = "trie::db", skip(provider))]
     fn from_reverts(
         provider: &(impl ChangeSetReader + StorageChangeSetReader),
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> Result<Self, ProviderError> {
-        // Extract concrete start/end values to use for both account and storage changesets.
-        let start = match range.start_bound() {
-            Bound::Included(&n) => n,
-            Bound::Excluded(&n) => n + 1,
-            Bound::Unbounded => 0,
-        };
-
-        let end = match range.end_bound() {
-            Bound::Included(&n) => n + 1,
-            Bound::Excluded(&n) => n,
-            Bound::Unbounded => BlockNumber::MAX,
-        };
-
-        // Iterate over account changesets and record value before first occurring account change
         let mut accounts = Vec::new();
         let mut seen_accounts = HashSet::new();
-        for entry in provider.account_changesets_range(start..end)? {
-            let (_, AccountBeforeTx { address, info }) = entry;
-            if seen_accounts.insert(address) {
-                accounts.push((keccak256(address), info));
-            }
-        }
-        accounts.sort_unstable_by_key(|(hash, _)| *hash);
-
-        // Read storages into B256Map<Vec<_>> with HashSet to track seen keys.
         // Only keep the first (oldest) occurrence of each (address, slot) pair.
         let mut storages = B256Map::<Vec<_>>::default();
         let mut seen_storage_keys = HashSet::new();
+        // Rows of a block are ordered by address, so all slots of one account arrive
+        // consecutively and the address hash can be reused across them.
+        let mut last_address: Option<(Address, B256)> = None;
 
-        if start < end {
-            let end_inclusive = end.saturating_sub(1);
-            // Rows are ordered by `BlockNumberAddress`, so all slots of one account arrive
-            // consecutively and the address hash can be reused across them.
-            let mut last_address: Option<(Address, B256)> = None;
-            for (BlockNumberAddress((_, address)), storage) in
-                provider.storage_changesets_range(start..=end_inclusive)?
-            {
+        // Blocks are visited oldest first, so the first occurrence of a key holds its value
+        // before the range.
+        for block in range {
+            for AccountBeforeTx { address, info } in provider.account_block_changeset(block)? {
+                if seen_accounts.insert(address) {
+                    accounts.push((keccak256(address), info));
+                }
+            }
+
+            for (BlockNumberAddress((_, address)), storage) in provider.storage_changeset(block)? {
                 if seen_storage_keys.insert((address, storage.key)) {
                     let hashed_address = match last_address {
                         Some((last, hashed)) if last == address => hashed,
@@ -329,6 +311,7 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
                 }
             }
         }
+        accounts.sort_unstable_by_key(|(hash, _)| *hash);
 
         // Sort storage slots and convert to HashedStorageSorted
         let hashed_storages = storages

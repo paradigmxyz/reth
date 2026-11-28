@@ -30,10 +30,7 @@ pub(super) struct BlobValidationCache {
 
 impl BlobValidationCache {
     /// Validates a V2 bundle, verifying only blobs absent from the cache.
-    pub(super) fn validate(
-        &self,
-        mut bundle: BlobsBundleV2,
-    ) -> Result<Vec<B256>, ValidationApiError> {
+    pub(super) fn validate(&self, bundle: BlobsBundleV2) -> Result<Vec<B256>, ValidationApiError> {
         if bundle.blobs.len() != bundle.commitments.len() ||
             bundle.blobs.len().checked_mul(CELLS_PER_EXT_BLOB) != Some(bundle.proofs.len())
         {
@@ -62,17 +59,9 @@ impl BlobValidationCache {
             return Ok(versioned_hashes)
         }
 
-        let mut cached = BlobsBundleV2::empty();
-        let mut missing = BlobsBundleV2::empty();
-        for hit in hits {
-            let partition = if hit { &mut cached } else { &mut missing };
-            // The checked lengths keep each blob, commitment, and proof group aligned.
-            partition.blobs.extend(bundle.blobs.drain(..1));
-            partition.commitments.extend(bundle.commitments.drain(..1));
-            partition.proofs.extend(bundle.proofs.drain(..CELLS_PER_EXT_BLOB));
-        }
-        drop(cached);
-
+        let (_, missing) = bundle
+            .try_partition_blobs(|index, _, _, _| hits[index])
+            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
         let sidecar =
             missing.try_into_sidecar().map_err(|_| ValidationApiError::InvalidBlobsBundle)?;
         let missing_hashes = sidecar.versioned_hashes().collect::<Vec<_>>();

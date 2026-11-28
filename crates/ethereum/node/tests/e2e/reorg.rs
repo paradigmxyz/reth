@@ -1,12 +1,15 @@
 //! Tests for building forks and reorging with the test context.
 
 use alloy_primitives::B256;
-use alloy_provider::Provider;
-use alloy_rpc_types_engine::ForkchoiceState;
+use alloy_rpc_types_engine::{
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodyV1,
+    ExecutionPayloadBodyV2, ForkchoiceState,
+};
 use reth_chainspec::EthereumHardfork;
-use reth_e2e_test_utils::{node::Finality, E2ETestSetupExt};
+use reth_e2e_test_utils::{node::Finality, wait::poll_until, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
-use reth_storage_api::BlockReader;
+use reth_payload_primitives::BuiltPayload;
+use reth_provider::BalProvider;
 
 /// Tests ancestor rewinds, switching chains, reading reverted blocks by hash, and rejecting reorgs
 /// below finality.
@@ -41,11 +44,16 @@ async fn can_build_forks_and_reorg() -> eyre::Result<()> {
     node.reorg_to(a2).await?;
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, a2);
 
-    // The reorged-out tip is still served by hash, through RPC and the provider read behind
-    // `engine_getPayloadBodiesByHash*`.
-    let block = node.rpc_provider().get_block_by_hash(b3).await?;
-    assert_eq!(block.map(|block| block.header.hash), Some(b3));
-    assert_eq!(node.inner.provider.block(b3.into())?.map(|block| block.hash_slow()), Some(b3));
+    let engine = node.auth_server_handle().http_client();
+    let b3_body = ExecutionPayloadBodyV1::from(b[2].block().clone().into_block());
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV1>("engine_getPayloadBodiesByHashV1", (vec![b3],))
+        .await?;
+    assert_eq!(bodies, vec![Some(b3_body.clone())]);
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV2>("engine_getPayloadBodiesByHashV2", (vec![b3],))
+        .await?;
+    assert_eq!(bodies, vec![Some(b3_body.into())]);
 
     node.reorg_to(a1).await?;
     assert_eq!(node.current_forkchoice_state()?.head_block_hash, a1);
@@ -76,6 +84,56 @@ async fn can_build_forks_and_reorg() -> eyre::Result<()> {
         )
     );
     assert_eq!(node.current_forkchoice_state()?, ForkchoiceState::same_hash(a3));
+
+    Ok(())
+}
+
+/// Tests that the engine API serves the BAL of a side chain block from the engine tree after the
+/// BAL store evicted it.
+#[tokio::test]
+async fn serves_evicted_side_chain_bal() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut nodes, _) = EthereumNode::test_setup_for(EthereumHardfork::Amsterdam)
+        .with_num_nodes(2)
+        .with_connect_nodes(false)
+        .with_tree_config_modifier(|config| {
+            config.with_persistence_threshold(0).with_memory_block_buffer_target(0)
+        })
+        .build()
+        .await?;
+    let mut target = nodes.pop().unwrap();
+    let mut source = nodes.pop().unwrap();
+    source.set_finality(Finality::Keep);
+    target.set_finality(Finality::Keep);
+
+    // The target validates the side block from its payload, which attaches the BAL to it.
+    let side = source.new_payload().await?;
+    let expected = ExecutionPayloadBodyV2 {
+        block_access_list: side.block_access_list().cloned(),
+        ..ExecutionPayloadBodyV1::from(side.block().clone().into_block()).into()
+    };
+    assert!(expected.block_access_list.is_some());
+    let side_hash = target.submit_payload(side).await?;
+
+    // The store evicts a non-canonical BAL once the persisted tip is more than 32 blocks above it.
+    for payload in source.advance_blocks(36).await? {
+        target.import_payload(payload).await?;
+    }
+    let provider = &target.inner.provider;
+    poll_until("the side chain BAL to be evicted", || async {
+        Ok(provider.bal_store().get_by_hash(side_hash)?.is_none().then_some(()))
+    })
+    .await?;
+
+    let engine = target.auth_server_handle().http_client();
+    let bodies = engine
+        .request::<_, ExecutionPayloadBodiesV2>(
+            "engine_getPayloadBodiesByHashV2",
+            (vec![side_hash],),
+        )
+        .await?;
+    assert_eq!(bodies, vec![Some(expected)]);
 
     Ok(())
 }

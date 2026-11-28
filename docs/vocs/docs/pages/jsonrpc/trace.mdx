@@ -224,9 +224,13 @@ The first parameter is a list of call traces, where each call trace is of the fo
 
 The second and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                          |
-| ------ | ---------------------------------------------------------- |
-| RPC    | `{"method": "trace_callMany", "params": [[[tx, type[]], ...], block]}` |
+The third and optional parameter is a `stateOverrides` object, applied once before the first call.
+
+The fourth and optional parameter is a `blockOverrides` object, applied to every call.
+
+| Client | Method invocation                                                                                   |
+| ------ | --------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "trace_callMany", "params": [[[tx, type[]], ...], block, stateOverrides, blockOverrides]}` |
 
 ### Example
 
@@ -458,6 +462,7 @@ Filters are objects with the following properties:
 
 -   `fromBlock`: Returns traces from the given block (a number, hash, or a tag like `latest`).
 -   `toBlock`: Returns traces to the given block.
+-   `blockHash`: Returns traces from the block with this hash. Cannot be combined with `fromBlock` or `toBlock`.
 -   `fromAddress`: Sent from these addresses
 -   `toAddress`: Sent to these addresses
 -   `after`: The offset trace number
@@ -504,7 +509,7 @@ All properties are optional.
 
 ## `trace_get`
 
-Returns trace at given position.
+Returns the trace at the given `traceAddress` path. Path entries are hex quantities such as `"0x0"`; JSON numbers are rejected as invalid params.
 
 | Client | Method invocation                                        |
 | ------ | -------------------------------------------------------- |

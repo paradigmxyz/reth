@@ -2,6 +2,9 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+#[cfg(all(feature = "fuzz", not(dst), not(feature = "rayon")))]
+use reth_concurrency as _;
+
 mod builder;
 pub use builder::*;
 
@@ -17,3 +20,6 @@ mod multiproof_calculator;
 
 mod provider;
 pub use provider::*;
+
+#[cfg(test)]
+mod test_utils;

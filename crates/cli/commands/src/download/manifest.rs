@@ -1,8 +1,8 @@
 use blake3::Hasher;
 use eyre::{Result, WrapErr};
-use rayon::prelude::*;
 use reqwest::Client;
-use reth_db::static_file::iter_static_files;
+use reth_concurrency::sync::rayon::prelude::*;
+use reth_db::static_file::{iter_static_files, StaticFileEntry};
 use reth_static_file_types::StaticFileSegment;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -189,7 +189,8 @@ impl OutputFileChecksum {
 pub struct SnapshotArchive {
     pub url: String,
     pub file_name: String,
-    pub size: u64,
+    /// Compressed archive size, or `None` when an older chunked manifest omits chunk sizes.
+    pub size: Option<u64>,
     pub blake3: Option<String>,
     pub output_files: Vec<OutputFileChecksum>,
 }
@@ -416,7 +417,7 @@ impl SnapshotManifest {
                 (start_chunk..num_chunks)
                     .map(|i| {
                         let file_name = chunked.chunk_relative_path(key, i);
-                        let size = chunked.chunk_sizes.get(i as usize).copied().unwrap_or_default();
+                        let size = chunked.chunk_sizes.get(i as usize).copied();
                         let output_files =
                             chunked.chunk_output_files.get(i as usize).cloned().unwrap_or_default();
 
@@ -675,7 +676,7 @@ impl SingleArchive {
         SnapshotArchive {
             url: resolve_archive_url(base_url, &self.file),
             file_name: self.file.clone(),
-            size: self.size,
+            size: Some(self.size),
             blake3: self.blake3.clone(),
             output_files: self.output_files.clone(),
         }
@@ -752,9 +753,11 @@ pub fn generate_manifest(
     ] {
         let key = ty.key();
         let segment = static_segment(*ty).expect("chunked components have a static file segment");
-        let Some((last_range, _)) = static_files.get(segment).and_then(|ranges| {
-            ranges.iter().rfind(|(_, header)| header.expected_block_range().start() <= block)
-        }) else {
+        let Some(StaticFileEntry { block_range: last_range, .. }) =
+            static_files.get(segment).and_then(|files| {
+                files.iter().rfind(|file| file.header.expected_block_range().start() <= block)
+            })
+        else {
             continue;
         };
 
@@ -849,6 +852,23 @@ pub fn generate_manifest(
                 .collect::<Result<Vec<_>>>()?;
 
             packaged_chunks.sort_unstable_by_key(|chunk| chunk.chunk_idx);
+            // Chunked manifests index their arrays from block zero. An explicitly listed
+            // archive set can represent the transaction files left after pruning that prefix.
+            if *ty == SnapshotComponentType::Transactions && packaged_chunks[0].chunk_idx != 0 {
+                let archives = packaged_chunks
+                    .into_iter()
+                    .map(|chunk| SingleArchive {
+                        file: chunk.file,
+                        size: chunk.size,
+                        decompressed_size: chunk.output_files.iter().map(|file| file.size).sum(),
+                        blake3: None,
+                        output_files: chunk.output_files,
+                    })
+                    .collect();
+                components
+                    .insert(key.to_string(), ComponentManifest::Files(ArchiveSet { archives }));
+                continue
+            }
             let chunk_files = packaged_chunks.iter().map(|chunk| chunk.file.clone()).collect();
             let chunk_sizes = packaged_chunks.iter().map(|chunk| chunk.size).collect::<Vec<_>>();
             let chunk_output_files =
@@ -1284,7 +1304,7 @@ impl<R: Read> Read for HashingReader<R> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::B256;
@@ -1345,7 +1365,7 @@ mod tests {
         source
     }
 
-    fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
+    pub(crate) fn write_test_static_files(source: &Path, segment: StaticFileSegment, tip: u64) {
         let static_files = source.join("static_files");
         reth_fs_util::create_dir_all(&static_files).unwrap();
 
@@ -1790,6 +1810,23 @@ mod tests {
         assert_eq!(m.size_for_distance(SnapshotComponentType::State, Some(100)), 100);
         // Missing component
         assert_eq!(m.size_for_distance(SnapshotComponentType::Receipts, None), 0);
+    }
+
+    #[test]
+    fn snapshot_archive_size_is_none_only_when_chunk_size_is_missing() {
+        let mut m = test_manifest();
+        if let Some(ComponentManifest::Single(single)) = m.components.get_mut("state") {
+            single.size = 0;
+        }
+        if let Some(ComponentManifest::Chunked(chunked)) = m.components.get_mut("headers") {
+            chunked.chunk_sizes.clear();
+        }
+
+        let state = m.snapshot_archives_for_distance(SnapshotComponentType::State, None);
+        let headers = m.snapshot_archives_for_distance(SnapshotComponentType::Headers, None);
+
+        assert_eq!(state[0].size, Some(0));
+        assert!(headers.iter().all(|archive| archive.size.is_none()));
     }
 
     #[test]

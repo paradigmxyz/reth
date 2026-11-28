@@ -10,7 +10,14 @@ use alloy_primitives::{map::B256Map, B256};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use error::InsertBlockFatalError;
 use payload_build::PayloadBuildTracker;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats};
+use reth_chain_state::{
+    CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, ExecutionTimingStats,
+};
+use reth_concurrency::sync::{
+    channel,
+    channel::{mpsc, select_biased, Receiver, Sender},
+    time::FastInstant as Instant,
+};
 use reth_consensus::FullConsensus;
 use reth_engine_primitives::{
     BeaconEngineMessage, ConsensusEngineEvent, ExecutionPayload, ForkchoiceStateTracker,
@@ -20,18 +27,17 @@ use reth_errors::ProviderResult;
 use reth_evm::ConfigureEvm;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
     StorageSettingsCache,
 };
 use reth_storage_overlay::OverlayManager;
-use reth_tasks::{spawn_os_thread, utils::increase_thread_priority};
+use reth_tasks::{spawn_thread, utils::increase_thread_priority};
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Duration};
 
-use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot,
@@ -110,7 +116,6 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
         max_invalid_header_cache_length: u32,
         invalid_header_hit_eviction_threshold: u8,
         canonical_block: BlockNumHash,
-        engine_kind: EngineApiKind,
         overlay_manager: OverlayManager<N>,
     ) -> Self {
         Self {
@@ -119,7 +124,7 @@ impl<N: NodePrimitives> EngineApiTreeState<N> {
                 invalid_header_hit_eviction_threshold,
             ),
             buffer: BlockBuffer::new(block_buffer_limit),
-            tree_state: TreeState::new(canonical_block, engine_kind, overlay_manager),
+            tree_state: TreeState::new(canonical_block, overlay_manager),
             pending_sparse_trie_prune: false,
             forkchoice_state_tracker: ForkchoiceStateTracker::default(),
         }
@@ -281,9 +286,12 @@ where
     persistence_state: PersistenceState,
     /// Flag indicating the state of the node's backfill synchronization process.
     backfill_sync_state: BackfillSyncState,
-    /// Keeps track of the state of the canonical chain that isn't persisted yet.
-    /// This is intended to be accessed from external sources, such as rpc.
-    canonical_in_memory_state: CanonicalInMemoryState<N>,
+    /// Changes the state of the canonical chain that isn't persisted yet: its executed blocks,
+    /// its chain info, and the notifications it sends.
+    ///
+    /// The engine reads that state through [`Self::canonical_in_memory_state`]. Its clones are
+    /// intended to be accessed from external sources, such as rpc.
+    canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
     /// Handle to the payload builder that will receive payload attributes for valid forkchoice
     /// updates
     payload_builder: PayloadBuilderHandle<T>,
@@ -323,7 +331,7 @@ where
             .field("persistence", &self.persistence)
             .field("persistence_state", &self.persistence_state)
             .field("backfill_sync_state", &self.backfill_sync_state)
-            .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("canonical_in_memory_state_writer", &self.canonical_in_memory_state_writer)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
             .field("metrics", &self.metrics)
@@ -365,7 +373,7 @@ where
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
+        canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
         persistence: PersistenceHandle<N>,
         persistence_state: PersistenceState,
         payload_builder: PayloadBuilderHandle<T>,
@@ -374,7 +382,7 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> Self {
-        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
+        let (incoming_tx, incoming) = channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
 
@@ -388,7 +396,7 @@ where
             persistence_state,
             backfill_sync_state: BackfillSyncState::Idle,
             state,
-            canonical_in_memory_state,
+            canonical_in_memory_state_writer,
             payload_builder,
             config,
             metrics: Default::default(),
@@ -414,7 +422,7 @@ where
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
-        canonical_in_memory_state: CanonicalInMemoryState<N>,
+        canonical_in_memory_state_writer: CanonicalInMemoryStateWriter<N>,
         overlay_manager: OverlayManager<N>,
         config: TreeConfig,
         kind: EngineApiKind,
@@ -437,7 +445,6 @@ where
             config.max_invalid_header_cache_length(),
             config.invalid_header_hit_eviction_threshold(),
             header.num_hash(),
-            kind,
             overlay_manager,
         );
 
@@ -447,7 +454,7 @@ where
             payload_validator,
             tx,
             state,
-            canonical_in_memory_state,
+            canonical_in_memory_state_writer,
             persistence,
             persistence_state,
             payload_builder,
@@ -457,7 +464,7 @@ where
             runtime,
         );
         let incoming = task.incoming_tx.clone();
-        spawn_os_thread("engine", || {
+        spawn_thread("engine", || {
             increase_thread_priority();
             task.run()
         });
@@ -605,7 +612,7 @@ where
         if let Some((persistence_rx, start_time, action)) = maybe_persistence {
             // Biased select prioritizes persistence completion to update in memory state and
             // unblock further writes
-            crossbeam_channel::select_biased! {
+            select_biased! {
                 recv(persistence_rx) -> result => {
                     // Don't put it back - consumed (oneshot-like behavior)
                     match result {
@@ -635,7 +642,7 @@ where
             }
         } else {
             // No persistence in progress - wait on an incoming message or payload job completion.
-            crossbeam_channel::select_biased! {
+            select_biased! {
                 recv(self.payload_build_finished) -> result => match result {
                     Ok(()) => LoopEvent::PayloadBuildFinished,
                     Err(_) => LoopEvent::Disconnected,
@@ -702,18 +709,21 @@ where
 
                         let is_pending = self.state.tree_state.canonical_block_hash() ==
                             block.recovered_block().parent_hash();
-                        self.state.tree_state.insert_executed(block.clone());
+
+                        if is_pending {
+                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
+                            self.canonical_in_memory_state_writer.set_pending_block(block.clone());
+                        } else {
+                            self.canonical_in_memory_state_writer.insert_executed(block.clone());
+                        }
+                        self.state
+                            .tree_state
+                            .overlay_manager
+                            .precompute_child_execution_overlays(block_num_hash.hash);
                         self.metrics
                             .engine
                             .executed_blocks
                             .set(self.state.tree_state.block_count() as f64);
-
-                        if is_pending {
-                            debug!(target: "engine::tree", pending=?block_num_hash, "updating pending block");
-                            self.canonical_in_memory_state.set_pending_block(block.clone());
-                        } else {
-                            self.canonical_in_memory_state.insert_executed(block.clone());
-                        }
 
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         self.emit_event(EngineApiEvent::BeaconConsensus(
@@ -822,8 +832,7 @@ where
                                 let explicit_persistence_wait = if wait_for_persistence {
                                     let pending_persistence = self.persistence_state.rx.take();
                                     if let Some((rx, start_time, _action)) = pending_persistence {
-                                        let (persistence_tx, persistence_rx) =
-                                            std::sync::mpsc::channel();
+                                        let (persistence_tx, persistence_rx) = mpsc::channel();
                                         self.runtime.spawn_blocking_named(
                                             "wait-persist",
                                             move || {
@@ -981,6 +990,12 @@ where
         let _ = self.outgoing.send(event).inspect_err(
             |err| error!(target: "engine::tree", "Failed to send internal event: {err:?}"),
         );
+    }
+
+    /// Returns the state of the canonical chain that isn't persisted yet, which the engine
+    /// changes through its writer.
+    const fn canonical_in_memory_state(&self) -> &CanonicalInMemoryState<N> {
+        self.canonical_in_memory_state_writer.canonical_in_memory_state()
     }
 }
 

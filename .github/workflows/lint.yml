@@ -47,7 +47,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: nightly-2026-10-31
+          toolchain: nightly-2026-11-18
           components: clippy
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -75,7 +75,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: nightly-2026-10-31
+          toolchain: nightly-2026-11-18
           components: clippy
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -88,6 +88,95 @@ jobs:
       - run: cargo clippy --workspace --lib --examples --tests --benches --locked
         env:
           RUSTFLAGS: -D warnings
+      # The primitive gate is pinned independently of the general workspace lint.
+      - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
+        with:
+          toolchain: nightly-2026-10-31
+          components: clippy
+      # Lint migrated workload libraries, not native dependency implementations (e.g. MDBX).
+      # Native tests and backend adapters are covered by their normal lint/test jobs.
+      # Clippy resolves native aliases to banned types, so this separate gate needs DST.
+      # Plain fuzz keeps native primitives and is covered by general all-features Clippy.
+      - name: Reject native primitives in DST workload libraries
+        run: |
+          status=0
+          report=$(mktemp)
+          trap 'rm -f "$report"' EXIT
+          for profile in fuzz all-features; do
+            args=(--features fuzz)
+            if [[ "$profile" == all-features ]]; then args=(--all-features); fi
+            cargo clippy --no-deps --lib \
+              -p reth-tasks -p reth-engine-tree -p reth-execution-cache \
+              -p reth-trie-common -p reth-trie -p reth-trie-sparse -p reth-trie-parallel \
+              "${args[@]}" --locked --message-format=json -- \
+              --warn clippy::disallowed_types --warn clippy::disallowed_methods \
+              --warn clippy::disallowed_macros > "$report" || status=1
+            python3 - "$report" <<'PYTHON' || status=1
+          import json
+          import sys
+
+          # Expanded thread_local! diagnostics ignore allowances on these host TLS declarations.
+          tls = {
+              "crates/tasks/src/pool.rs": "WORKERS",
+          }
+          failed = False
+          finished = False
+          with open(sys.argv[1]) as report:
+              for line in report:
+                  item = json.loads(line)
+                  if item["reason"] == "build-finished":
+                      finished = item["success"]
+                  if item["reason"] != "compiler-message":
+                      continue
+                  diagnostic = item["message"]
+                  lint = (diagnostic.get("code") or {}).get("code", "")
+                  spans = [span for span in diagnostic["spans"] if span["is_primary"]]
+                  exempt = False
+                  for span in spans:
+                      macros = []
+                      while span.get("expansion"):
+                          macros.append(span["expansion"]["macro_decl_name"])
+                          span = span["expansion"]["span"]
+                      path = span["file_name"]
+                      source = "\n".join(part["text"][part["highlight_start"] - 1:part["highlight_end"] - 1]
+                                         for part in span["text"]).strip()
+                      exempt |= (lint == "clippy::disallowed_macros"
+                                 and diagnostic["message"] == "use of a disallowed macro `std::thread_local`"
+                                 and path in tls
+                                 and source.startswith(("thread_local! {", "std::thread_local! {"))
+                                 and any(line.strip().startswith(f"static {tls[path]}:")
+                                         for line in source.splitlines()))
+                      # Metrics registration and Arbitrary's recursion guard are host internals,
+                      # not workload synchronization. Match both expansion and native symbol.
+                      symbol = diagnostic["message"].split("`")[1] if "`" in diagnostic["message"] else ""
+                      exempt |= (any("derive(Metrics" in macro or "derive(reth_metrics::Metrics" in macro
+                                     for macro in macros)
+                                 and symbol in {"std::sync::Once", "std::sync::OnceLock",
+                                                "std::sync::Once::new", "std::sync::Once::call_once",
+                                                "std::sync::OnceLock::new", "std::sync::OnceLock::get_or_init"})
+                      exempt |= ("#[derive(arbitrary::Arbitrary)]" in macros
+                                 and symbol in {"std::thread_local", "std::thread::LocalKey"})
+                      # Ingress latency uses the timestamp supplied by the native Engine API.
+                      exempt |= (path == "crates/engine/tree/src/tree/mod.rs"
+                                 and source == "elapsed"
+                                 and any(part["text"].strip() == "let backpressure_wait = enqueued_at.elapsed();"
+                                         for part in span["text"])
+                                 and symbol == "std::time::Instant::elapsed")
+                  if exempt and lint in {"clippy::disallowed_types", "clippy::disallowed_methods",
+                                         "clippy::disallowed_macros"}:
+                      continue
+                  if diagnostic.get("rendered"):
+                      print(diagnostic["rendered"], end="", file=sys.stderr)
+                  failed |= lint in {"clippy::disallowed_types", "clippy::disallowed_methods",
+                                     "clippy::disallowed_macros"} or diagnostic["level"] == "error"
+          sys.exit(failed or not finished)
+          PYTHON
+          done
+          exit "$status"
+        env:
+          CLIPPY_CONF_DIR: ${{ github.workspace }}/.config/fuzz-primitives
+          RUSTFLAGS: --cfg dst
+          RUSTUP_TOOLCHAIN: nightly-2026-10-31
 
   wasm:
     runs-on: ${{ github.repository == 'paradigmxyz/reth' && 'depot-ubuntu-latest' || 'ubuntu-latest' }}
@@ -203,7 +292,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: "1.96" # MSRV
+          toolchain: "1.100" # MSRV
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -229,7 +318,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: nightly-2026-10-31
+          toolchain: nightly-2026-11-18
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -279,7 +368,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: nightly-2026-10-31
+          toolchain: nightly-2026-11-18
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
@@ -309,7 +398,7 @@ jobs:
       - run: .github/scripts/install_llvm.sh ubuntu
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         with:
-          toolchain: nightly-2026-10-31
+          toolchain: nightly-2026-11-18
       - uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:

@@ -4,9 +4,10 @@ use super::{
 };
 use blake3::Hasher;
 use eyre::Result;
-use rayon::prelude::*;
+use reth_concurrency::sync::rayon::{self, prelude::*};
 use reth_fs_util::{self as fs, FsPathError};
 use std::{
+    collections::HashMap,
     io::{ErrorKind, Read},
     mem,
     path::{Path, PathBuf},
@@ -15,6 +16,23 @@ use tracing::warn;
 
 /// Read size per hash update. Large enough for `update_rayon` to split across threads.
 const HASH_BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
+/// Sizes and BLAKE3 hashes of regular files, computed from the bytes extraction wrote to them,
+/// keyed by output path.
+#[derive(Debug, Default)]
+pub(crate) struct ExtractedHashes(HashMap<PathBuf, (u64, blake3::Hash)>);
+
+impl ExtractedHashes {
+    /// Records the size and hash of the file written to `path`.
+    pub(crate) fn insert(&mut self, path: PathBuf, size: u64, hash: blake3::Hash) {
+        self.0.insert(path, (size, hash));
+    }
+
+    /// Drops every recorded hash.
+    pub(crate) fn clear(&mut self) {
+        self.0.clear();
+    }
+}
 
 /// Verifies and cleans up extracted output files in one target directory.
 pub(crate) struct OutputVerifier<'a> {
@@ -34,17 +52,20 @@ impl<'a> OutputVerifier<'a> {
     /// Returns `false` if any file is missing, mismatched, or no outputs were declared, and an
     /// error if a file exists but cannot be inspected or read.
     pub(crate) fn verify(&self, output_files: &[OutputFileChecksum]) -> Result<bool> {
-        self.verify_with_progress(output_files, None)
+        self.verify_with_progress(output_files, None, None)
     }
 
     /// Returns `true` only when every declared output file exists and matches size and BLAKE3,
     /// updating the optional verification progress as file bytes are hashed.
     ///
-    /// Sizes are checked before any file is hashed, then files are hashed in parallel.
+    /// Sizes are checked before any file is hashed, then files are hashed in parallel. A file
+    /// with a hash in `extracted` of its declared size is checked against that hash instead of
+    /// being read back, but must still open for reading.
     pub(crate) fn verify_with_progress(
         &self,
         output_files: &[OutputFileChecksum],
         progress: Option<&ArchiveVerificationProgress<'_>>,
+        extracted: Option<&ExtractedHashes>,
     ) -> Result<bool> {
         if output_files.is_empty() {
             return Ok(false);
@@ -69,6 +90,16 @@ impl<'a> OutputVerifier<'a> {
             .par_iter()
             .zip(paths)
             .map(|(expected, path)| {
+                if let Some(&(size, hash)) = extracted.and_then(|hashes| hashes.0.get(&path)) &&
+                    size == expected.size
+                {
+                    // The archive sets the file mode, which can leave the output unreadable.
+                    fs::open(&path)?;
+                    if let Some(progress) = progress {
+                        progress.record_verified(size);
+                    }
+                    return Ok(hash.to_hex().eq_ignore_ascii_case(&expected.blake3))
+                }
                 Self::file_blake3_hex(&path, expected.size, progress)
                     .map(|actual| actual.eq_ignore_ascii_case(&expected.blake3))
             })
@@ -139,7 +170,10 @@ impl<'a> OutputVerifier<'a> {
         while filled > 0 {
             let (_, read) = rayon::join(
                 || {
+                    #[cfg(not(all(feature = "fuzz", dst)))]
                     hasher.update_rayon(&current[..filled]);
+                    #[cfg(all(feature = "fuzz", dst))]
+                    hasher.update(&current[..filled]);
                 },
                 || read_full(&mut file, &mut next),
             );

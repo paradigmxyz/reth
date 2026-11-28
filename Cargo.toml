@@ -1,7 +1,7 @@
 [workspace.package]
 version = "2.11.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.100"
 license = "MIT OR Apache-2.0"
 homepage = "https://paradigmxyz.github.io/reth"
 repository = "https://github.com/paradigmxyz/reth"
@@ -18,6 +18,8 @@ members = [
     "crates/cli/commands/",
     "crates/cli/runner/",
     "crates/cli/util/",
+    "crates/concurrency/",
+    "crates/concurrency/macros/",
     "crates/config/",
     "crates/consensus/common/",
     "crates/consensus/consensus/",
@@ -173,7 +175,7 @@ rust.rust_2018_idioms = { level = "deny", priority = -1 }
 rust.unreachable_pub = "warn"
 rust.unused_must_use = "deny"
 rust.rust_2024_incompatible_pat = "warn"
-rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)', 'cfg(reth_sparse_trie_coverage)'] }
+rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dst)', 'cfg(tokio_unstable)', 'cfg(reth_sparse_trie_coverage)'] }
 rustdoc.all = "warn"
 # rust.unnameable-types = "warn"
 
@@ -206,7 +208,7 @@ iter_on_empty_collections = "warn"
 iter_on_single_items = "warn"
 iter_with_drain = "warn"
 iter_without_into_iter = "warn"
-large_stack_frames = "warn"
+large_unopt_stack_frames = "warn"
 manual_assert = "warn"
 manual_clamp = "warn"
 manual_is_variant_and = "warn"
@@ -283,6 +285,9 @@ unarray.opt-level = 3
 blst.opt-level = 3
 c-kzg.opt-level = 3
 secp256k1-sys.opt-level = 3
+# Without these, `cmake` builds MCL in Debug mode in dev builds.
+mcl_rust.opt-level = 3
+mcl_rust.debug = false
 # `cc` builds C++ with full `-g` when `debug` is on, making `librocksdb.a` 854 MiB instead of 180 MiB.
 librocksdb-sys.debug = false
 
@@ -338,6 +343,8 @@ reth-cli-runner = { path = "crates/cli/runner" }
 reth-cli-util = { path = "crates/cli/util" }
 reth-codecs = { version = "0.8.2", default-features = false }
 reth-codecs-derive = "0.8.2"
+reth-concurrency = { path = "crates/concurrency", default-features = false }
+reth-concurrency-macros = { path = "crates/concurrency/macros" }
 reth-config = { path = "crates/config", default-features = false }
 reth-consensus = { path = "crates/consensus/consensus", default-features = false }
 reth-consensus-common = { path = "crates/consensus/common", default-features = false }
@@ -442,9 +449,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1", default-features = false }
-evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1", default-features = false }
-evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1", default-features = false }
+evm2 = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47", default-features = false }
+evm2-inspectors = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47", default-features = false }
+evm2-jit = { git = "https://github.com/alloy-rs/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -459,29 +466,29 @@ alloy-trie = { version = "0.9.9", default-features = false }
 
 alloy-hardforks = "0.4.11"
 
-alloy-consensus = { version = "2.5.0", default-features = false }
-alloy-contract = { version = "2.5.0", default-features = false }
-alloy-eips = { version = "2.5.0", default-features = false }
-alloy-genesis = { version = "2.5.0", default-features = false }
-alloy-json-rpc = { version = "2.5.0", default-features = false }
-alloy-network = { version = "2.5.0", default-features = false }
-alloy-node-bindings = "2.5.0"
-alloy-provider = { version = "2.5.0", features = ["reqwest", "debug-api"], default-features = false }
-alloy-rpc-client = { version = "2.5.0", default-features = false }
-alloy-rpc-types = { version = "2.5.0", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "2.5.0", default-features = false }
-alloy-rpc-types-anvil = { version = "2.5.0", default-features = false }
-alloy-rpc-types-beacon = { version = "2.5.0", default-features = false }
-alloy-rpc-types-debug = { version = "2.5.0", default-features = false }
-alloy-rpc-types-engine = { version = "2.5.0", default-features = false }
-alloy-rpc-types-eth = { version = "2.5.0", default-features = false }
-alloy-rpc-types-mev = { version = "2.5.0", default-features = false }
-alloy-rpc-types-trace = { version = "2.5.0", default-features = false }
-alloy-rpc-types-txpool = { version = "2.5.0", default-features = false }
-alloy-serde = { version = "2.5.0", default-features = false }
-alloy-signer = { version = "2.5.0", default-features = false }
-alloy-signer-local = { version = "2.5.0", default-features = false }
-alloy-transport = { version = "2.5.0" }
+alloy-consensus = { version = "2.6.1", default-features = false }
+alloy-contract = { version = "2.6.1", default-features = false }
+alloy-eips = { version = "2.6.1", default-features = false }
+alloy-genesis = { version = "2.6.1", default-features = false }
+alloy-json-rpc = { version = "2.6.1", default-features = false }
+alloy-network = { version = "2.6.1", default-features = false }
+alloy-node-bindings = "2.6.1"
+alloy-provider = { version = "2.6.1", features = ["reqwest", "debug-api"], default-features = false }
+alloy-rpc-client = { version = "2.6.1", default-features = false }
+alloy-rpc-types = { version = "2.6.1", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "2.6.1", default-features = false }
+alloy-rpc-types-anvil = { version = "2.6.1", default-features = false }
+alloy-rpc-types-beacon = { version = "2.6.1", default-features = false }
+alloy-rpc-types-debug = { version = "2.6.1", default-features = false }
+alloy-rpc-types-engine = { version = "2.6.1", default-features = false }
+alloy-rpc-types-eth = { version = "2.6.1", default-features = false }
+alloy-rpc-types-mev = { version = "2.6.1", default-features = false }
+alloy-rpc-types-trace = { version = "2.6.1", default-features = false }
+alloy-rpc-types-txpool = { version = "2.6.1", default-features = false }
+alloy-serde = { version = "2.6.1", default-features = false }
+alloy-signer = { version = "2.6.1", default-features = false }
+alloy-signer-local = { version = "2.6.1", default-features = false }
+alloy-transport = { version = "2.6.1" }
 
 # misc
 derive-where = { version = "1.6", default-features = false }
@@ -521,6 +528,10 @@ parking_lot = "0.12"
 paste = "1.0"
 rand = "0.9"
 rayon = "1.7"
+rpds = "1.2"
+shuttle = { git = "https://github.com/awslabs/shuttle", rev = "dd6df3cf67a79f2d0a278ef6f121cce5d508251c" }
+shuttle-sync = { git = "https://github.com/awslabs/shuttle", rev = "dd6df3cf67a79f2d0a278ef6f121cce5d508251c", default-features = false }
+shuttle-parking_lot = { git = "https://github.com/awslabs/shuttle", rev = "dd6df3cf67a79f2d0a278ef6f121cce5d508251c", default-features = false }
 thread-priority = "3.0.0"
 rustc-hash = { version = "2.0", default-features = false }
 serde = { version = "1.0", default-features = false }
@@ -531,9 +542,10 @@ smallvec = "1"
 strum = { version = "0.27", default-features = false }
 thiserror = { version = "2.0.20", default-features = false }
 tar = "0.4.46"
+log = "0.4"
 tracing = { version = "0.1.0", default-features = false, features = ["attributes"] }
 tracing-appender = "0.2.5"
-url = { version = "2.3", default-features = false }
+url = { version = "2.5.9", default-features = false }
 zstd = "0.14.3"
 byteorder = "1"
 fixed-cache = { version = "0.1.10", default-features = false, features = ["alloc"] }
@@ -547,10 +559,15 @@ metrics-process = "2.1.0"
 metrics-util = { default-features = false, version = "0.20.3" }
 
 # tokio
-tokio = { version = "1.52.3", default-features = false }
+tokio = { version = "1.53.3", default-features = false }
 tokio-stream = "0.1.11"
 tokio-tungstenite = "0.29.0"
 tokio-util = { version = "0.7.11", features = ["codec"] }
+
+# proc-macros
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", default-features = false }
 
 # async
 async-compression = { version = "0.4", default-features = false }
@@ -648,7 +665,7 @@ hickory-resolver = "0.26.1"
 hmac = "0.12.1"
 human_bytes = "0.4.1"
 indexmap = "2"
-interprocess = "2.4.2"
+interprocess = "2.4.8"
 lz4_flex = { version = "0.12", default-features = false }
 memmap2 = "0.9.11"
 num-traits = "0.2.15"
@@ -679,14 +696,14 @@ ipnet = "2.11"
 # evm2 is patched through its pre-transfer URL, which redirects to alloy-rs/evm2, because Cargo
 # rejects a patch from the same source.
 [patch."https://github.com/alloy-rs/evm2"]
-evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
-evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
-evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e681662b6d9ec59edafd112f7c8d64f49f1e6dd1" }
+evm2 = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47" }
+evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47" }
+evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47" }
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
-reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "5dabd396f4b041b0bde4104e449bbaa39ff1d99e" }
+reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-primitives-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-rpc-traits = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
+reth-zstd-compressors = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }

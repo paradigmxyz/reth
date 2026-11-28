@@ -201,15 +201,13 @@ impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut + DbTx {}
 mod tests {
     use super::DbTxPruneExt;
     use crate::PruneLimiter;
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
     use reth_provider::{DBProvider, DatabaseProviderFactory};
     use reth_stages::test_utils::{StorageKind, TestStageDB};
     use reth_testing_utils::generators::{self, random_block_range, BlockRangeParams};
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    };
+    use std::sync::Arc;
 
     struct CountingIter {
         data: Vec<u64>,
@@ -244,7 +242,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn prune_table_with_iterator_early_exit_does_not_overconsume() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();
@@ -298,7 +296,7 @@ mod tests {
         assert_eq!(db.table::<tables::TransactionSenders>().unwrap().len(), total - 2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn prune_table_with_iterator_consumes_to_end_reports_done() {
         let db = TestStageDB::default();
         let mut rng = generators::rng();

@@ -1,6 +1,6 @@
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use eyre::Context;
-use rayon::slice::ParallelSliceMut;
+use reth_concurrency::sync::rayon::prelude::ParallelSliceMut;
 use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},

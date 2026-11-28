@@ -1,7 +1,9 @@
 use crate::tree::TxPoolPrewarmCacheSnapshot as Snapshot;
 use alloy_primitives::B256;
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use parking_lot::RwLock;
+use reth_concurrency::sync::{
+    channel::{unbounded, Receiver, Sender},
+    parking_lot::RwLock,
+};
 use std::{
     fmt::Debug,
     sync::{Arc, Weak},
@@ -98,7 +100,7 @@ mod tests {
         Snapshot::new(parent_hash, Default::default())
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn snapshot_is_published_for_matching_parent() {
         let (control, _receiver) = control();
         let parent_hash = B256::repeat_byte(0x01);
@@ -111,7 +113,7 @@ mod tests {
         assert!(control.snapshot(B256::ZERO).is_none());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn start_sends_job() {
         let (control, receiver) = control();
         let parent_hash = B256::repeat_byte(0x01);
@@ -124,7 +126,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn pause_guard_does_not_retain_control() {
         let (control, _receiver) = control();
         let weak_control = Arc::downgrade(&control);
@@ -135,7 +137,7 @@ mod tests {
         drop(guard);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn overlapping_pause_guards_send_matching_resumes() {
         let (control, receiver) = control();
         let first = control.pause();

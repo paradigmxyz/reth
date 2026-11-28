@@ -1,8 +1,13 @@
 //! A lazily-resolved handle to a value computed on a background thread.
 
-use parking_lot::Mutex;
-use std::sync::{Arc, OnceLock};
+use reth_concurrency::sync::{parking_lot::Mutex, OnceLock};
+use std::sync::Arc;
 use tokio::sync::oneshot;
+
+#[cfg(all(feature = "fuzz", dst))]
+use reth_concurrency::sync::time::{self, Duration};
+#[cfg(all(feature = "fuzz", dst))]
+use tokio::sync::oneshot::error::TryRecvError;
 
 /// Handle to a value computed on a background thread.
 ///
@@ -55,7 +60,25 @@ impl<T: Send + 'static> LazyHandle<T> {
                 .lock()
                 .take()
                 .expect("LazyHandle receiver already taken without value being set");
-            rx.blocking_recv().expect("LazyHandle task dropped without producing a value")
+            #[cfg(not(all(feature = "fuzz", dst)))]
+            {
+                rx.blocking_recv().expect("LazyHandle task dropped without producing a value")
+            }
+            #[cfg(all(feature = "fuzz", dst))]
+            {
+                // Poll and yield to the simulator; Tokio's blocking receive would
+                // park the simulator's only OS thread.
+                let mut rx = rx;
+                loop {
+                    match rx.try_recv() {
+                        Ok(value) => break value,
+                        Err(TryRecvError::Empty) => time::sleep(Duration::from_millis(1)),
+                        Err(TryRecvError::Closed) => {
+                            panic!("LazyHandle task dropped without producing a value")
+                        }
+                    }
+                }
+            }
         })
     }
 
@@ -90,7 +113,7 @@ impl<T: Send + std::fmt::Debug + 'static> std::fmt::Debug for LazyHandle<T> {
 mod tests {
     use super::*;
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_resolves() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -100,7 +123,7 @@ mod tests {
         assert_eq!(*handle.get(), 42);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_clone_shares_value() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -110,7 +133,7 @@ mod tests {
         assert_eq!(*handle2.get(), 99);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_try_into_inner() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -118,7 +141,7 @@ mod tests {
         assert_eq!(handle.try_into_inner().unwrap(), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_lazy_handle_try_into_inner_returns_self_with_clone() {
         let (tx, rx) = oneshot::channel();
         let handle = LazyHandle::new(rx);
@@ -128,7 +151,7 @@ mod tests {
         assert_eq!(*handle.get(), "hello");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     #[should_panic(expected = "LazyHandle task dropped without producing a value")]
     fn test_lazy_handle_panics_on_dropped_sender() {
         let (_tx, rx) = oneshot::channel::<u64>();

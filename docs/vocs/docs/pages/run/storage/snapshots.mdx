@@ -62,6 +62,48 @@ reth download \
     -y
 ```
 
+Transaction downloads restore whole jars. If the continuous range starts at block
+10, `--with-txs-since 13` restores bodies from 10. Each jar needs data, header and
+offsets directly under `static_files/`, and the selection must cover the snapshot tip.
+The Bodies checkpoint is the block before the continuous range ending at the tip,
+or a later source checkpoint. A cutoff above the tip skips transaction archives,
+keeps the requested future cutoff and anchors an empty file at the tip on a fresh restore.
+The `earliest` block tag follows the available bodies. Engine API payload-body requests
+return `null` for each pruned body and return the available bodies in request order.
+If a requested range starts within the snapshot but a lagging transaction component
+has no corresponding archives, the download fails before clearing the data directory.
+A node restored by an older download serves bodies and reports their availability from
+its transaction files, regardless of its Bodies checkpoint. When repackaging such a
+download, reth checks the transaction rows and prune policy before correcting a legacy
+tip checkpoint. If the source evidence is inconclusive, reth keeps the recorded pruning
+progress. When the first transaction
+archive has already been pruned, `snapshot-manifest` emits the remaining archives as
+an explicit file set. Selecting transactions downloads that entire set.
+
+`--with-state-history-since N` configures the node to retain state history
+from block `N` onward. If `N` is above the snapshot height, the download skips
+changeset archives and writes that future boundary to the generated `reth.toml`.
+
+Legacy snapshots with changesets and history indices in MDBX carry that history
+in the state archive. This includes v1.10 snapshots with static-file receipts,
+and snapshots with static-file senders when the download omits senders.
+After all archives are verified, the downloader checks the storage layout
+before updating checkpoints. It reports any known legacy backend setting that
+is incompatible with the selected download.
+
+A v1 restore preserves the original changeset and index checkpoints, including
+the mode needed to resume an interrupted prune. An explicit state-history
+selection sets future retention when the downloader creates `reth.toml`.
+The downloader uses `--config`, or the data directory's `reth.toml` by default,
+and generates that file if it is missing. On a retry, it preserves the existing file
+and uses the current download selection for any prune checkpoints it writes.
+The retained static-file settings are validated before cleanup and determine the size
+of new transaction files. Pass the same `--config` when starting the node.
+
+When `reth db migrate-v2` moves history from an older restore, it copies surviving
+changesets even below the recorded prune checkpoint. A block can be partially
+pruned, so historical queries keep the original read boundary.
+
 ## Further reading
 
 -   [Storage V2](/run/storage) - understand the default storage layout

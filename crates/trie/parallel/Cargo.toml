@@ -13,10 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 reth-provider.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-trie.workspace = true
 
@@ -28,7 +28,6 @@ tracing.workspace = true
 
 # misc
 thiserror.workspace = true
-crossbeam-channel.workspace = true
 crossbeam-utils.workspace = true
 
 # `metrics` feature
@@ -43,15 +42,23 @@ rand = { workspace = true, optional = true }
 reth-db-common.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-primitives-traits.workspace = true
+reth-primitives-traits = { workspace = true, features = ["std"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-overlay.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
+reth-concurrency = { workspace = true, features = ["std"] }
 
 # misc
 rand.workspace = true
 
 [features]
+fuzz = [
+    "reth-trie/fuzz",
+    "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
+    "reth-provider/fuzz",
+    "reth-storage-overlay/fuzz",
+]
 default = ["metrics"]
 metrics = ["reth-metrics", "dep:metrics"]
 trie-debug = [
@@ -62,6 +69,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "reth-chainspec/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]

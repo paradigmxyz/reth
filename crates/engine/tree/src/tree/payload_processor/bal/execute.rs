@@ -31,8 +31,12 @@ use alloy_eip7928::{
     compute_block_access_list_hash, BlockAccessList,
 };
 use alloy_primitives::Address;
-use crossbeam_channel::{Receiver, Sender};
 use evm2::evm::Bal as EvmBal;
+use reth_concurrency::sync::{
+    channel,
+    channel::{Receiver, Sender},
+    rayon::Scope,
+};
 use reth_engine_primitives::BlockAccessListDecodeError;
 use reth_evm::{
     BlockExecutionOutput, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ConfigureEvm,
@@ -91,7 +95,7 @@ where
 
 #[expect(clippy::too_many_arguments, clippy::type_complexity)]
 fn execute_block_inner<'scope, Evm, Tx, Err, DB, MakeDb>(
-    scope: &rayon::Scope<'scope>,
+    scope: &Scope<'scope>,
     evm_config: &'scope Evm,
     make_db: &'scope MakeDb,
     input_bal: Arc<DecodedBal>,
@@ -130,7 +134,7 @@ where
         )
         .map_err(BlockAccessListDecodeError::new)?,
     );
-    let (result_tx, result_rx) = crossbeam_channel::unbounded();
+    let (result_tx, result_rx) = channel::unbounded();
     let (abort_guard, abort_rx) = AbortGuard::new();
 
     for _ in 0..worker_count {
@@ -220,7 +224,7 @@ struct AbortGuard {
 
 impl AbortGuard {
     fn new() -> (Self, Receiver<()>) {
-        let (tx, rx) = crossbeam_channel::bounded(0);
+        let (tx, rx) = channel::bounded(0);
         (Self { _tx: tx }, rx)
     }
 }
@@ -244,6 +248,7 @@ mod tests {
         CacheDB, EmptyDB, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
     };
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_engine_primitives::{InsertBlockErrorKind, InsertBlockValidationError};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction, TransactionSigned};
     use reth_evm::{
@@ -253,10 +258,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Block as _, Recovered, SealedBlock};
     use reth_testing_utils::generators::{generate_key, rng, sign_tx_with_key_pair};
-    use std::{
-        convert::Infallible,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::{convert::Infallible, io};
 
     fn test_evm_config() -> EthEvmConfig {
         EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().amsterdam_activated().build()))
@@ -354,7 +356,7 @@ mod tests {
     }
 
     fn tx_stream<Tx>(txs: Vec<Tx>) -> Receiver<(usize, Result<Tx, Infallible>)> {
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (tx, rx) = channel::unbounded();
         for (index, transaction) in txs.into_iter().enumerate() {
             tx.send((index, Ok(transaction))).unwrap();
         }
@@ -392,7 +394,7 @@ mod tests {
         MakeDb: Fn(bool) -> Result<DB, BalExecutionError> + Sync,
     {
         let transaction_count = txs.len();
-        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, _receipt_rx) = channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(block).unwrap();
         execute_block(
@@ -539,7 +541,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn empty_block_happy_path_round_trip() {
         // Two-pass end-to-end:
         //   1. Build the canonical BAL an empty Amsterdam block produces (via
@@ -564,7 +566,7 @@ mod tests {
         assert!(output.receipts.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn multi_tx_happy_path_round_trip() {
         // End-to-end with two value transfers from distinct senders to the same recipient.
         //
@@ -617,7 +619,7 @@ mod tests {
         assert!(output.gas_used >= 42_000);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_empty_block() {
         // System calls only — no txs. Both paths should produce identical system-call
         // side effects in their execution state (beacon roots storage, history storage, etc.).
@@ -629,7 +631,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_multi_value_transfer() {
         // Two senders → same recipient. Byte-equal across paths means: worker-produced
         // diffs commit identically to a directly-executed serial path.
@@ -651,7 +653,7 @@ mod tests {
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), txs);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn rejects_tx_gas_limit_that_exceeds_remaining_block_gas() {
         // Each worker sees an empty block, so both transactions fit individually. The ordered
         // commit loop must still reject tx2 because tx1's committed gas leaves too little
@@ -702,7 +704,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_tx_with_revert() {
         // A tx that reverts in a deployed contract. Both paths must produce identical receipts
         // (success = false, gas charged, state rolled back except for gas payment + nonce bump).
@@ -725,7 +727,7 @@ mod tests {
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn shadow_tx_with_sstore() {
         // Tx calls a deployed contract that does `SSTORE(0, 0x42)`. The storage write must
         // commit identically across serial and BAL paths even though the canonical state applies
@@ -748,7 +750,7 @@ mod tests {
         assert_shadow_equal(evm_config, db, empty_amsterdam_block(B256::ZERO), vec![tx]);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn returns_built_bal_for_final_hash_mismatch() {
         // Build the BAL an empty block actually produces, then append a phantom address
         // that execution never touches. The rebuilt BAL omits it, and the outer consensus
@@ -785,7 +787,7 @@ mod tests {
         assert_ne!(compute_block_access_list_hash(&built_bal), tampered_hash);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn canonical_make_db_failure() {
         // A make_db that always fails must surface as Provider.
         let block = empty_amsterdam_block(B256::ZERO);
@@ -803,20 +805,18 @@ mod tests {
         assert!(matches!(result, Err(BalExecutionError::Provider(_))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_tx_recovery_error_becomes_validation_error() {
         // A tx recovery failure fed into the worker channel must surface as
         // a block validation error. Uses execute_block directly since tx_stream hardcodes
         // Infallible and cannot inject errors.
         let evm_config = test_evm_config();
         let block = empty_amsterdam_block(B256::ZERO);
-        let (tx_tx, tx_rx) = crossbeam_channel::unbounded::<(
-            usize,
-            Result<Recovered<TransactionSigned>, std::io::Error>,
-        )>();
-        tx_tx.send((0, Err(std::io::Error::other("sig fail")))).unwrap();
+        let (tx_tx, tx_rx) =
+            channel::unbounded::<(usize, Result<Recovered<TransactionSigned>, io::Error>)>();
+        tx_tx.send((0, Err(io::Error::other("sig fail")))).unwrap();
         drop(tx_tx);
-        let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+        let (receipt_tx, _receipt_rx) = channel::unbounded();
         let evm_env = evm_config.evm_env(block.header()).unwrap();
         let execution_ctx = evm_config.context_for_block(&block).unwrap();
 
@@ -837,7 +837,7 @@ mod tests {
         ));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn gas_tracker_non_amsterdam_uses_cumulative_gas() {
         // tx2's gas limit fits the block gas limit on its own but not the gas left after tx1, so
         // non-Amsterdam admission, which budgets by cumulative gas, must reject it.
@@ -878,7 +878,7 @@ mod tests {
         assert!(matches!(result, Err(BalExecutionError::Execution(_))));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn gas_tracker_caps_oversized_tx_gas_limit_at_tx_gas_limit_cap() {
         // A tx with gas_limit above the tx gas limit cap (EIP-7825) is admitted when the
         // capped value fits in the remaining block gas.
@@ -981,7 +981,7 @@ mod tests {
         (pre_block_db, reference_bal, tx1, tx2)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn default_tx_gas_limit_cap_matches_serial_execution() {
         let evm_config = test_evm_config();
         let block_gas_limit = 20_000_000;
@@ -1011,7 +1011,7 @@ mod tests {
         assert_eq!(parallel.receipts, serial.receipts);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn propagates_bal_miss_of_admitted_transaction_as_block_verdict() {
         // The BAL covers neither transaction: the first slot's speculative failure is
         // adjudicated in block order and becomes the block's verdict.
@@ -1047,7 +1047,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn admission_rejects_before_speculative_worker_failure_surfaces() {
         // tx2 exceeds the remaining block gas AND misses the BAL; block-gas admission is
         // adjudicated first, so the verdict is the gas error, not tx2's BAL failure.
@@ -1078,7 +1078,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn worker_reuses_provider_after_failure_and_finishes_earlier_transactions() {
         let evm_config = test_evm_config();
         let (pre_block_db, reference_bal, tx1, tx2) =
@@ -1101,15 +1101,15 @@ mod tests {
             }
             Ok(pre_block_db.clone())
         };
-        let (tx_tx, tx_rx) = crossbeam_channel::unbounded();
+        let (tx_tx, tx_rx) = channel::unbounded();
         // Recovery can finish out of order. A single worker must continue after both kinds
         // of error to execute slot 0, without reusing the failed slot 1 executor.
-        tx_tx.send((2, Err(std::io::Error::other("sig fail")))).unwrap();
+        tx_tx.send((2, Err(io::Error::other("sig fail")))).unwrap();
         tx_tx.send((1, Ok(tx2))).unwrap();
         tx_tx.send((0, Ok(tx1.clone()))).unwrap();
         drop(tx_tx);
         let (_abort_guard, abort_rx) = AbortGuard::new();
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let (result_tx, result_rx) = channel::unbounded();
         let runtime = Runtime::test();
         runtime.bal_streaming_pool().in_place_scope(|scope| {
             worker::spawn_worker(
@@ -1155,7 +1155,7 @@ mod tests {
         assert_eq!(setups.load(Ordering::Relaxed), 1);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn amsterdam_state_gas_admission_matches_serial_execution() {
         let evm_config = EthEvmConfig::new(Arc::new(
             reth_chainspec::ChainSpecBuilder::mainnet().amsterdam_activated().build(),
@@ -1191,7 +1191,7 @@ mod tests {
             serial.execute_transaction(tx1.clone()).unwrap();
             let serial_result = serial.execute_transaction(tx2.clone());
 
-            let (receipt_tx, _receipt_rx) = crossbeam_channel::unbounded();
+            let (receipt_tx, _receipt_rx) = channel::unbounded();
             let parallel_result = execute_block(
                 &Runtime::test(),
                 &evm_config,

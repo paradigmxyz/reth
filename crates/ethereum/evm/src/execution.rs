@@ -46,13 +46,14 @@ mod tests {
         bytecode::Bytecode, env::BlockEnv as EvmBlockEnv, evm::InMemoryDB, interpreter::opcode::op,
     };
     use reth_chainspec::{Chain, ChainSpec, MAINNET};
+    use reth_concurrency::sync::channel;
     use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
     use reth_ethereum_primitives::{Block, BlockBody, Receipt, TransactionSigned};
     use reth_evm::{BlockExecutorFactory, ConfigureEvm, Executor};
     use reth_execution_types::BlockExecutionOutput;
     use reth_primitives_traits::RecoveredBlock;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::sync::{mpsc, Arc};
+    use std::sync::Arc;
 
     sol! {
         event DepositEvent(
@@ -200,7 +201,7 @@ mod tests {
             },
             senders,
         );
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = channel::unbounded();
         let config = crate::EthEvmConfig::new(Arc::new(chain));
         let without_hook = config.batch_executor(database.clone()).execute(&block)?;
         let output = config
@@ -216,7 +217,7 @@ mod tests {
         Ok(output)
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn charges_london_sstore_set_gas() {
         let caller = address!("0000000000000000000000000000000000000001");
         let contract = address!("0000000000000000000000000000000000001000");
@@ -272,7 +273,7 @@ mod tests {
         assert_eq!(output.storage(&contract, U256::ZERO).unwrap(), U256::from(10));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn applies_withdrawals_to_block_output() {
         let existing = address!("0000000000000000000000000000000000000001");
         let new = address!("0000000000000000000000000000000000000002");
@@ -305,7 +306,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn zero_withdrawals_apply_eip161_state_clearing() {
         let nonexistent = address!("0000000000000000000000000000000000000001");
         let empty = address!("0000000000000000000000000000000000000002");
@@ -409,7 +410,7 @@ mod tests {
         assert_eq!(base_block_reward(&chain_spec, 14), Some(ETH_TO_WEI * 2));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn collects_post_execution_system_call_requests() {
         let mut database = InMemoryDB::default();
         database.insert_account_info(
@@ -440,7 +441,7 @@ mod tests {
         assert!(output.result.receipts.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn collects_amsterdam_builder_requests() {
         let mut database = InMemoryDB::default();
         for (address, byte) in [
@@ -475,7 +476,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn system_call_failures_follow_contract_policy() {
         for address in [
             BEACON_ROOTS_ADDRESS,
@@ -535,10 +536,10 @@ mod tests {
         let requests = block_requests_from_receipts(
             SpecId::PRAGUE,
             BlockExecutionContext {
-                system_calls: Some(BlockSystemCalls {
+                system_calls: BlockSystemCalls {
                     parent_hash: B256::ZERO,
                     parent_beacon_block_root: Some(B256::ZERO),
-                }),
+                },
                 ommers: None,
                 withdrawals: None,
                 deposit_contract_address: None,

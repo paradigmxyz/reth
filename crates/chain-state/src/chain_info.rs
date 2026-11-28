@@ -1,8 +1,8 @@
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::BlockNumber;
-use parking_lot::RwLock;
 use reth_chainspec::ChainInfo;
+use reth_concurrency::sync::parking_lot::RwLock;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use std::{
     sync::{
@@ -234,7 +234,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_chain_info() {
         // Create a random header
         let mut rng = generators::rng();
@@ -255,7 +255,7 @@ mod tests {
         assert_eq!(chain_info.best_hash, header.hash());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_on_forkchoice_update_received() {
         // Create a random block header
         let mut rng = generators::rng();
@@ -278,7 +278,7 @@ mod tests {
         assert!(tracker.last_forkchoice_update_received_at().is_some());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_canonical_head() {
         // Create a random number generator
         let mut rng = generators::rng();
@@ -301,7 +301,7 @@ mod tests {
         assert_eq!(canonical_head, header2);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_safe() {
         // Create a random number generator
         let mut rng = generators::rng();
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(updated_safe_header, header3);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_finalized() {
         // Create a random number generator
         let mut rng = generators::rng();
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(updated_finalized_header.unwrap(), header3);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_get_finalized_num_hash() {
         // Create a random header
         let mut rng = generators::rng();
@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(tracker.get_finalized_num_hash(), Some(finalized_header.num_hash()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_get_safe_num_hash() {
         // Create a random header
         let mut rng = generators::rng();
@@ -431,7 +431,7 @@ mod tests {
         assert_eq!(tracker.get_safe_num_hash(), Some(safe_header.num_hash()));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_persisted() {
         let mut rng = generators::rng();
         let header = random_header(&mut rng, 10, None);

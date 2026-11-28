@@ -8,6 +8,7 @@ homepage.workspace = true
 repository.workspace = true
 
 [lints]
+rust.unexpected_cfgs = { level = "warn", check-cfg = ['cfg(dst)'] }
 
 [dependencies]
 # reth
@@ -48,6 +49,7 @@ reth-stages.workspace = true
 reth-stages-types.workspace = true
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks.workspace = true
 reth-storage-api.workspace = true
 reth-storage-overlay.workspace = true
@@ -79,7 +81,6 @@ lz4.workspace = true
 zstd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-parking_lot.workspace = true
 tar.workspace = true
 tracing.workspace = true
 backon.workspace = true
@@ -89,7 +90,6 @@ reqwest = { workspace = true, features = ["blocking"] }
 url.workspace = true
 metrics.workspace = true
 blake3 = { workspace = true, features = ["rayon"] }
-rayon.workspace = true
 
 # io
 fdlimit.workspace = true
@@ -112,6 +112,22 @@ tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [features]
+fuzz = [
+    "reth-storage-overlay/fuzz",
+    "reth-trie/fuzz",
+    "reth-tasks/fuzz",
+    "reth-concurrency/fuzz",
+    "reth-downloaders/fuzz",
+    "reth-etl/fuzz",
+    "reth-evm/fuzz",
+    "reth-network/fuzz",
+    "reth-provider/fuzz",
+    "reth-stages/fuzz",
+    "reth-static-file/fuzz",
+    "reth-trie-common?/fuzz",
+    "reth-db/fuzz",
+    "reth-prune/fuzz",
+]
 arbitrary = [
     "secp256k1/arbitrary",
     "dep:proptest",

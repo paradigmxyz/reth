@@ -1,12 +1,10 @@
 //! Cooperative cancellation of spawned work.
 
-use std::{
-    cell::RefCell,
-    sync::{
-        atomic::{AtomicBool, AtomicU8, Ordering},
-        Arc,
-    },
+use reth_concurrency::sync::{
+    atomic::{AtomicBool, AtomicU8, Ordering},
+    thread_local,
 };
+use std::{cell::RefCell, sync::Arc};
 
 /// The work is still in progress.
 const RUNNING: u8 = 0;
@@ -62,11 +60,11 @@ impl CancelOnDrop {
 
         impl Drop for Restore {
             fn drop(&mut self) {
-                CURRENT.set(self.0.take());
+                CURRENT.with(|state| *state.borrow_mut() = self.0.take());
             }
         }
 
-        let _restore = Restore(CURRENT.replace(Some(self.0.clone())));
+        let _restore = Restore(CURRENT.with(|state| state.replace(Some(self.0.clone()))));
         f()
     }
 }
@@ -109,9 +107,18 @@ impl ManualCancel {
 ///
 /// Always returns `false` outside of a [`CancelOnDrop::scope`].
 pub fn is_cancelled() -> bool {
-    CURRENT.with_borrow(|state| {
-        state.as_ref().is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
-    })
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    {
+        CURRENT.with_borrow(|state| {
+            state.as_ref().is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
+        })
+    }
+    #[cfg(all(feature = "fuzz", dst))]
+    {
+        // Release the TLS borrow before a selected atomic operation can switch tasks.
+        let state = CURRENT.with(|state| state.borrow().clone());
+        state.is_some_and(|state| state.load(Ordering::Relaxed) == CANCELLED)
+    }
 }
 
 thread_local! {
@@ -123,14 +130,14 @@ thread_local! {
 mod tests {
     use super::*;
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_default_cancelled() {
         let c = CancelOnDrop::default();
         assert!(!c.is_interrupted());
         assert!(!c.is_cancelled());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_set_cancel_task() {
         let c = ManualCancel::default();
         assert!(!c.is_cancelled());
@@ -146,7 +153,7 @@ mod tests {
         assert!(c2.is_cancelled());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cancelondrop_clone_behavior() {
         let cancel = CancelOnDrop::default();
         assert!(!cancel.is_cancelled());
@@ -163,7 +170,7 @@ mod tests {
         assert!(cloned_cancel.is_cancelled());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cancelondrop_multiple_clones() {
         let cancel = CancelOnDrop::default();
         let clone1 = cancel.clone();
@@ -184,7 +191,7 @@ mod tests {
         assert!(clone3.is_cancelled());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_cancel_on_drop_finalization_request() {
         let cancel = CancelOnDrop::default();
         let clone = cancel.clone();
@@ -206,7 +213,7 @@ mod tests {
         assert!(!clone.is_finalization_requested());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_scope_is_cancelled() {
         assert!(!is_cancelled());
 
@@ -229,7 +236,7 @@ mod tests {
         assert!(!outer.is_cancelled());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_scope_restores_on_panic() {
         let cancel = CancelOnDrop::default();
         drop(cancel.clone());

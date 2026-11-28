@@ -12,6 +12,8 @@ description = "Task management"
 workspace = true
 
 [dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
+
 # async
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread"] }
 tracing-futures.workspace = true
@@ -23,13 +25,12 @@ metrics.workspace = true
 
 # misc
 dashmap.workspace = true
-parking_lot.workspace = true
+shuttle = { workspace = true, optional = true }
 thread-priority.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 
 # feature `rayon`
-rayon = { workspace = true, optional = true }
 crossbeam-utils = { workspace = true, optional = true }
 pin-project = { workspace = true, optional = true }
 
@@ -40,5 +41,6 @@ libc.workspace = true
 tokio = { workspace = true, features = ["sync", "rt", "rt-multi-thread", "time", "macros"] }
 
 [features]
-rayon = ["dep:rayon", "dep:crossbeam-utils", "pin-project"]
-test-utils = []
+rayon = ["dep:crossbeam-utils", "pin-project"]
+test-utils = ["reth-concurrency/test-utils"]
+fuzz = ["reth-concurrency/fuzz", "dep:shuttle"]

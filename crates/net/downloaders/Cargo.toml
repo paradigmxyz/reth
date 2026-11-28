@@ -20,6 +20,7 @@ reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-tasks.workspace = true
 reth-trie-common.workspace = true
 
@@ -47,7 +48,6 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-rayon.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
@@ -72,6 +72,7 @@ alloy-rlp.workspace = true
 itertools.workspace = true
 
 [features]
+fuzz = ["reth-tasks/fuzz", "reth-concurrency/fuzz", "reth-trie-common/fuzz", "reth-provider/fuzz"]
 default = []
 file-client = ["dep:async-compression", "dep:itertools"]
 test-utils = [
@@ -85,5 +86,6 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "reth-trie-common/test-utils",
 ]
