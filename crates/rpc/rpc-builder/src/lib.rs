@@ -1095,7 +1095,7 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_cors_domains: Option<String>,
     /// Allowed `Host` names for http.
     ///
-    /// If `None`, names without a dot (such as `localhost`) and IP addresses are allowed.
+    /// If `None`, `localhost` and IP addresses are allowed.
     http_vhosts: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
@@ -1249,8 +1249,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure the allowed `Host` names for HTTP requests, comma-separated. `*` allows any
     /// host.
     ///
-    /// IP addresses are always allowed. If `None`, names without a dot (such as `localhost`) are
-    /// allowed too. This does not apply to `WebSocket` upgrades.
+    /// IP addresses are always allowed. If `None`, `localhost` is allowed too. This does not apply
+    /// to `WebSocket` upgrades.
     pub fn with_http_vhosts(mut self, vhosts: Option<String>) -> Self {
         self.http_vhosts = vhosts;
         self

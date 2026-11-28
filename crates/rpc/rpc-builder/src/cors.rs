@@ -4,7 +4,7 @@ use http::{
     HeaderValue, Method, Request, Response, StatusCode,
 };
 use jsonrpsee::server::{ws, HttpBody};
-use std::net::IpAddr;
+use std::{net::IpAddr, sync::Arc};
 use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     validate_request::ValidateRequest,
@@ -93,10 +93,11 @@ impl<B> ValidateRequest<B> for WsOriginValidator {
 /// accepted.
 #[derive(Clone, Debug)]
 pub(crate) enum HostValidator {
-    /// Accepts names without a dot, such as `localhost` or a Docker service name.
+    /// Accepts `localhost`.
     Local,
-    /// Accepts only the listed names, case-insensitively.
-    List(Vec<String>),
+    /// Accepts only the listed names, case-insensitively. Shared because the server clones the
+    /// validator for every connection and request.
+    List(Arc<[String]>),
 }
 
 impl HostValidator {
@@ -107,17 +108,33 @@ impl HostValidator {
         if hosts.clone().any(|host| host == "*") {
             return None
         }
-        Some(Self::List(hosts.map(String::from).collect()))
+        // Ports are ignored on both sides.
+        Some(Self::List(
+            hosts
+                .map(|host| {
+                    host.parse::<Authority>()
+                        .map_or_else(|_| host.to_string(), |a| a.host().to_string())
+                })
+                .collect(),
+        ))
     }
 
     fn allows(&self, authority: &Authority) -> bool {
         let host = authority.host();
+        // `host()` drops userinfo and anything after a bracketed literal, so reject those.
+        if !authority
+            .as_str()
+            .strip_prefix(host)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
+        {
+            return false
+        }
         let ip = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
         if ip.parse::<IpAddr>().is_ok() {
             return true
         }
         match self {
-            Self::Local => !host.contains('.'),
+            Self::Local => host.eq_ignore_ascii_case("localhost"),
             Self::List(allowed) => allowed.iter().any(|allowed| allowed.eq_ignore_ascii_case(host)),
         }
     }
@@ -127,21 +144,20 @@ impl<B> ValidateRequest<B> for HostValidator {
     type ResponseBody = HttpBody;
 
     fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<HttpBody>> {
-        // `WsOriginValidator` owns the policy for upgrades.
-        if ws::is_upgrade_request(request) {
+        // `WsOriginValidator` owns the policy for upgrades, which are always `GET`.
+        if request.method() == Method::GET && ws::is_upgrade_request(request) {
             return Ok(())
         }
         let mut hosts = request.headers().get_all(HOST).iter();
-        let allowed = match (hosts.next(), hosts.next()) {
-            // HTTP/2 carries the host in the URI authority instead of a `Host` header.
-            (None, _) => request.uri().authority().is_none_or(|authority| self.allows(authority)),
-            (Some(host), None) => {
+        let host = hosts.next();
+        // HTTP/2 and absolute-form requests also carry the host in the URI authority.
+        let allowed = hosts.next().is_none() &&
+            host.is_none_or(|host| {
                 host.is_empty() ||
                     Authority::try_from(host.as_bytes())
                         .is_ok_and(|authority| self.allows(&authority))
-            }
-            _ => false,
-        };
+            }) &&
+            request.uri().authority().is_none_or(|authority| self.allows(authority));
         if allowed {
             return Ok(())
         }
@@ -191,13 +207,13 @@ mod tests {
     #[test]
     fn test_host_validator() {
         let mut local = HostValidator::new(None).unwrap();
-        let list = HostValidator::new(Some("rpc.example.com, other.example")).unwrap();
+        let list = HostValidator::new(Some("rpc.example.com:8545, other.example")).unwrap();
         for (hosts, local_allowed, list_allowed) in [
             (vec![], true, true),
             (vec![""], true, true),
             (vec!["localhost:8545"], true, false),
             (vec!["LOCALHOST"], true, false),
-            (vec!["reth:8545"], true, false),
+            (vec!["reth:8545"], false, false),
             (vec!["127.0.0.1:8545"], true, true),
             (vec!["[::1]:8545"], true, true),
             (vec!["10.0.0.1"], true, true),
@@ -207,6 +223,8 @@ mod tests {
             (vec!["127.0.0.1.nip.io"], false, false),
             (vec!["0x7f.1"], false, false),
             (vec!["bad host"], false, false),
+            (vec!["[::1].unknown.example"], false, false),
+            (vec!["unknown.example@127.0.0.1"], false, false),
             (vec!["localhost", "localhost"], false, false),
         ] {
             for (validator, allowed) in [(&local, local_allowed), (&list, list_allowed)] {
@@ -223,20 +241,30 @@ mod tests {
             }
         }
 
-        for (uri, allowed) in [("http://localhost:8545/", true), ("http://unknown.example/", false)]
-        {
+        for (uri, host, allowed) in [
+            ("http://localhost:8545/", None, true),
+            ("http://unknown.example/", None, false),
+            ("http://unknown.example/", Some("localhost"), false),
+            ("http://unknown.example/", Some(""), false),
+        ] {
             let mut request = Request::builder().uri(uri).body(()).unwrap();
-            assert_eq!(local.validate(&mut request).is_ok(), allowed, "{uri}");
+            if let Some(host) = host {
+                request.headers_mut().insert(HOST, HeaderValue::from_static(host));
+            }
+            assert_eq!(local.validate(&mut request).is_ok(), allowed, "{uri}, host={host:?}");
         }
 
         // Upgrades are left to `WsOriginValidator`.
-        let mut request = Request::builder()
-            .header(HOST, "unknown.example")
-            .header("connection", "Upgrade")
-            .header("upgrade", "websocket")
-            .body(())
-            .unwrap();
-        assert!(local.validate(&mut request).is_ok());
+        for (method, allowed) in [(Method::GET, true), (Method::OPTIONS, false)] {
+            let mut request = Request::builder()
+                .method(&method)
+                .header(HOST, "unknown.example")
+                .header("connection", "Upgrade")
+                .header("upgrade", "websocket")
+                .body(())
+                .unwrap();
+            assert_eq!(local.validate(&mut request).is_ok(), allowed, "{method}");
+        }
 
         assert!(HostValidator::new(Some("rpc.example.com, *")).is_none());
     }

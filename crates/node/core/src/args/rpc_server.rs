@@ -550,9 +550,9 @@ pub struct RpcServerArgs {
     /// Comma-separated list of `Host` names the HTTP server accepts requests for. Use `*` to
     /// accept any host.
     ///
-    /// IP addresses are always accepted. Defaults to names without a dot, such as `localhost` or a
-    /// Docker service name. Set this when clients or a reverse proxy reach the server under a
-    /// domain name. The list replaces the default names. Names are matched without the port.
+    /// IP addresses are always accepted. Defaults to `localhost`. Set this when clients or a
+    /// reverse proxy reach the server under another name, such as a Docker service name. The
+    /// list replaces the default. Names are matched without the port.
     #[arg(long = "http.vhosts", value_name = "HOSTS", default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_vhosts.as_ref().map(|v| v.to_string().into())))]
     pub http_vhosts: Option<String>,
 
