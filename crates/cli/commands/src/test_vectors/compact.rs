@@ -1,9 +1,9 @@
 use alloy_eips::{
     eip4895::Withdrawals,
-    eip8141::{FrameLimits, FrameMode, SignatureScheme, FRAME_TX_TYPE},
+    eip8141::{FrameLimits, FrameMode, SignatureScheme, TransactionFees, FRAME_TX_TYPE},
 };
 use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256};
-use alloy_rlp::{Encodable, PayloadView, RlpDecodable, RlpEncodable};
+use alloy_rlp::{Decodable, Encodable, PayloadView, RlpDecodable, RlpEncodable};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -272,10 +272,10 @@ where
         }
         let len_or_identifier = identifier.unwrap_or(compact_bytes.len());
 
-        match decode_legacy_frame_vector(&type_name, &compact_bytes)? {
+        match roundtrip_legacy_frame_vector(&type_name, &compact_bytes)? {
             Some((prefix_len, legacy)) => {
                 buffer.extend_from_slice(&compact_bytes[..prefix_len]);
-                legacy.encode(&mut buffer);
+                buffer.extend_from_slice(&legacy);
             }
             None => {
                 let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
@@ -332,20 +332,34 @@ struct LegacyFrameFees {
 }
 
 #[derive(Debug, RlpEncodable, RlpDecodable)]
-struct LegacyFrameTransaction {
+struct LegacyFrameTransaction<Fees: Encodable + Decodable = LegacyFrameFees> {
     chain_id: u64,
     nonce: u64,
     sender: Address,
     frames: Vec<LegacyFrame>,
     signatures: Vec<LegacyFrameSignature>,
-    fees: LegacyFrameFees,
+    fees: Fees,
     blob_versioned_hashes: Vec<B256>,
 }
 
-fn decode_legacy_frame_vector(
+/// Devnet 2 keyed transactions add the nonce key list before the shared sequence.
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct KeyedLegacyFrameTransaction {
+    chain_id: u64,
+    nonce_keys: Vec<U256>,
+    nonce: u64,
+    sender: Address,
+    frames: Vec<LegacyFrame>,
+    signatures: Vec<LegacyFrameSignature>,
+    fees: TransactionFees,
+    blob_versioned_hashes: Vec<B256>,
+}
+
+/// Decodes and re-encodes historical frame schemas without treating them as PROOF records.
+fn roundtrip_legacy_frame_vector(
     type_name: &str,
     bytes: &[u8],
-) -> alloy_rlp::Result<Option<(usize, LegacyFrameTransaction)>> {
+) -> alloy_rlp::Result<Option<(usize, Vec<u8>)>> {
     let prefix: &[u8] = match type_name {
         "Transaction" => &[FRAME_TX_TYPE, FRAME_TX_TYPE],
         "TransactionSigned" => &[u8::MAX, FRAME_TX_TYPE, FRAME_TX_TYPE],
@@ -356,19 +370,26 @@ fn decode_legacy_frame_vector(
     let PayloadView::List(fields) = alloy_rlp::Header::decode_raw(&mut encoded)? else {
         return Err(alloy_rlp::Error::UnexpectedString)
     };
-    // Keyed transactions add an eighth field; current fees contain two values.
-    if fields.len() != 7 {
-        return Ok(None)
-    }
-    let mut encoded_fees = fields[5];
+    let fee_index = match fields.len() {
+        7 => 5,
+        8 => 6,
+        _ => return Ok(None),
+    };
+    let mut encoded_fees = fields[fee_index];
     let PayloadView::List(fees) = alloy_rlp::Header::decode_raw(&mut encoded_fees)? else {
         return Err(alloy_rlp::Error::UnexpectedString)
     };
-    if fees.len() != 3 {
-        return Ok(None)
-    }
-    let transaction = alloy_rlp::decode_exact(payload)?;
-    Ok(Some((prefix.len(), transaction)))
+    let roundtrip = match (fields.len(), fees.len()) {
+        (7, 3) => alloy_rlp::encode(alloy_rlp::decode_exact::<LegacyFrameTransaction>(payload)?),
+        (7, 2) => alloy_rlp::encode(alloy_rlp::decode_exact::<
+            LegacyFrameTransaction<TransactionFees>,
+        >(payload)?),
+        (8, 2) => {
+            alloy_rlp::encode(alloy_rlp::decode_exact::<KeyedLegacyFrameTransaction>(payload)?)
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some((prefix.len(), roundtrip)))
 }
 
 #[cfg(test)]
@@ -400,10 +421,11 @@ mod tests {
         for (type_name, prefix) in PREFIXES {
             let mut vector = prefix.to_vec();
             vector.extend_from_slice(&payload);
-            let (prefix_len, mut legacy) =
-                decode_legacy_frame_vector(type_name, &vector).unwrap().unwrap();
+            let (prefix_len, roundtrip) =
+                roundtrip_legacy_frame_vector(type_name, &vector).unwrap().unwrap();
             assert_eq!(prefix_len, prefix.len());
-            assert_eq!(alloy_rlp::encode(&legacy), payload);
+            assert_eq!(roundtrip, payload);
+            let mut legacy = alloy_rlp::decode_exact::<LegacyFrameTransaction>(&payload).unwrap();
 
             for target in [Bytes::new(), Bytes::from_static(&[0xaa])] {
                 legacy.frames[0].target = target;
@@ -419,10 +441,51 @@ mod tests {
                 let mut encoded = prefix.to_vec();
                 legacy.encode(&mut encoded);
                 let (prefix_len, decoded) =
-                    decode_legacy_frame_vector(type_name, &encoded).unwrap().unwrap();
+                    roundtrip_legacy_frame_vector(type_name, &encoded).unwrap().unwrap();
                 let mut roundtrip = encoded[..prefix_len].to_vec();
-                decoded.encode(&mut roundtrip);
+                roundtrip.extend_from_slice(&decoded);
                 assert_eq!(roundtrip, encoded);
+            }
+        }
+    }
+
+    #[test]
+    fn devnet_two_frame_vectors_preserve_signature_lists_and_nonce_keys() {
+        let payloads = [
+            concat!(
+                "e7018094",
+                "0000000000000000000000000000000000000000",
+                "cac9808081aac280808080",
+                "c0c28080c0",
+            ),
+            concat!(
+                "e801c08094",
+                "0000000000000000000000000000000000000000",
+                "cac9808081aac280808080",
+                "c0c28080c0",
+            ),
+            concat!(
+                "ea01c201028094",
+                "0000000000000000000000000000000000000000",
+                "cac9808081aac280808080",
+                "c0c28080c0",
+            ),
+            concat!(
+                "f001c201028094",
+                "0000000000000000000000000000000000000000",
+                "cac9808081aac280808080",
+                "c6c580808081abc28080c0",
+            ),
+        ];
+        for (type_name, prefix) in PREFIXES {
+            for payload in payloads {
+                let payload = hex::decode(payload).unwrap();
+                let mut vector = prefix.to_vec();
+                vector.extend_from_slice(&payload);
+                let (prefix_len, roundtrip) =
+                    roundtrip_legacy_frame_vector(type_name, &vector).unwrap().unwrap();
+                assert_eq!(prefix_len, prefix.len());
+                assert_eq!(roundtrip, payload);
             }
         }
     }
@@ -435,13 +498,15 @@ mod tests {
             let signed = TransactionSigned::Eip8141(frame.seal_slow());
             let mut compact = Vec::new();
             let identifier = unsigned.to_compact(&mut compact);
-            assert!(decode_legacy_frame_vector("Transaction", &compact).unwrap().is_none());
+            assert!(roundtrip_legacy_frame_vector("Transaction", &compact).unwrap().is_none());
             let (decoded, _) = Transaction::from_compact(&compact, identifier);
             assert_eq!(decoded, unsigned);
 
             compact.clear();
             let len = signed.to_compact(&mut compact);
-            assert!(decode_legacy_frame_vector("TransactionSigned", &compact).unwrap().is_none());
+            assert!(roundtrip_legacy_frame_vector("TransactionSigned", &compact)
+                .unwrap()
+                .is_none());
             let (decoded, _) = TransactionSigned::from_compact(&compact, len);
             assert_eq!(decoded, signed);
         }
@@ -451,7 +516,7 @@ mod tests {
             ("Transaction", &[0, 0]),
             ("TransactionSigned", &[0, 0]),
         ] {
-            assert!(decode_legacy_frame_vector(type_name, bytes).unwrap().is_none());
+            assert!(roundtrip_legacy_frame_vector(type_name, bytes).unwrap().is_none());
         }
     }
 
@@ -462,14 +527,14 @@ mod tests {
             vector.extend_from_slice(&hex::decode(LEGACY_PAYLOAD).unwrap());
             vector.push(0);
             assert_eq!(
-                decode_legacy_frame_vector(type_name, &vector).unwrap_err(),
+                roundtrip_legacy_frame_vector(type_name, &vector).unwrap_err(),
                 alloy_rlp::Error::UnexpectedLength,
             );
 
             let mut vector = prefix.to_vec();
             vector.push(0x80);
             assert_eq!(
-                decode_legacy_frame_vector(type_name, &vector).unwrap_err(),
+                roundtrip_legacy_frame_vector(type_name, &vector).unwrap_err(),
                 alloy_rlp::Error::UnexpectedString,
             );
 
@@ -477,7 +542,7 @@ mod tests {
             vector.push(0xc7);
             vector.extend_from_slice(&[0x80; 7]);
             assert_eq!(
-                decode_legacy_frame_vector(type_name, &vector).unwrap_err(),
+                roundtrip_legacy_frame_vector(type_name, &vector).unwrap_err(),
                 alloy_rlp::Error::UnexpectedString,
             );
         }
