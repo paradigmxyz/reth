@@ -241,11 +241,11 @@
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
 //! use reth_evm::ConfigureEvm;
-//! use reth_ethereum_primitives::EthPrimitives;
+//! use reth_ethereum_primitives::{Block, EthPrimitives};
 //! use alloy_consensus::Header;
 //!
 //!  async fn t<C, St, Evm>(client: C, stream: St, evm_config: Evm)
-//!    where C: StateProviderFactory + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
+//!    where C: StateProviderFactory + BlockReaderIdExt<Block = Block, Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification<EthPrimitives>> + Send + Unpin + 'static,
 //!     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 //!     {

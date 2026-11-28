@@ -51,7 +51,8 @@ async fn exex_receives_reorgs() -> eyre::Result<()> {
     assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (None, Some(vec![a1])));
 
     let b1 = node.advance_block_on(genesis).await?.block().hash();
-    assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (Some(vec![a1]), Some(vec![b1])));
+    assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (Some(vec![a1]), None));
+    assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (None, Some(vec![b1])));
 
     node.reorg_to(a1).await?;
     assert_eq!(recv_block_hashes(&mut notifications_rx).await?, (Some(vec![b1]), Some(vec![a1])));

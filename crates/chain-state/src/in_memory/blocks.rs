@@ -141,6 +141,19 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
                     self.insert_executed(block);
                 }
             }
+            NewCanonicalChain::Revert { old, .. } => {
+                for block in &old {
+                    let hash = block.recovered_block().hash();
+                    if self.canonical.blocks.contains_key(&hash) {
+                        self.demote_canonical_block(&hash);
+                    }
+                }
+                self.pending_hash = None;
+                self.relink();
+                for block in old {
+                    self.insert_executed(block);
+                }
+            }
         }
     }
 
@@ -191,9 +204,7 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
             .map(|(_, hash)| *hash)
             .collect::<Vec<_>>();
         for hash in demoted {
-            let state = self.canonical.remove(&hash);
-            self.queue_moved(&state);
-            self.non_canonical.insert(state);
+            self.demote_canonical_block(&hash);
         }
 
         for block in new {
@@ -214,6 +225,12 @@ impl<N: NodePrimitives> InMemoryBlocks<N> {
 
         self.pending_hash = None;
         self.relink();
+    }
+
+    fn demote_canonical_block(&mut self, hash: &B256) {
+        let state = self.canonical.remove(hash);
+        self.queue_moved(&state);
+        self.non_canonical.insert(state);
     }
 
     /// Moves every canonical block to the non-canonical section and clears the pending block.

@@ -50,6 +50,8 @@ use std::{
 pub struct ConsistentProvider<N: ProviderNodeTypes> {
     /// Storage provider, with the in-memory blocks tracked while its transaction opened.
     storage_provider: Snapshotted<DatabaseProviderRO<N::DB, N>, N::Primitives>,
+    /// Canonical head while persistence has not confirmed the rewind.
+    rewind_head: Option<BlockNumHash>,
     /// Manager of the overlays built over this view.
     overlay_manager: OverlayManager<N::Primitives>,
     /// In-memory canonical state. This is not a snapshot, and can change! Use with caution.
@@ -90,12 +92,34 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // Blocks leave memory only after their persistence committed, so every block is either in
         // the snapshot's in-memory chain or visible to the transaction, and there are no gaps in
         // the range.
+        let mut pending_rewind = None;
         let storage_provider = state
             .in_memory_state()
-            .snapshot_during(|| storage_provider_factory.provider().map(&configure))
+            .snapshot_during(|| {
+                pending_rewind = state.first_block_in_pending_rewind().map(|_| state.chain_info());
+                storage_provider_factory.provider().map(&configure)
+            })
             .transpose()?;
+        let rewind_head = pending_rewind.map(|head| {
+            storage_provider.snapshot().canonical_head().map_or_else(
+                || BlockNumHash::new(head.best_number, head.best_hash),
+                |block| BlockNumHash::new(block.number(), block.hash()),
+            )
+        });
+        // The pending rewind bounds this snapshot even if disk holds another branch or cleanup
+        // finishes before the engine observes it.
         let overlay_manager = storage_provider_factory.overlay_manager().clone();
-        Ok(Self { storage_provider, overlay_manager, canonical_in_memory_state: state })
+        Ok(Self {
+            storage_provider,
+            rewind_head,
+            overlay_manager,
+            canonical_in_memory_state: state,
+        })
+    }
+
+    /// The canonical head to use while this storage snapshot contains a reverted suffix.
+    pub(crate) const fn rewind_head(&self) -> Option<BlockNumHash> {
+        self.rewind_head
     }
 
     /// Returns the in-memory canonical head when this view was created.
@@ -248,13 +272,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             self.head_block().map(|b| b.chain().collect::<Vec<_>>()).unwrap_or_default();
         let db_provider = &self.storage_provider;
 
-        let (start, end) = self.convert_range_bounds(range, || {
-            // the first block is the highest one.
-            in_memory_chain
-                .first()
-                .map(|b| b.number())
-                .unwrap_or_else(|| db_provider.last_block_number().unwrap_or_default())
-        });
+        let (start, end) =
+            self.convert_range_bounds(range, || self.best_block_number().unwrap_or_default());
+        let end = self.rewind_head.map_or(end, |head| end.min(head.number));
 
         if start > end {
             return Ok(vec![])
@@ -351,6 +371,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             .last()
             .map(|b| Ok(b.anchor().number))
             .unwrap_or_else(|| provider.last_block_number())?;
+        let last_database_block_number = self
+            .rewind_head
+            .map_or(last_database_block_number, |head| last_database_block_number.min(head.number));
 
         // Get the next tx number for the last block stored in the storage, which marks the start of
         // the in-memory state.
@@ -449,13 +472,17 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             .last()
             .map(|b| Ok(b.anchor().number))
             .unwrap_or_else(|| provider.last_block_number())?;
+        let last_database_block_number = self
+            .rewind_head
+            .map_or(last_database_block_number, |head| last_database_block_number.min(head.number));
 
         // Get the next tx number for the last block stored in the database and consider it the
         // first tx number of the in-memory state
         let last_block_body_index = provider
             .block_body_indices(last_database_block_number)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(last_database_block_number))?;
-        let mut in_memory_tx_num = last_block_body_index.next_tx_num();
+        let database_tx_end = last_block_body_index.next_tx_num();
+        let mut in_memory_tx_num = database_tx_end;
 
         // If the transaction number is less than the first in-memory transaction number, make a
         // database lookup
@@ -489,7 +516,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         }
 
         // Not found in-memory, so check database.
-        if let HashOrNumber::Hash(_) = id {
+        if let HashOrNumber::Hash(hash) = id &&
+            provider.transaction_id(hash)?.is_some_and(|id| id < database_tx_end)
+        {
             return fetch_from_db(provider)
         }
 
@@ -502,11 +531,17 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         id: BlockHashOrNumber,
         fetch_from_db: S,
         fetch_from_block_state: M,
-    ) -> ProviderResult<R>
+    ) -> ProviderResult<Option<R>>
     where
-        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<R>,
-        M: Fn(&BlockState<N::Primitives>) -> ProviderResult<R>,
+        S: FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
+        M: Fn(&BlockState<N::Primitives>) -> ProviderResult<Option<R>>,
     {
+        // Persistence can still contain the suffix that a forkchoice update just reverted.
+        if let BlockHashOrNumber::Number(number) = id &&
+            self.rewind_head.is_some_and(|head| number > head.number)
+        {
+            return Ok(None)
+        }
         if let Some(Some(block_state)) = self.head_block().map(|b| b.block_on_chain(id)) {
             return fetch_from_block_state(block_state)
         }
@@ -581,6 +616,31 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             append_block(state, &mut changesets);
         }
         Ok(changesets)
+    }
+    /// Reads a transaction from the disk prefix of this canonical snapshot.
+    ///
+    /// A transaction in the replaced or rewound disk suffix must not appear mined while physical
+    /// cleanup is pending. In-memory transactions are resolved by the caller first.
+    fn get_canonical_storage_transaction<R>(
+        &self,
+        hash: TxHash,
+        fetch: impl FnOnce(&DatabaseProviderRO<N::DB, N>) -> ProviderResult<Option<R>>,
+    ) -> ProviderResult<Option<R>> {
+        let disk_prefix = self
+            .head_block()
+            .map(|head| head.anchor().number)
+            .or_else(|| self.rewind_head.map(|head| head.number));
+        if let Some(number) = disk_prefix {
+            let next_tx = self
+                .storage_provider
+                .block_body_indices(number)?
+                .map(|indices| indices.next_tx_num())
+                .unwrap_or_default();
+            if self.storage_provider.transaction_id(hash)?.is_none_or(|id| id >= next_tx) {
+                return Ok(None)
+            }
+        }
+        fetch(&self.storage_provider)
     }
 }
 
@@ -701,11 +761,17 @@ impl<N: ProviderNodeTypes> BlockHashReader for ConsistentProvider<N> {
 
 impl<N: ProviderNodeTypes> BlockNumReader for ConsistentProvider<N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
+        if let Some(head) = self.rewind_head {
+            return Ok(ChainInfo { best_hash: head.hash, best_number: head.number })
+        }
         let best_number = self.best_block_number()?;
         Ok(ChainInfo { best_hash: self.block_hash(best_number)?.unwrap_or_default(), best_number })
     }
 
     fn best_block_number(&self) -> ProviderResult<BlockNumber> {
+        if let Some(head) = self.rewind_head {
+            return Ok(head.number)
+        }
         self.head_block().map(|b| Ok(b.number())).unwrap_or_else(|| self.last_block_number())
     }
 
@@ -957,7 +1023,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             return Ok(Some(tx))
         }
 
-        self.storage_provider.transaction_by_hash(hash)
+        self.get_canonical_storage_transaction(hash, |provider| provider.transaction_by_hash(hash))
     }
 
     fn transaction_by_hash_with_meta(
@@ -970,7 +1036,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             return Ok(Some((tx, meta)))
         }
 
-        self.storage_provider.transaction_by_hash_with_meta(tx_hash)
+        self.get_canonical_storage_transaction(tx_hash, |provider| {
+            provider.transaction_by_hash_with_meta(tx_hash)
+        })
     }
 
     fn transaction_by_hash_with_meta_and_sender(
@@ -986,7 +1054,9 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
             return Ok(Some(found))
         }
 
-        self.storage_provider.transaction_by_hash_with_meta_and_sender(tx_hash)
+        self.get_canonical_storage_transaction(tx_hash, |provider| {
+            provider.transaction_by_hash_with_meta_and_sender(tx_hash)
+        })
     }
 
     fn transactions_by_block(
@@ -1084,7 +1154,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             }
         }
 
-        self.storage_provider.receipt_by_hash(hash)
+        self.get_canonical_storage_transaction(hash, |provider| provider.receipt_by_hash(hash))
     }
 
     fn receipts_by_block(
@@ -1518,8 +1588,8 @@ mod tests {
         ChangesetOffset, ChangesetOffsetWriter, SegmentHeader, SegmentRangeInclusive,
     };
     use reth_storage_api::{
-        BlockReader, BlockSource, ChangeSetReader, PruneCheckpointWriter, StateReader,
-        StorageChangeSetReader, StorageSettingsCache,
+        BlockHashReader, BlockNumReader, BlockReader, BlockSource, ChangeSetReader,
+        PruneCheckpointWriter, StateReader, StorageChangeSetReader, StorageSettingsCache,
     };
     use reth_testing_utils::generators::{
         self, random_block_range, random_changeset_range, random_eoa_accounts, BlockRangeParams,
@@ -1532,6 +1602,54 @@ mod tests {
     };
 
     const TEST_BLOCKS_COUNT: usize = 5;
+
+    #[test]
+    fn hides_reverted_disk_suffix_from_canonical_number_reads() -> eyre::Result<()> {
+        let factory = create_test_provider_factory();
+        let blocks = random_block_range(
+            &mut generators::rng(),
+            0..=3,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+        let writer = factory.provider_rw()?;
+        for block in &blocks {
+            writer.insert_block(&block.clone().try_recover().expect("recover block senders"))?;
+        }
+        writer.commit()?;
+
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            InMemoryState::new().1,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory,
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
+        let state = provider.canonical_in_memory_state();
+        assert!(state.head_state().is_none());
+        canonical_in_memory_state_writer.set_canonical_head(blocks[3].clone_sealed_header());
+        let before = provider.consistent_provider()?;
+
+        // During backfill published head tracking can lag the stored chain.
+        canonical_in_memory_state_writer.set_canonical_head(blocks[1].clone_sealed_header());
+        assert_eq!(provider.consistent_provider()?.block_hash(2)?, Some(blocks[2].hash()));
+
+        // Publish a rewind while the reverted suffix is still stored on disk.
+        canonical_in_memory_state_writer
+            .set_canonical_head_after_rewind(blocks[1].clone_sealed_header(), blocks[2].num_hash());
+        let after = provider.consistent_provider()?;
+        assert_eq!(after.best_block_number()?, 1);
+        assert_eq!(after.block_hash(1)?, Some(blocks[1].hash()));
+        for block in &blocks[2..] {
+            assert_eq!(before.block_hash(block.number)?, Some(block.hash()));
+            assert_eq!(after.block_hash(block.number)?, None);
+            assert!(after.block(block.number.into())?.is_none());
+            assert_eq!(after.block(block.hash().into())?, Some(block.clone().into_block()));
+        }
+        assert_eq!(after.canonical_hashes_range(0, 4)?, [blocks[0].hash(), blocks[1].hash()]);
+        assert_eq!(after.block_range(1..=3)?, [blocks[1].clone().into_block()]);
+        Ok(())
+    }
 
     fn random_blocks(
         rng: &mut impl Rng,
