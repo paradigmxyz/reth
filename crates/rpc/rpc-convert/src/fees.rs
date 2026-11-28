@@ -165,7 +165,7 @@ pub enum CallFeesError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::constants::GWEI_TO_WEI;
+    use alloy_consensus::{constants::GWEI_TO_WEI, Transaction, TxEip1559};
 
     #[test]
     fn test_ensure_0_fallback() {
@@ -275,5 +275,26 @@ mod tests {
             Some(U256::ZERO),
         );
         assert!(call_fees.is_err());
+    }
+
+    #[ephyra::test]
+    fn rpc_fee_matches_transaction_price(base_fee: u64, cap: [u8; 16], tip: [u8; 16]) {
+        let cap = u128::from_le_bytes(cap).max(u128::from(base_fee));
+        let tx = TxEip1559 {
+            max_fee_per_gas: cap,
+            max_priority_fee_per_gas: u128::from_le_bytes(tip).min(cap),
+            ..Default::default()
+        };
+        let fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(cap)),
+            Some(U256::from(tx.max_priority_fee_per_gas)),
+            U256::from(base_fee),
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(fees.gas_price, U256::from(tx.effective_gas_price(Some(base_fee))));
     }
 }
