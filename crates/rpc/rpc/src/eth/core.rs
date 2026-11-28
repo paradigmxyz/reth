@@ -2407,11 +2407,7 @@ mod tests {
                     cache_new_blocks_task(
                         api.cache().clone(),
                         futures::stream::iter([CanonStateNotification::Commit {
-                            new: Arc::new(reth_execution_types::Chain::new(
-                                blocks.clone(),
-                                outcome,
-                                Default::default(),
-                            )),
+                            new: Arc::new(Chain::new(blocks.clone(), outcome, Default::default())),
                         }]),
                     )
                     .await;
