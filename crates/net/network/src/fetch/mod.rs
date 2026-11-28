@@ -4,7 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{message::BlockRequest, session::BlockRangeInfo};
+use crate::{message::BlockRequest, metrics::SnapRequestMetrics, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{
@@ -22,6 +22,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
+use reth_primitives_traits::FastInstant;
 use std::{
     collections::{HashMap, VecDeque},
     ops::RangeInclusive,
@@ -38,7 +39,19 @@ type InflightHeadersRequest<H> = Request<HeadersRequest, PeerRequestResult<Vec<H
 type InflightBodiesRequest<B> = Request<(), PeerRequestResult<Vec<B>>>;
 type InflightReceiptsRequest<R> = Request<(), PeerRequestResult<ReceiptsResponse<R>>>;
 type InflightBlockAccessListsRequest = Request<(), PeerRequestResult<BlockAccessLists>>;
-type InflightSnapRequest = Request<(), PeerRequestResult<SnapResponse>>;
+type InflightSnapRequest = Request<InflightSnap, PeerRequestResult<SnapResponse>>;
+
+/// Maximum number of concurrent Snap requests to one peer.
+///
+/// At most [`MAX_INFLIGHT_SNAP_STATE_RANGES`] of them are account or storage ranges.
+const MAX_INFLIGHT_SNAP_REQUESTS: usize = 4;
+
+/// Maximum number of account and storage ranges among a peer's concurrent Snap requests.
+///
+/// A serving peer runs one range per requester and queues one more, so the second starts as soon
+/// as the first is served. It answers any further range empty, which the snap client reads as the
+/// root being unavailable.
+const MAX_INFLIGHT_SNAP_STATE_RANGES: usize = 2;
 
 /// Manages data fetching operations.
 ///
@@ -57,7 +70,7 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Currently active `GetReceipts` requests
     inflight_receipts_requests: HashMap<PeerId, InflightReceiptsRequest<N::Receipt>>,
     /// Currently active `snap/2` requests
-    inflight_snap_requests: HashMap<PeerId, InflightSnapRequest>,
+    inflight_snap_requests: HashMap<PeerId, VecDeque<InflightSnapRequest>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
@@ -70,6 +83,8 @@ pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
     download_requests_tx: UnboundedSender<DownloadRequest<N>>,
+    /// Outbound Snap request concurrency and latency.
+    snap_metrics: SnapRequestMetrics,
 }
 
 // === impl StateSyncer ===
@@ -89,6 +104,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             queued_requests: Default::default(),
             download_requests_rx: UnboundedReceiverStream::new(download_requests_rx),
             download_requests_tx,
+            snap_metrics: Default::default(),
         }
     }
 
@@ -138,8 +154,15 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         if let Some(req) = self.inflight_receipts_requests.remove(peer) {
             let _ = req.response.send(Err(RequestError::ConnectionDropped));
         }
-        if let Some(req) = self.inflight_snap_requests.remove(peer) {
-            let _ = req.response.send(Err(RequestError::ConnectionDropped));
+        if let Some(requests) = self.inflight_snap_requests.remove(peer) {
+            self.snap_metrics.requests_inflight.decrement(requests.len() as f64);
+            self.snap_metrics.requests_failed_total.increment(requests.len() as u64);
+            for req in requests {
+                self.snap_metrics
+                    .response_duration_seconds
+                    .record(req.request.sent.elapsed().as_secs_f64());
+                let _ = req.response.send(Err(RequestError::ConnectionDropped));
+            }
         }
     }
 
@@ -164,20 +187,20 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         }
     }
 
-    /// Returns the _next_ idle peer that's ready to accept a request,
+    /// Returns the next peer with capacity to accept a request,
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data. Additionally, if full blocks are required this prioritizes peers that have
     /// full history available
     fn next_best_peer(&self, requirement: BestPeerRequirements) -> Option<PeerId> {
-        // filter out peers that aren't idle or don't meet the requirement
-        let mut idle = self
+        // Filter out peers without capacity or the required capabilities.
+        let mut available = self
             .peers
             .iter()
-            .filter(|(_, peer)| peer.state.is_idle() && peer.satisfies(&requirement));
+            .filter(|(_, peer)| peer.can_request(&requirement) && !self.is_draining(peer));
 
-        let mut best_peer = idle.next()?;
+        let mut best_peer = available.next()?;
 
-        for maybe_better in idle {
+        for maybe_better in available {
             // replace best peer if our current best peer sent us a bad response last time
             if best_peer.1.last_response_likely_bad && !maybe_better.1.last_response_likely_bad {
                 best_peer = maybe_better;
@@ -212,6 +235,18 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             !matches!(peer.state, PeerState::Closing) &&
                 peer.capabilities.supports_eth_at_least(&EthVersion::Eth71)
         })
+    }
+
+    /// Returns whether `peer` is finishing its `snap/2` requests for a queued download it can
+    /// serve, which needs it idle.
+    ///
+    /// Such a peer takes no more `snap/2` requests, since it only becomes idle once all of them
+    /// are answered.
+    fn is_draining(&self, peer: &Peer) -> bool {
+        !peer.state.is_idle() &&
+            self.queued_requests
+                .iter()
+                .any(|req| !req.is_snap() && peer.satisfies(&req.best_peer_requirements()))
     }
 
     /// Returns the next action to return
@@ -306,11 +341,19 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Handles a new request to a peer.
     ///
-    /// Caution: this assumes the peer exists and is idle
+    /// Caution: this assumes the peer exists and has capacity for this request.
     fn prepare_block_request(&mut self, peer_id: PeerId, req: DownloadRequest<N>) -> BlockRequest {
         // update the peer's state
         if let Some(peer) = self.peers.get_mut(&peer_id) {
-            peer.state = req.peer_state();
+            debug_assert!(peer.can_request(&req.best_peer_requirements()));
+            if let PeerState::GetSnap { inflight, state_ranges } = &mut peer.state &&
+                req.is_snap()
+            {
+                *inflight += 1;
+                *state_ranges += req.is_snap_state_range() as usize;
+            } else {
+                peer.state = req.peer_state();
+            }
         }
 
         self.prepare_inflight_block_request(peer_id, req)
@@ -350,8 +393,16 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 BlockRequest::GetReceipts(GetReceipts(request))
             }
             DownloadRequest::GetSnap { request, response, .. } => {
-                let inflight = Request { request: (), response };
-                self.inflight_snap_requests.insert(peer_id, inflight);
+                let inflight = Request {
+                    request: InflightSnap {
+                        sent: FastInstant::now(),
+                        state_range: is_snap_state_range(&request),
+                    },
+                    response,
+                };
+                self.inflight_snap_requests.entry(peer_id).or_default().push_back(inflight);
+                self.snap_metrics.requests_inflight.increment(1.0);
+                self.snap_metrics.requests_sent_total.increment(1);
                 BlockRequest::GetSnap(Box::new(request))
             }
         }
@@ -365,15 +416,16 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     ///
     /// Caution: this expects that the peer is _not_ closed.
     fn followup_request(&mut self, peer_id: PeerId) -> Option<BlockResponseOutcome> {
-        let peer = self.peers.get_mut(&peer_id)?;
+        let peer = self.peers.get(&peer_id)?;
+        if self.is_draining(peer) {
+            return None
+        }
         let req_idx = self.queued_requests.iter().position(|req| {
-            // Find the first queued request this peer can serve.
-            peer.satisfies(&req.best_peer_requirements())
+            // Find the first queued request this peer can serve within its capacity.
+            peer.can_request(&req.best_peer_requirements())
         })?;
         let req = self.queued_requests.remove(req_idx).expect("valid request index");
-
-        peer.state = req.peer_state();
-        let req = self.prepare_inflight_block_request(peer_id, req);
+        let req = self.prepare_block_request(peer_id, req);
         Some(BlockResponseOutcome::Request(peer_id, req))
     }
 
@@ -507,13 +559,26 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             Err(_) => true,
         };
 
-        if let Some(resp) = self.inflight_snap_requests.remove(&peer_id) {
-            let _ = resp.response.send(res.map(|r| (peer_id, r).into()));
+        // NetworkState delivers this peer's receivers in request order, including errors.
+        let requests = self.inflight_snap_requests.get_mut(&peer_id)?;
+        let resp = requests.pop_front()?;
+        if requests.is_empty() {
+            self.inflight_snap_requests.remove(&peer_id);
         }
+        self.snap_metrics.requests_inflight.decrement(1.0);
+        self.snap_metrics
+            .response_duration_seconds
+            .record(resp.request.sent.elapsed().as_secs_f64());
+        if res.is_err() {
+            self.snap_metrics.requests_failed_total.increment(1);
+        }
+        let _ = resp.response.send(res.map(|r| (peer_id, r).into()));
         if let Some(peer) = self.peers.get_mut(&peer_id) {
             peer.last_response_likely_bad = is_likely_bad_response;
 
-            if peer.state.on_request_finished() && !is_likely_bad_response {
+            if peer.state.on_snap_request_finished(resp.request.state_range) &&
+                !is_likely_bad_response
+            {
                 return self.followup_request(peer_id)
             }
         }
@@ -606,7 +671,9 @@ impl Peer {
     fn satisfies(&self, requirement: &BestPeerRequirements) -> bool {
         match requirement {
             BestPeerRequirements::EthVersion(ver) => self.capabilities.supports_eth_at_least(ver),
-            BestPeerRequirements::SupportsSnap => self.supports_snap,
+            BestPeerRequirements::SupportsSnap | BestPeerRequirements::SnapStateRange => {
+                self.supports_snap
+            }
             BestPeerRequirements::None |
             BestPeerRequirements::FullBlock |
             BestPeerRequirements::FullBlockRange(_) => true,
@@ -665,8 +732,28 @@ impl Peer {
             // get here both peers already satisfy the requirement.
             BestPeerRequirements::None |
             BestPeerRequirements::EthVersion(_) |
-            BestPeerRequirements::SupportsSnap => false,
+            BestPeerRequirements::SupportsSnap |
+            BestPeerRequirements::SnapStateRange => false,
         }
+    }
+
+    // Snap can share its connection within a fixed bound. Other downloads remain exclusive.
+    fn can_request(&self, requirement: &BestPeerRequirements) -> bool {
+        if !self.satisfies(requirement) {
+            return false
+        }
+        if self.state.is_idle() {
+            return true
+        }
+        let PeerState::GetSnap { inflight, state_ranges } = &self.state else { return false };
+        *inflight < MAX_INFLIGHT_SNAP_REQUESTS &&
+            match requirement {
+                BestPeerRequirements::SupportsSnap => true,
+                BestPeerRequirements::SnapStateRange => {
+                    *state_ranges < MAX_INFLIGHT_SNAP_STATE_RANGES
+                }
+                _ => false,
+            }
     }
 }
 
@@ -683,8 +770,13 @@ enum PeerState {
     GetBlockAccessLists,
     /// Peer is handling a `GetReceipts` request.
     GetReceipts,
-    /// Peer is handling a `snap/2` request.
-    GetSnap,
+    /// Peer is handling a bounded pipeline of `snap/2` requests.
+    GetSnap {
+        /// Requests awaiting their response.
+        inflight: usize,
+        /// Account and storage ranges among them, at most [`MAX_INFLIGHT_SNAP_STATE_RANGES`].
+        state_ranges: usize,
+    },
     /// Peer session is about to close
     Closing,
 }
@@ -709,6 +801,20 @@ impl PeerState {
         }
         false
     }
+
+    /// Releases the place of a finished `snap/2` request, and its range place if it held one.
+    ///
+    /// Returns `true` if the peer is ready for another request.
+    const fn on_snap_request_finished(&mut self, was_state_range: bool) -> bool {
+        if let Self::GetSnap { inflight, state_ranges } = self &&
+            *inflight > 1
+        {
+            *inflight -= 1;
+            *state_ranges -= was_state_range as usize;
+            return true
+        }
+        self.on_request_finished()
+    }
 }
 
 /// A request that waits for a response from the network, so it can send it back through the
@@ -719,6 +825,23 @@ struct Request<Req, Resp> {
     // TODO: this can be attached to the response in error case
     request: Req,
     response: oneshot::Sender<Resp>,
+}
+
+/// What the fetcher keeps about a `snap/2` request awaiting its response.
+#[derive(Debug)]
+struct InflightSnap {
+    /// When the request was handed to the peer's session.
+    sent: FastInstant,
+    /// Whether it holds one of the peer's account or storage range places.
+    state_range: bool,
+}
+
+/// Returns `true` for account and storage range requests, which a peer serves one at a time.
+const fn is_snap_state_range(request: &SnapProtocolMessage) -> bool {
+    matches!(
+        request,
+        SnapProtocolMessage::GetAccountRange(_) | SnapProtocolMessage::GetStorageRanges(_)
+    )
 }
 
 /// Requests that can be sent to the Syncer from a [`FetchClient`]
@@ -769,7 +892,10 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
             Self::GetBlockBodies { .. } => PeerState::GetBlockBodies,
             Self::GetBlockAccessLists { .. } => PeerState::GetBlockAccessLists,
             Self::GetReceipts { .. } => PeerState::GetReceipts,
-            Self::GetSnap { .. } => PeerState::GetSnap,
+            Self::GetSnap { .. } => PeerState::GetSnap {
+                inflight: 1,
+                state_ranges: self.is_snap_state_range() as usize,
+            },
         }
     }
 
@@ -799,6 +925,11 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
         matches!(self, Self::GetSnap { .. })
     }
 
+    /// Returns `true` if this is a `snap/2` account or storage range request.
+    const fn is_snap_state_range(&self) -> bool {
+        matches!(self, Self::GetSnap { request, .. } if is_snap_state_range(request))
+    }
+
     /// Sends an error response to the waiting caller.
     fn send_err_response(self, err: RequestError) {
         let _ = match self {
@@ -823,6 +954,9 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
                 }
             }
             Self::GetReceipts { .. } => BestPeerRequirements::FullBlock,
+            Self::GetSnap { .. } if self.is_snap_state_range() => {
+                BestPeerRequirements::SnapStateRange
+            }
             Self::GetSnap { .. } => BestPeerRequirements::SupportsSnap,
         }
     }
@@ -862,6 +996,8 @@ enum BestPeerRequirements {
     EthVersion(EthVersion),
     /// Peer must have negotiated `snap/2`.
     SupportsSnap,
+    /// Peer must have negotiated `snap/2` and have room for another account or storage range.
+    SnapStateRange,
 }
 
 #[cfg(test)]
@@ -874,7 +1010,7 @@ mod tests {
     use reth_eth_wire::Capability;
     use reth_eth_wire_types::snap::{
         AccountRangeMessage, BlockAccessListsMessage, ByteCodesMessage, GetAccountRangeMessage,
-        StorageRangesMessage,
+        GetByteCodesMessage, GetStorageRangesMessage, StorageRangesMessage,
     };
     use std::{
         future::poll_fn,
@@ -2199,8 +2335,15 @@ mod tests {
         });
 
         let (tx, mut rx) = oneshot::channel();
-        fetcher.inflight_snap_requests.insert(peer_id, Request { request: (), response: tx });
-        fetcher.peers.get_mut(&peer_id).unwrap().state = PeerState::GetSnap;
+        fetcher.inflight_snap_requests.insert(
+            peer_id,
+            VecDeque::from([Request {
+                request: InflightSnap { sent: FastInstant::now(), state_range: true },
+                response: tx,
+            }]),
+        );
+        fetcher.peers.get_mut(&peer_id).unwrap().state =
+            PeerState::GetSnap { inflight: 1, state_ranges: 1 };
 
         let outcome = fetcher.on_snap_response(peer_id, Ok(resp));
 
@@ -2307,8 +2450,15 @@ mod tests {
             }
             assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(fast));
             let (tx, rx) = oneshot::channel();
-            fetcher.inflight_snap_requests.insert(fast, Request { request: (), response: tx });
-            fetcher.peers.get_mut(&fast).unwrap().state = PeerState::GetSnap;
+            fetcher.inflight_snap_requests.insert(
+                fast,
+                VecDeque::from([Request {
+                    request: InflightSnap { sent: FastInstant::now(), state_range: true },
+                    response: tx,
+                }]),
+            );
+            fetcher.peers.get_mut(&fast).unwrap().state =
+                PeerState::GetSnap { inflight: 1, state_ranges: 1 };
             let (followup_tx, _followup_rx) = oneshot::channel();
             fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
                 request: SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
@@ -2334,5 +2484,242 @@ mod tests {
                 PollAction::Ready(FetchAction::BlockRequest { peer_id, .. }) if peer_id == other
             ));
         }
+    }
+
+    #[tokio::test]
+    async fn snap_pipeline_is_bounded_and_keeps_other_downloads_exclusive() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::ZERO,
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        let mut responses = Vec::new();
+        for id in 1..=MAX_INFLIGHT_SNAP_REQUESTS as u64 + 1 {
+            let (response, rx) = oneshot::channel();
+            responses.push(rx);
+            fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
+                request: SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+                    request_id: id,
+                    hashes: vec![B256::ZERO],
+                    response_bytes: 512 * 1024,
+                }),
+                response,
+                priority: Priority::Normal,
+            });
+        }
+        for _ in 0..MAX_INFLIGHT_SNAP_REQUESTS {
+            assert!(matches!(
+                fetcher.poll_action(),
+                PollAction::Ready(FetchAction::BlockRequest { peer_id, .. }) if peer_id == peer
+            ));
+        }
+        assert!(matches!(fetcher.poll_action(), PollAction::NoPeersAvailable));
+        assert_eq!(fetcher.queued_requests.len(), 1);
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
+        for id in 1..=MAX_INFLIGHT_SNAP_REQUESTS as u64 + 1 {
+            let response = SnapResponse::ByteCodes(ByteCodesMessage {
+                request_id: id,
+                codes: vec![Bytes::from_static(&[0xc0])],
+            });
+            let outcome = fetcher.on_snap_response(peer, Ok(response.clone()));
+            if id == 1 {
+                assert!(
+                    matches!(outcome, Some(BlockResponseOutcome::Request(pid, _)) if pid == peer)
+                );
+                assert_eq!(fetcher.inflight_snap_requests[&peer].len(), MAX_INFLIGHT_SNAP_REQUESTS);
+            }
+            assert_eq!(responses.remove(0).await.unwrap().unwrap().1, response);
+            if id <= MAX_INFLIGHT_SNAP_REQUESTS as u64 {
+                assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), None);
+            }
+        }
+        assert!(fetcher.inflight_snap_requests.is_empty());
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::None), Some(peer));
+    }
+
+    #[tokio::test]
+    async fn disconnect_cancels_every_request_in_the_snap_pipeline() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::ZERO,
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        let mut responses = Vec::new();
+        for id in 1..=MAX_INFLIGHT_SNAP_REQUESTS as u64 {
+            let (response, rx) = oneshot::channel();
+            responses.push(rx);
+            fetcher.prepare_block_request(
+                peer,
+                DownloadRequest::GetSnap {
+                    request: SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+                        request_id: id,
+                        hashes: vec![B256::ZERO],
+                        response_bytes: 512 * 1024,
+                    }),
+                    response,
+                    priority: Priority::Normal,
+                },
+            );
+        }
+        fetcher.on_pending_disconnect(&peer);
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), None);
+        fetcher.on_session_closed(&peer);
+        for response in responses {
+            assert_eq!(response.await.unwrap().unwrap_err(), RequestError::ConnectionDropped);
+        }
+        assert!(fetcher.inflight_snap_requests.is_empty());
+    }
+
+    #[tokio::test]
+    async fn two_state_ranges_per_peer_leave_room_for_other_snap_requests() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::ZERO,
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        let requests = [
+            SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 1,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: 512 * 1024,
+            }),
+            SnapProtocolMessage::GetStorageRanges(GetStorageRangesMessage {
+                request_id: 2,
+                root_hash: B256::ZERO,
+                account_hashes: vec![B256::ZERO],
+                starting_hash: B256::ZERO.into(),
+                limit_hash: B256::repeat_byte(0xff).into(),
+                response_bytes: 512 * 1024,
+            }),
+            SnapProtocolMessage::GetAccountRange(GetAccountRangeMessage {
+                request_id: 3,
+                root_hash: B256::ZERO,
+                starting_hash: B256::ZERO,
+                limit_hash: B256::repeat_byte(0xff),
+                response_bytes: 512 * 1024,
+            }),
+            SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+                request_id: 4,
+                hashes: vec![B256::ZERO],
+                response_bytes: 512 * 1024,
+            }),
+        ];
+        let mut responses = Vec::new();
+        for request in requests {
+            let (response, rx) = oneshot::channel();
+            responses.push(rx);
+            fetcher.queued_requests.push_back(DownloadRequest::GetSnap {
+                request,
+                response,
+                priority: Priority::Normal,
+            });
+        }
+
+        // The account and storage ranges take the peer's two range places, so the second account
+        // range waits while the code request behind it is sent.
+        let sent = |action| match action {
+            PollAction::Ready(FetchAction::BlockRequest {
+                request: BlockRequest::GetSnap(request),
+                ..
+            }) => Some(request.request_id()),
+            _ => None,
+        };
+        assert_eq!(sent(fetcher.poll_action()), Some(1));
+        assert_eq!(sent(fetcher.poll_action()), Some(2));
+        assert_eq!(sent(fetcher.poll_action()), None);
+        assert_eq!(sent(fetcher.poll_action()), Some(4));
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SnapStateRange), None);
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), Some(peer));
+
+        // The finished account range frees a place for the waiting one.
+        let range = SnapResponse::AccountRange(AccountRangeMessage {
+            request_id: 1,
+            accounts: vec![],
+            proof: vec![Bytes::from_static(&[0xc0])],
+        });
+        let outcome = fetcher.on_snap_response(peer, Ok(range.clone()));
+        assert!(matches!(
+            outcome,
+            Some(BlockResponseOutcome::Request(_, BlockRequest::GetSnap(request)))
+                if request.request_id() == 3
+        ));
+        assert_eq!(responses.remove(0).await.unwrap().unwrap().1, range);
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SnapStateRange), None);
+    }
+
+    #[tokio::test]
+    async fn busy_snap_peer_drains_for_a_queued_download() {
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+        let peer = B512::random();
+        fetcher.new_active_peer(NewPeerInfo {
+            peer_id: peer,
+            best_hash: B256::ZERO,
+            best_number: 100,
+            capabilities: Arc::new(Capabilities::new(vec![])),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        let code_request = |request_id| DownloadRequest::GetSnap {
+            request: SnapProtocolMessage::GetByteCodes(GetByteCodesMessage {
+                request_id,
+                hashes: vec![B256::ZERO],
+                response_bytes: 512 * 1024,
+            }),
+            response: oneshot::channel().0,
+            priority: Priority::Normal,
+        };
+        let codes = |request_id| {
+            Ok(SnapResponse::ByteCodes(ByteCodesMessage {
+                request_id,
+                codes: vec![Bytes::from_static(&[0xc0])],
+            }))
+        };
+        fetcher.prepare_block_request(peer, code_request(1));
+        fetcher.prepare_block_request(peer, code_request(2));
+        fetcher.queued_requests.push_back(DownloadRequest::GetBlockHeaders {
+            request: HeadersRequest::falling(1u64.into(), 1),
+            response: oneshot::channel().0,
+            priority: Priority::Normal,
+        });
+        fetcher.queued_requests.push_back(code_request(3));
+
+        // The queued headers need the peer idle, so it takes no more code requests.
+        assert_eq!(fetcher.next_best_peer(BestPeerRequirements::SupportsSnap), None);
+        assert!(fetcher.on_snap_response(peer, codes(1)).is_none());
+
+        // Once its last code request is answered, the headers go next.
+        assert!(matches!(
+            fetcher.on_snap_response(peer, codes(2)),
+            Some(BlockResponseOutcome::Request(_, BlockRequest::GetBlockHeaders(_)))
+        ));
     }
 }

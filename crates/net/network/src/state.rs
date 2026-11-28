@@ -183,6 +183,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                 version,
                 request_tx,
                 pending_response: None,
+                pending_snap_responses: VecDeque::new(),
                 blocks: LruCache::new(PEER_BLOCK_CACHE_LIMIT),
             },
         );
@@ -401,8 +402,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
     /// Sends The message to the peer's session and queues in a response.
     ///
-    /// Caution: this will replace an already pending response. It's the responsibility of the
-    /// caller to select the peer.
+    /// The fetcher bounds concurrent requests. Receivers are retained in request order so even
+    /// out-of-order Snap replies or errors are delivered to the matching caller.
     fn handle_block_request(&mut self, peer_id: PeerId, request: BlockRequest) {
         if let Some(ref mut peer) = self.active_peers.get_mut(&peer_id) {
             let (request, response) = match request {
@@ -455,8 +456,13 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                     (request, response)
                 }
             };
+            let snap = matches!(&response, PeerResponse::Snap { .. });
             let _ = peer.request_tx.to_session_tx.try_send(request);
-            peer.pending_response = Some(response);
+            if snap {
+                peer.pending_snap_responses.push_back(response);
+            } else {
+                peer.pending_response = Some(response);
+            }
         }
     }
 
@@ -545,7 +551,14 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
                 // poll all connected peers for responses
                 for (id, peer) in &mut self.active_peers {
-                    let Some(mut response) = peer.pending_response.take() else { continue };
+                    let Some(mut response) = peer
+                        .pending_response
+                        .take()
+                        .or_else(|| peer.pending_snap_responses.pop_front())
+                    else {
+                        continue
+                    };
+                    let snap = matches!(&response, PeerResponse::Snap { .. });
                     match response.poll(cx) {
                         Poll::Ready(res) => {
                             // check if the error is due to a closed channel to the session
@@ -567,7 +580,11 @@ impl<N: NetworkPrimitives> NetworkState<N> {
                         }
                         Poll::Pending => {
                             // not ready yet, store again.
-                            peer.pending_response = Some(response);
+                            if snap {
+                                peer.pending_snap_responses.push_front(response);
+                            } else {
+                                peer.pending_response = Some(response);
+                            }
                         }
                     };
                 }
@@ -610,8 +627,10 @@ pub(crate) struct ActivePeer<N: NetworkPrimitives> {
     pub(crate) version: EthVersion,
     /// A communication channel directly to the session task.
     pub(crate) request_tx: PeerRequestSender<PeerRequest<N>>,
-    /// The response receiver for a currently active request to that peer.
+    /// The response receiver for a currently active eth request to that peer.
     pub(crate) pending_response: Option<PeerResponse<N>>,
+    /// Snap response receivers in request order, bounded by the fetcher's per-peer capacity.
+    pub(crate) pending_snap_responses: VecDeque<PeerResponse<N>>,
     /// Blocks we know the peer has.
     pub(crate) blocks: LruCache<B256>,
 }
@@ -679,6 +698,7 @@ pub(crate) enum StateAction<N: NetworkPrimitives> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{
         discovery::Discovery,
         fetch::StateFetcher,
@@ -689,9 +709,16 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::B256;
     use reth_eth_wire::{BlockBodies, Capabilities, Capability, EthNetworkPrimitives, EthVersion};
+    use reth_eth_wire_types::snap::{
+        ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
+    };
     use reth_ethereum_primitives::BlockBody;
     use reth_network_api::PeerRequestSender;
-    use reth_network_p2p::{bodies::client::BodiesClient, error::RequestError};
+    use reth_network_p2p::{
+        bodies::client::BodiesClient,
+        error::RequestError,
+        snap::client::{SnapClient, SnapResponse},
+    };
     use reth_network_peers::PeerId;
     use reth_storage_api::noop::NoopProvider;
     use std::{
@@ -777,5 +804,74 @@ mod tests {
         let resp = client.get_block_bodies(vec![B256::random()]).await;
         assert!(resp.is_err());
         assert_eq!(resp.unwrap_err(), RequestError::ConnectionDropped);
+    }
+
+    #[tokio::test]
+    async fn pipelined_snap_replies_and_errors_keep_their_callers() {
+        let mut state = state();
+        let client = state.fetch_client();
+        let peer = PeerId::random();
+        let (tx, mut session) = mpsc::channel(4);
+        state.on_session_activated(SessionActivation {
+            peer,
+            capabilities: capabilities(),
+            version: EthVersion::Eth71,
+            status: Arc::default(),
+            request_tx: PeerRequestSender::new(peer, tx),
+            timeout: Arc::new(AtomicU64::new(10)),
+            range_info: None,
+            supports_snap: true,
+        });
+        // One range and three code requests, the most one peer takes at once.
+        let mut responses = vec![client.get_account_range(GetAccountRangeMessage {
+            request_id: 1,
+            root_hash: B256::ZERO,
+            starting_hash: B256::ZERO,
+            limit_hash: B256::repeat_byte(0xff),
+            response_bytes: 512 * 1024,
+        })];
+        for request_id in 2..=4 {
+            responses.push(client.get_byte_codes(GetByteCodesMessage {
+                request_id,
+                hashes: vec![B256::ZERO],
+                response_bytes: 512 * 1024,
+            }));
+        }
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(state.poll(&mut cx).is_pending());
+        let mut replies = Vec::new();
+        for _ in 0..4 {
+            let PeerRequest::GetSnap { request, response } = session.try_recv().unwrap() else {
+                panic!("expected a Snap request")
+            };
+            replies.push((request.request_id(), response));
+        }
+        // Later replies arrive first. The first request times out instead of supplying an ID.
+        // NetworkState retains each receiver and delivers them in request order to the fetcher.
+        for (id, response) in replies.into_iter().rev() {
+            let result = if id == 1 {
+                Err(RequestError::Timeout)
+            } else {
+                Ok(SnapResponse::ByteCodes(ByteCodesMessage {
+                    request_id: id,
+                    codes: vec![alloy_primitives::Bytes::from_static(&[0xc0])],
+                }))
+            };
+            response.send(result).unwrap();
+        }
+        assert!(state.poll(&mut cx).is_pending());
+        for (index, response) in responses.into_iter().enumerate() {
+            let result = response.await;
+            if index == 0 {
+                assert_eq!(result.unwrap_err(), RequestError::Timeout);
+            } else {
+                let SnapResponse::ByteCodes(codes) = result.unwrap().1 else {
+                    panic!("expected byte codes")
+                };
+                assert_eq!(codes.request_id, index as u64 + 1);
+            }
+        }
+        assert!(state.active_peers[&peer].pending_snap_responses.is_empty());
     }
 }
