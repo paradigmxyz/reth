@@ -449,9 +449,9 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { version = "0.8.2", default-features = false }
 
 # evm2
-evm2 = { git = "https://github.com/Rimeeeeee/evm2", rev = "68c9a04c0f658b4b6ba033907103cfd3c6de1524", default-features = false }
-evm2-inspectors = { git = "https://github.com/Rimeeeeee/evm2", rev = "68c9a04c0f658b4b6ba033907103cfd3c6de1524", default-features = false }
-evm2-jit = { git = "https://github.com/Rimeeeeee/evm2", rev = "68c9a04c0f658b4b6ba033907103cfd3c6de1524", default-features = false }
+evm2 = { git = "https://github.com/Rimeeeeee/evm2", rev = "b75ee09ef470fa0dd589b1fc55426763d9eb9c9c", default-features = false }
+evm2-inspectors = { git = "https://github.com/Rimeeeeee/evm2", rev = "b75ee09ef470fa0dd589b1fc55426763d9eb9c9c", default-features = false }
+evm2-jit = { git = "https://github.com/Rimeeeeee/evm2", rev = "b75ee09ef470fa0dd589b1fc55426763d9eb9c9c", default-features = false }
 
 # eth
 alloy-dyn-abi = "1.6.1"
@@ -695,11 +695,11 @@ ipnet = "2.11"
 
 [patch.crates-io]
 # reth-core
-reth-codecs = { git = "https://github.com/Rimeeeeee/reth-core", rev = "eb5191144457da3471565e408b4da3f8c4286aeb" }
-reth-codecs-derive = { git = "https://github.com/Rimeeeeee/reth-core", rev = "eb5191144457da3471565e408b4da3f8c4286aeb" }
-reth-primitives-traits = { git = "https://github.com/Rimeeeeee/reth-core", rev = "eb5191144457da3471565e408b4da3f8c4286aeb" }
-reth-rpc-traits = { git = "https://github.com/Rimeeeeee/reth-core", rev = "eb5191144457da3471565e408b4da3f8c4286aeb" }
-reth-zstd-compressors = { git = "https://github.com/Rimeeeeee/reth-core", rev = "eb5191144457da3471565e408b4da3f8c4286aeb" }
+reth-codecs = { git = "https://github.com/Rimeeeeee/reth-core", rev = "d60d09018c1220d911e10599760e20ccd299636e" }
+reth-codecs-derive = { git = "https://github.com/Rimeeeeee/reth-core", rev = "d60d09018c1220d911e10599760e20ccd299636e" }
+reth-primitives-traits = { git = "https://github.com/Rimeeeeee/reth-core", rev = "d60d09018c1220d911e10599760e20ccd299636e" }
+reth-rpc-traits = { git = "https://github.com/Rimeeeeee/reth-core", rev = "d60d09018c1220d911e10599760e20ccd299636e" }
+reth-zstd-compressors = { git = "https://github.com/Rimeeeeee/reth-core", rev = "d60d09018c1220d911e10599760e20ccd299636e" }
 
 alloy-consensus = { git = "https://github.com/Rimeeeeee/alloy", rev = "853c61fc0abd365ce98fe50fbfd54412db0b308d" }
 alloy-consensus-any = { git = "https://github.com/Rimeeeeee/alloy", rev = "853c61fc0abd365ce98fe50fbfd54412db0b308d" }
