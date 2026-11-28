@@ -191,6 +191,7 @@ where
     state_trie_overlay: OnceCell<StateTrieOverlay>,
     state_trie_overlay_with_trie_changesets: OnceCell<StateTrieOverlay>,
     execution_overlay: OnceCell<CachedExecutionOverlay>,
+    /// Whether the provider uses the v2 storage layout, as given by its storage settings.
     is_v2: bool,
 }
 
@@ -544,10 +545,10 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StorageSettingsCache,
+    Provider::Target: DBProvider,
 {
     fn basic_account_from_db(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if self.provider().cached_storage_settings().use_hashed_state() {
+        if self.is_v2 {
             let hashed_address = alloy_primitives::keccak256(address);
             self.provider()
                 .tx()
@@ -943,7 +944,7 @@ where
 impl<Provider, N: NodePrimitives> OverlayStateProvider<Provider, N>
 where
     Provider: Deref,
-    Provider::Target: DBProvider + StorageSettingsCache,
+    Provider::Target: DBProvider,
 {
     fn storage_from_db(
         &self,
@@ -951,7 +952,7 @@ where
         storage_key: alloy_primitives::StorageKey,
         zero_if_missing: bool,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
-        if self.provider().cached_storage_settings().use_hashed_state() {
+        if self.is_v2 {
             let hashed_address = alloy_primitives::keccak256(address);
             let hashed_slot = alloy_primitives::keccak256(storage_key);
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
