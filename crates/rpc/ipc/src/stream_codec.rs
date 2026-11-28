@@ -173,6 +173,8 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 if (byte == b'{' || byte == b'[') && !self.scan.in_str {
                     if self.scan.depth == 0 {
                         self.scan.start_idx = idx;
+                        // Frame length is measured from the opener, excluding leading whitespace.
+                        self.scan.whitespaces = 0;
                     }
                     self.scan.depth += 1;
                 } else if (byte == b'}' || byte == b']') && !self.scan.in_str {
@@ -462,7 +464,6 @@ mod tests {
             let mut in_str = false;
             let mut is_escaped = false;
             let mut start_idx = 0usize;
-            let mut whitespaces = 0usize;
 
             for idx in 0..buf.as_ref().len() {
                 let byte = buf.as_ref()[idx];
@@ -476,12 +477,13 @@ mod tests {
                     depth -= 1;
                 } else if byte == b'"' && !is_escaped {
                     in_str = !in_str;
-                } else if is_whitespace(byte) {
-                    whitespaces += 1;
                 }
                 is_escaped = byte == b'\\' && !is_escaped && in_str;
 
-                if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
+                if depth == 0 &&
+                    idx != start_idx &&
+                    buf[start_idx..=idx].iter().any(|&b| !is_whitespace(b))
+                {
                     if start_idx > 0 {
                         buf.advance(start_idx);
                     }
@@ -743,5 +745,31 @@ mod tests {
                 assert!(buf.len() <= max_length, "{} bytes buffered", buf.len());
             }
         }
+    }
+
+    #[ephyra::test]
+    fn padded_frames_survive_chunking(values: Vec<String>, padding: u8, chunk: u8) {
+        let array = serde_json::to_string(&values).unwrap();
+        let stream = format!("{}{array}{{}}", " \t\r\n".repeat(usize::from(padding % 17)));
+        let mut codec = StreamCodec::stream_incoming();
+        let mut buf = BytesMut::new();
+        let mut frames = Vec::new();
+        for bytes in stream.as_bytes().chunks(1 + usize::from(chunk)) {
+            buf.extend_from_slice(bytes);
+            while let Some(frame) = codec.decode(&mut buf).unwrap() {
+                frames.push(frame);
+            }
+        }
+        assert_eq!(frames, [array.as_str(), "{}"]);
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn short_frames_after_whitespace() {
+        let mut buf = BytesMut::from(&b"  []{}"[..]);
+        let mut codec = StreamCodec::stream_incoming();
+        assert_eq!(codec.decode(&mut buf).unwrap().as_deref(), Some("[]"));
+        assert_eq!(codec.decode(&mut buf).unwrap().as_deref(), Some("{}"));
+        assert!(buf.is_empty());
     }
 }

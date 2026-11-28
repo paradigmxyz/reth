@@ -28,6 +28,7 @@ futures-util.workspace = true
 interprocess = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
+ephyra.workspace = true
 tokio-stream = { workspace = true, features = ["sync"] }
 serde.workspace = true
 reth-tracing.workspace = true
