@@ -117,10 +117,8 @@ const ALPHA: usize = 3;
 /// backpressure in recursive lookups.
 const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 
-/// Number of [`MAX_NODES_PING`] slots reserved for lookups and pings to proven endpoints.
-///
-/// Unproven nodes that never answer our ping can't hold these, so they can't block lookups or
-/// bond renewals.
+// Number of `MAX_NODES_PING` slots reserved for lookups and pings to proven endpoints, so unproven
+// nodes that never answer our ping can't block lookups or bond renewals.
 const RESERVED_PINGS: usize = MAX_NODES_PER_BUCKET / 2;
 
 /// Maximum number of pings to keep queued.
