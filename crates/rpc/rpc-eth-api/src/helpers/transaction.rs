@@ -27,7 +27,7 @@ use reth_primitives_traits::{
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
-    transaction::{frame_signature_padding_gas, has_frame_signatures},
+    transaction::{frame_proof_padding_gas, has_frame_proofs},
     utils::{binary_search, decode_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
     EthResult, FillTransaction, SignError, TransactionSource,
@@ -627,16 +627,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .into())
                 }
 
-                let has_signatures = has_frame_signatures(request.as_ref());
+                let has_proofs = has_frame_proofs(request.as_ref());
                 // Legacy completeness permits missing keys, but defaulting them
                 // here would change a signed frame transaction's payload.
-                if has_signatures && request.as_ref().nonce_keys.is_none() {
+                if has_proofs && request.as_ref().nonce_keys.is_none() {
                     return Err(EthApiError::InvalidParams(
                         "signed frame transactions must include nonceKeys before filling".into(),
                     )
                     .into())
                 }
-                if has_signatures &&
+                if has_proofs &&
                     (request.as_ref().chain_id().is_none() ||
                         request.as_ref().nonce().is_none() ||
                         request.as_ref().complete_8141().is_err())
@@ -669,9 +669,6 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     let nonce = self.next_available_nonce_for(&request).await?;
                     request.as_mut().set_nonce(nonce);
                 }
-                if request.as_ref().signatures.is_none() {
-                    request.as_mut().signatures = Some(Vec::new());
-                }
 
                 let needs_budget =
                     request.as_ref().max_fee.is_none() && request.as_ref().eip8141_fees.is_none();
@@ -692,8 +689,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 if needs_budget {
                     let (evm_env, _) = self.evm_env_at(BlockId::pending()).await?;
                     let preview = self.converter().tx_env(request.clone(), &evm_env)?;
-                    let signature_gas = frame_signature_padding_gas(
-                        request.as_ref().signatures.as_deref().unwrap_or_default(),
+                    let proof_padding_gas = frame_proof_padding_gas(
+                        request.as_ref().frames.as_deref().unwrap_or_default(),
                         evm_env.version(),
                     )
                     .map_err(Self::Error::from_eth_err)?;
@@ -707,8 +704,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     .map_err(reth_evm::execute::map_handler_error)
                     .map_err(Self::Error::from_evm_err)?
                     .maximum
-                    .checked_add(signature_gas)
-                    .ok_or_else(|| EthApiError::InvalidParams("signature gas overflows".into()))?;
+                    .checked_add(proof_padding_gas)
+                    .ok_or_else(|| EthApiError::InvalidParams("proof data gas overflows".into()))?;
                     let header =
                         self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
                     let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();

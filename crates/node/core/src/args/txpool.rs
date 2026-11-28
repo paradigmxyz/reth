@@ -427,8 +427,8 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.max-batch-size", value_parser = RangedU64ValueParser::<usize>::new().range(1..), default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
 
-    /// Max execution gas of an EIP-8141 public-pool validation prefix, including signature
-    /// verification. Values below the spec cap are raised to it.
+    /// Max execution gas of an EIP-8141 public-pool validation prefix, including PROOF
+    /// verification. Values above the spec cap are lowered to it.
     #[arg(long = "txpool.max-verify-gas", default_value_t = MAX_VERIFY_GAS)]
     pub max_verify_gas: u64,
     /// Reject transactions whose nonce is below the sender nonce tracked from canonical updates.

@@ -304,8 +304,9 @@ not (
     test(=eth::helpers::transaction::tests::fill_frame_limits_preserves_independent_block_budgets) or
     test(=eth::helpers::transaction::tests::fill_frame_transaction_does_not_replace_explicit_zero_execution) or
     test(=eth::helpers::transaction::tests::fill_frame_transaction_estimates_missing_limits_and_preserves_zero) or
+    test(=eth::helpers::transaction::tests::fill_frame_transaction_estimates_omitted_native_proof_gas) or
     test(=eth::helpers::transaction::tests::fill_frame_transaction_preserves_frame_limits) or
-    test(=eth::helpers::transaction::tests::fill_frame_transaction_preserves_signature_placeholders) or
+    test(=eth::helpers::transaction::tests::fill_frame_transaction_preserves_proof_placeholders) or
     test(=eth::helpers::transaction::tests::fill_frame_transaction_preserves_state_between_frames) or
     test(=eth::helpers::transaction::tests::fill_frame_transaction_uses_execution_budget_without_reserving_unused_state) or
     test(=eth::helpers::transaction::tests::frame_pending_deployment_observes_nonce_transition_collision) or
