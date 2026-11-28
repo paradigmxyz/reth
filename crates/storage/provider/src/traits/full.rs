@@ -34,7 +34,8 @@ pub trait FullProvider<N: NodeTypesWithDB>:
         Block = BlockTy<N>,
         Receipt = ReceiptTy<N>,
         Header = HeaderTy<N>,
-    > + BalProvider
+    > + reth_storage_api::DependencyProofProvider
+    + BalProvider
     + StateProviderFactory<Primitives = N::Primitives>
     + StateRangeProviderFactory
     + StateReader
@@ -72,7 +73,8 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
             Block = BlockTy<N>,
             Receipt = ReceiptTy<N>,
             Header = HeaderTy<N>,
-        > + BalProvider
+        > + reth_storage_api::DependencyProofProvider
+        + BalProvider
         + StateProviderFactory<Primitives = N::Primitives>
         + StateRangeProviderFactory
         + StateReader

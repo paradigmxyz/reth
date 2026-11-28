@@ -275,7 +275,13 @@ where
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block).and_then(|()| {
+            if self.payload_validator.validates_block_supplemental_data() {
+                Ok(())
+            } else {
+                self.consensus.validate_block_supplemental_data(block)
+            }
+        }) {
             error!(target: "engine::tree", block = ?block.block_with_parent(), %e, "Failed to validate block");
             return Err(e)
         }
@@ -603,6 +609,10 @@ where
         payload_num_hash: NumHash,
         parent_hash: B256,
     ) -> ProviderResult<PayloadStatus> {
+        if matches!(error, NewPayloadError::Unavailable(_)) {
+            error!(target: "engine::tree", payload=?payload_num_hash, %error, "Payload processing unavailable");
+            return Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing));
+        }
         error!(target: "engine::tree", payload=?payload_num_hash, %error, "Invalid payload");
         // we need to convert the error to a payload status (response to the CL)
 

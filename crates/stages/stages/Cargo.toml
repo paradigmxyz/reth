@@ -52,7 +52,7 @@ alloy-consensus.workspace = true
 alloy-rlp.workspace = true
 
 # async
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "time"] }
 futures-util.workspace = true
 
 # observability

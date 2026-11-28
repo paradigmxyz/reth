@@ -5,7 +5,7 @@ use crate::{
     error::PoolError,
     metrics::MaintainPoolMetrics,
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
-    BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
+    BlockInfo, DependencyEvidence, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
 use alloy_eips::{BlockNumberOrTag, Decodable2718};
@@ -23,7 +23,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_execution_types::ChangedAccount;
 use reth_fs_util::FsPathError;
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, NodePrimitives, SealedHeader,
+    transaction::signed::SignedTransaction, BlockBody, NodePrimitives, SealedHeader,
 };
 use reth_storage_api::{errors::provider::ProviderError, BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::Runtime;
@@ -104,6 +104,7 @@ pub fn maintain_transaction_pool_future<N, Client, P, St>(
 where
     N: NodePrimitives,
     Client: StateProviderFactory
+        + reth_storage_api::DependencyProofProvider
         + BlockReaderIdExt<Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
@@ -130,6 +131,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
 ) where
     N: NodePrimitives,
     Client: StateProviderFactory
+        + reth_storage_api::DependencyProofProvider
         + BlockReaderIdExt<Header = N::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader> + EthereumHardforks>
         + Clone
@@ -404,14 +406,48 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 let new_mined_transactions =
                     mined_transactions.iter().copied().collect::<B256Set>();
 
+                let proof_hashes: Vec<_> =
+                    old_blocks.iter().map(|(_, block)| block.hash()).collect();
+                let proof_client = client.clone();
+                let (proof_tx, proof_rx) = oneshot::channel();
+                task_spawner.spawn_blocking_task(async move {
+                    let mut proofs = alloy_primitives::map::B256Map::default();
+                    for hash in proof_hashes {
+                        match proof_client.dependency_proof(hash) {
+                            Ok(Some(proof)) => { proofs.insert(hash, proof); }
+                            Ok(None) => {}
+                            Err(error) => debug!(target: "txpool", %hash, %error, "Cannot read reorg dependency proof"),
+                        }
+                    }
+                    let _ = proof_tx.send(proofs);
+                });
+                let reorg_proofs = proof_rx.await.unwrap_or_default();
+
                 // update the pool then re-inject the pruned transactions
                 // find all transactions that were mined in the old chain but not in the new chain
                 let pruned_old_transactions = old_blocks
-                    .transactions_with_sender()
-                    .filter(|(_, tx)| !new_mined_transactions.contains(tx.tx_hash()))
-                    .filter_map(|(signer, tx)| {
+                    .iter()
+                    .flat_map(|(_, block)| {
+                        // The old canonical block's proof is sufficient evidence after reorg.
+                        let evidence = reorg_proofs.get(&block.hash()).filter(|proof| !proof.is_empty()).and_then(|proof| {
+                            alloy_consensus::TxEip8141::collect_signature_dependencies(block.body().transactions())
+                                .map_err(alloy_eips::eip8288::ProofError::Declaration)
+                                .and_then(|deps| DependencyEvidence::aggregate(deps, proof.clone()))
+                                .map(Arc::new)
+                                .map_err(|error| debug!(target: "txpool", %error, "Cannot retain reorg dependency evidence"))
+                                .ok()
+                        });
+                        block
+                            .transactions_with_sender()
+                            .map(move |(sender, tx)| (sender, tx, evidence.clone()))
+                    })
+                    .filter(|(_, tx, _)| !new_mined_transactions.contains(tx.tx_hash()))
+                    .filter_map(|(signer, tx, evidence)| {
                         let tx = tx.clone().with_signer(*signer);
-                        if tx.blob_versioned_hashes().is_some_and(|hashes| !hashes.is_empty()) {
+                        let mut transaction = if tx
+                            .blob_versioned_hashes()
+                            .is_some_and(|hashes| !hashes.is_empty())
+                        {
                             // reorged blobs no longer include the blob, which is necessary for
                             // validating the transaction. Even though the transaction could have
                             // been validated previously, we still need the blob in order to
@@ -426,7 +462,16 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                 })
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()
+                        }?;
+                        if transaction.frame_transaction().is_some_and(|tx| {
+                            tx.frames.iter().any(|frame| {
+                                frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify
+                            })
+                        }) && let Err(error) = transaction.set_dependency_evidence(evidence?) {
+                            debug!(target: "txpool", %error, "Cannot attach reorg dependency evidence");
+                            return None;
                         }
+                        Some(transaction)
                     })
                     .collect::<Vec<_>>();
 

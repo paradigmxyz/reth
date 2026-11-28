@@ -810,3 +810,12 @@ impl<ChainSpec: Send + Sync, N: Send + Sync> StorageSettingsCache for NoopProvid
 
     fn set_storage_settings_cache(&self, _settings: reth_db_api::models::StorageSettings) {}
 }
+
+impl<C: Send + Sync, N: NodePrimitives> crate::DependencyProofProvider for NoopProvider<C, N> {
+    fn dependency_proof(&self, _hash: B256) -> ProviderResult<Option<Bytes>> {
+        Ok(None)
+    }
+    fn insert_dependency_proof(&self, _hash: B256, _proof: Bytes) -> ProviderResult<()> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}

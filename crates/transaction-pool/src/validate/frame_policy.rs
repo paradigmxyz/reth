@@ -7,6 +7,7 @@ use alloy_eips::{
         MAX_RECENT_ROOT_REFERENCES, RECENT_ROOT_ADDRESS, RECENT_ROOT_ENTRY_DOMAIN,
         RECENT_ROOT_LENGTH, RECENT_ROOT_STORAGE_DOMAIN, RECENT_ROOT_TUPLE_BYTES,
     },
+    eip8288::MAX_SIGS_PER_TX,
 };
 use alloy_primitives::{keccak256, Address, B256, U256};
 
@@ -111,6 +112,13 @@ impl FrameValidationPolicy {
         max_verify_gas: u64,
     ) -> Result<Self, &'static str> {
         let max_verify_gas = max_verify_gas.max(MAX_VERIFY_GAS);
+        if tx.frames.iter().any(|frame| frame.mode == FrameMode::DependencyVerify) {
+            let dependencies =
+                tx.signature_dependencies().map_err(|_| "invalid EIP-8288 dependency frame")?;
+            if dependencies.len() > MAX_SIGS_PER_TX {
+                return Err("too many EIP-8288 signature dependencies");
+            }
+        }
         let mut start = 0;
         let expiry_index = if tx.frames.first().is_some_and(Frame::is_expiry_verifier) {
             let frame = &tx.frames[0];
@@ -135,6 +143,10 @@ impl FrameValidationPolicy {
             _ => None,
         };
 
+        // Dependency declarations do not execute code, but retain their indexes and gas charge.
+        while tx.frames.get(start).is_some_and(|frame| frame.mode == FrameMode::DependencyVerify) {
+            start += 1;
+        }
         let rest = &tx.frames[start..];
         let (prefix_len, deploy_index) = match rest {
             [self_verify, ..] if is_sender_verify(self_verify, tx.sender, 3) => (1, None),
@@ -236,7 +248,10 @@ fn is_pay(frame: &Frame) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip8141::{FrameAddress, FrameLimits, EXPIRY_DATA_LENGTH, EXPIRY_VERIFIER};
+    use alloy_eips::{
+        eip8141::{FrameAddress, FrameLimits, EXPIRY_DATA_LENGTH, EXPIRY_VERIFIER},
+        eip8288::{SignatureDependency, LEANSPHINCS_SCHEME, LEANSPHINCS_VERIFICATION_GAS},
+    };
     use alloy_primitives::{b256, Bytes, U256};
 
     fn frame(mode: FrameMode, flags: u8, target: FrameAddress) -> Frame {
@@ -517,6 +532,63 @@ mod tests {
         assert_eq!(
             FrameValidationPolicy::new(&tx(vec![root, frame(FrameMode::Verify, 3, sender())]), 0),
             Err("verification gas budget exceeded")
+        );
+    }
+
+    fn dependency_frame(count: usize, distinct: bool) -> Frame {
+        let mut data = Vec::new();
+        for index in 0..count {
+            data.extend_from_slice(
+                &SignatureDependency {
+                    scheme: LEANSPHINCS_SCHEME,
+                    data_hash: B256::ZERO,
+                    verification_key_hash: B256::from(U256::from(if distinct { index } else { 0 })),
+                }
+                .encode(),
+            );
+        }
+        Frame {
+            mode: FrameMode::DependencyVerify,
+            limits: FrameLimits {
+                execution: count as u64 * LEANSPHINCS_VERIFICATION_GAS,
+                state: 0,
+            },
+            data: data.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn dependency_prefix_preserves_frame_indexes_and_execution_budget() {
+        let transaction = tx(vec![
+            expiry_frame(),
+            dependency_frame(1, false),
+            frame(FrameMode::Verify, 3, sender()),
+            frame(FrameMode::Sender, 0, sender()),
+        ]);
+        let policy = FrameValidationPolicy::new(&transaction, 0).unwrap();
+        assert_eq!(policy.prefix_end, 3);
+        assert_eq!(policy.expiry_index, Some(0));
+        assert_eq!(policy.declared_execution_gas, LEANSPHINCS_VERIFICATION_GAS + 20);
+        assert_eq!(policy.state_gas, 20);
+        let transaction =
+            tx(vec![dependency_frame(1, false), frame(FrameMode::Verify, 3, sender())]);
+        assert_eq!(
+            FrameValidationPolicy::new(&transaction, MAX_VERIFY_GAS - LEANSPHINCS_VERIFICATION_GAS,),
+            Err("verification gas budget exceeded")
+        );
+    }
+
+    #[test]
+    fn dependency_pool_limit_counts_distinct_resolved_claims() {
+        let transaction =
+            tx(vec![dependency_frame(17, false), frame(FrameMode::Verify, 3, sender())]);
+        assert_eq!(FrameValidationPolicy::new(&transaction, 0).unwrap().prefix_end, 2);
+        let transaction =
+            tx(vec![dependency_frame(17, true), frame(FrameMode::Verify, 3, sender())]);
+        assert_eq!(
+            FrameValidationPolicy::new(&transaction, 0),
+            Err("too many EIP-8288 signature dependencies")
         );
     }
 }

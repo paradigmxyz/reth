@@ -74,9 +74,9 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// An explicit genesis list overrides the mainnet default, including an empty list. Other
     /// chains default to no accounts and must configure their own pre-fork state exceptions.
     fn eip8253_accounts(&self) -> &[Address] {
-        self.genesis().config.eip8253_accounts.as_deref().unwrap_or_else(|| {
+        self.genesis().config.zero_nonce_storage_accounts.as_deref().unwrap_or_else(|| {
             if self.genesis_hash() == MAINNET_GENESIS_HASH {
-                &alloy_genesis::EIP8253_MAINNET_ACCOUNTS
+                &alloy_eips::eip8253::MAINNET_ACCOUNTS
             } else {
                 &[]
             }

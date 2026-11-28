@@ -36,7 +36,7 @@ use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum_engine_primitives::{EthBuiltPayload, EthEngineTypes};
 use reth_payload_primitives::EngineApiMessageVersion;
 use reth_primitives_traits::AlloyBlockHeader;
-use reth_provider::{BalProvider, BlockReader, StateProviderFactory};
+use reth_provider::{BalProvider, BlockReader, DependencyProofProvider, StateProviderFactory};
 use reth_rpc::EngineApi;
 use reth_rpc_engine_api::EngineApiError;
 use reth_transaction_pool::TransactionPool;
@@ -372,7 +372,7 @@ impl EngineSszApi for reth_node_builder::rpc::NoopEngineApi {}
 impl<Provider, Pool, Validator, ChainSpec> EngineSszApi
     for EthEngineApi<Provider, Pool, Validator, ChainSpec>
 where
-    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + DependencyProofProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -875,7 +875,7 @@ async fn submit_payload<Provider, Pool, Validator, ChainSpec>(
     payload: ExecutionData,
 ) -> Result<EngineSszPayloadStatus, HttpResponse>
 where
-    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + DependencyProofProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
@@ -928,7 +928,7 @@ async fn handle_get_payload_bodies<Provider, Pool, Validator, ChainSpec>(
     request: PayloadBodiesRequest,
 ) -> HttpResponse
 where
-    Provider: BlockReader + StateProviderFactory + BalProvider + 'static,
+    Provider: BlockReader + StateProviderFactory + BalProvider + DependencyProofProvider + 'static,
     Pool: TransactionPool + 'static,
     Validator: EngineApiValidator<EthEngineTypes>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,

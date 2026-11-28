@@ -17,6 +17,7 @@ reth-chainspec.workspace = true
 reth-consensus-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-consensus.workspace = true
+reth-storage-api.workspace = true
 
 # alloy
 alloy-eips.workspace = true
@@ -24,15 +25,19 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
 tracing.workspace = true
+tokio = { workspace = true, optional = true, features = ["rt"] }
 
 [features]
 default = ["std"]
 std = [
+    "dep:tokio",
+    "alloy-eips/eip8288-proofs",
     "alloy-consensus/std",
     "alloy-eips/std",
     "alloy-primitives/std",
     "reth-chainspec/std",
     "reth-consensus/std",
+    "reth-storage-api/std",
     "reth-consensus-common/std",
     "reth-ethereum-primitives/std",
     "reth-execution-types/std",
@@ -43,3 +48,4 @@ std = [
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
+tokio = { workspace = true, features = ["macros", "rt"] }

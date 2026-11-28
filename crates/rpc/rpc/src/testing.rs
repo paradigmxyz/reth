@@ -368,8 +368,11 @@ where
         let block_hash = payload.block().hash();
         let requests = payload.requests();
         let block_access_list = payload.block_access_list().cloned();
+        let dependency_proof = payload.dependency_proof().cloned();
         let block = Arc::unwrap_or_clone(payload.into_block_arc()).into_sealed_block();
-        let execution_data = Payload::block_to_payload(block, block_access_list);
+        let mut extras = alloy_rpc_types_engine::PayloadExtras::from(block_access_list);
+        extras.dependency_proof = dependency_proof;
+        let execution_data = Payload::block_to_payload(block, extras);
         let execution_data = match (requests, execution_data.sidecar.cancun()) {
             (Some(requests), Some(cancun)) => ExecutionData::new(
                 execution_data.payload,

@@ -1,6 +1,6 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef};
+use alloy_consensus::{constants::EIP4844_TX_TYPE_ID, transaction::TxHashRef, Transaction};
 use reth_concurrency::sync::rayon::iter::{IntoParallelIterator, ParallelIterator};
 use smallvec::SmallVec;
 
@@ -11,6 +11,8 @@ pub mod announcement;
 pub mod config;
 /// Default and spec'd bounds.
 pub mod constants;
+/// Bounded dependency-wrapper admission, gossip, and recursive aggregation.
+pub mod dependencies;
 /// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
 pub mod fetcher;
 /// Defines the traits for transaction-related policies.
@@ -1830,10 +1832,19 @@ impl PropagationMode {
     }
 }
 
+/// Whether a transaction must travel with its dependency proof wrapper.
+fn requires_dependency_wrapper(transaction: &impl Transaction) -> bool {
+    transaction.frame_transaction().is_some_and(|tx| {
+        tx.frames.iter().any(|frame| frame.mode == alloy_eips::eip8141::FrameMode::DependencyVerify)
+    })
+}
+
 /// A transaction that's about to be propagated to multiple peers.
 #[derive(Debug, Clone)]
 struct PropagateTransaction {
     is_broadcastable_in_full: bool,
+    /// Dependency transactions are announced by the wrapper capability.
+    requires_dependency_wrapper: bool,
     /// Size advertised in eth/68 to eth/71 `NewPooledTransactionHashes` metadata and used for full
     /// broadcast soft-limit accounting.
     ///
@@ -1860,6 +1871,7 @@ impl PropagateTransaction {
 
         Self {
             is_broadcastable_in_full,
+            requires_dependency_wrapper: requires_dependency_wrapper(&transaction),
             propagation_size,
             propagation_size_without_blobs: (!transaction.is_eip4844()).then_some(propagation_size),
             cell_mask: None,
@@ -1879,6 +1891,9 @@ impl PropagateTransaction {
         let cell_mask = tx.transaction.blob_cell_availability().map(BlobCellAvailability::get);
         Self {
             is_broadcastable_in_full,
+            requires_dependency_wrapper: requires_dependency_wrapper(
+                tx.transaction.consensus_ref().into_inner(),
+            ),
             propagation_size,
             propagation_size_without_blobs,
             cell_mask,
@@ -2077,6 +2092,9 @@ impl FullTransactionsBuilder {
     /// to list of pooled transactions, (e.g. 4844 transactions).
     /// See also [`SignedTransaction::is_broadcastable_in_full`].
     fn push(&mut self, transaction: &PropagateTransaction) {
+        if transaction.requires_dependency_wrapper {
+            return
+        }
         // Do not send full 4844 transaction hashes to peers.
         //
         //  Nodes MUST NOT automatically broadcast blob transactions to their peers.
@@ -2121,6 +2139,9 @@ enum PooledTransactionsHashesBuilder {
 impl PooledTransactionsHashesBuilder {
     /// Push a transaction from the pool to the list.
     fn push_pooled<T: PoolTransaction>(&mut self, pooled_tx: Arc<ValidPoolTransaction<T>>) {
+        if requires_dependency_wrapper(&pooled_tx.transaction) {
+            return
+        }
         self.push_hash(
             *pooled_tx.hash(),
             pooled_tx.transaction.ty(),
@@ -2147,6 +2168,9 @@ impl PooledTransactionsHashesBuilder {
     }
 
     fn push(&mut self, tx: &PropagateTransaction) {
+        if tx.requires_dependency_wrapper {
+            return
+        }
         self.push_hash(
             *tx.tx_hash(),
             tx.tx_type(),
@@ -2678,6 +2702,40 @@ mod tests {
             }
             .seal_slow(),
         )
+    }
+
+    #[test]
+    fn dependency_transactions_require_wrapper_gossip() {
+        let transaction = TransactionSigned::Eip8141(
+            TxEip8141 {
+                frames: vec![alloy_eips::eip8141::Frame {
+                    mode: alloy_eips::eip8141::FrameMode::DependencyVerify,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }
+            .seal_slow(),
+        );
+        let pooled = valid_eth_pool_transaction(EthPooledTransaction::new(
+            Recovered::new_unchecked(transaction.clone(), Address::ZERO),
+            transaction.encode_2718_len(),
+        ));
+        let dependency = PropagateTransaction::new(transaction);
+        let ordinary = PropagateTransaction::new(frame_transaction(false));
+        for version in [EthVersion::Eth66, EthVersion::Eth68, EthVersion::Eth72, EthVersion::Eth73]
+        {
+            let mut full = FullTransactionsBuilder::new(version);
+            full.push(&dependency);
+            assert!(full.is_empty());
+            full.push(&ordinary);
+            assert!(!full.is_empty());
+            let mut hashes = PooledTransactionsHashesBuilder::new(version);
+            hashes.push(&dependency);
+            hashes.push_pooled(pooled.clone());
+            assert!(hashes.is_empty());
+            hashes.push(&ordinary);
+            assert!(!hashes.is_empty());
+        }
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -246,7 +246,7 @@ where
                 let primitive_block = N::Types::rpc_to_primitive_block(rpc_block);
                 <N::Types as NodeTypes>::Payload::block_to_payload(
                     SealedBlock::new_unhashed(primitive_block),
-                    extras.bal,
+                    extras,
                 )
             })
             .await?;
@@ -282,7 +282,7 @@ where
                     let primitive_block = N::Types::rpc_to_primitive_block(rpc_block);
                     <N::Types as NodeTypes>::Payload::block_to_payload(
                         SealedBlock::new_unhashed(primitive_block),
-                        None,
+                        Default::default(),
                     )
                 },
             );

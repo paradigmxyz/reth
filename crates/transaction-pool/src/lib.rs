@@ -235,7 +235,7 @@
 //! use futures_util::Stream;
 //! use reth_chain_state::CanonStateNotification;
 //! use reth_chainspec::{MAINNET, ChainSpecProvider, ChainSpec};
-//! use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+//! use reth_storage_api::{BlockReaderIdExt, DependencyProofProvider, StateProviderFactory};
 //! use reth_tasks::Runtime;
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
@@ -245,7 +245,7 @@
 //! use alloy_consensus::Header;
 //!
 //!  async fn t<C, St, Evm>(client: C, stream: St, evm_config: Evm)
-//!    where C: StateProviderFactory + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
+//!    where C: StateProviderFactory + DependencyProofProvider + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification<EthPrimitives>> + Send + Unpin + 'static,
 //!     Evm: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 //!     {
@@ -276,8 +276,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-pub use alloy_consensus::transaction::eip8141::TxEip8141ValidationError;
-
+pub use alloy_consensus::TxEip8141ValidationError;
+pub use alloy_eips::eip8288::{DependencyEvidence, ProofError};
 pub use imbl::OrdMap;
 
 pub use crate::{
@@ -483,6 +483,14 @@ where
 
     fn block_info(&self) -> BlockInfo {
         self.pool.block_info()
+    }
+
+    fn dependency_aggregate(&self) -> Option<Arc<DependencyEvidence>> {
+        self.pool.dependency_aggregate.read().clone()
+    }
+
+    fn set_dependency_aggregate(&self, evidence: Option<Arc<DependencyEvidence>>) {
+        *self.pool.dependency_aggregate.write() = evidence;
     }
 
     async fn add_transaction_and_subscribe(

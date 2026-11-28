@@ -319,10 +319,13 @@ impl<ChainSpec, F: EvmFactory> EthEvmConfig<ChainSpec, F> {
         blob_params: Option<BlobParams>,
     ) -> EthEvmEnv<F::Types>
     where
-        ChainSpec: EthChainSpec,
+        ChainSpec: EthChainSpec + EthereumHardforks,
     {
         let factory = self.executor_factory.evm_factory();
         let mut version = factory.version(spec, self.chain_spec().chain_id());
+        if self.chain_spec().is_bogota_active_at_timestamp(block.timestamp.saturating_to()) {
+            version.features.insert(evm2::EvmFeatures::EIP8288);
+        }
         if let Some(blob_params) = blob_params {
             version.max_blobs_per_tx = blob_params.max_blobs_per_tx as usize;
         }

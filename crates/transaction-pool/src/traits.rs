@@ -60,7 +60,8 @@ use crate::{
     validate::{
         FrameValidation, TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
     },
-    AddedTransactionOutcome, AllTransactionsEvents, PriceBumpConfig, TxEip8141ValidationError,
+    AddedTransactionOutcome, AllTransactionsEvents, DependencyEvidence, PriceBumpConfig,
+    ProofError, TxEip8141ValidationError,
 };
 use alloy_consensus::{
     error::ValueError,
@@ -130,6 +131,15 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ///
     /// This tracks the block that the pool has last seen.
     fn block_info(&self) -> BlockInfo;
+
+    /// Returns the most recent bounded aggregate available to payload construction.
+    fn dependency_aggregate(&self) -> Option<Arc<DependencyEvidence>> {
+        None
+    }
+
+    /// Replaces the single aggregate retained as a proving optimization.
+    /// Payload construction independently verifies coverage and the proof.
+    fn set_dependency_aggregate(&self, _evidence: Option<Arc<DependencyEvidence>>) {}
 
     /// Imports an _external_ transaction.
     ///
@@ -1543,6 +1553,19 @@ pub trait PoolTransaction:
         None
     }
 
+    /// Returns immutable dependency evidence attached by wrapper admission.
+    fn dependency_evidence(&self) -> Option<&Arc<DependencyEvidence>> {
+        None
+    }
+
+    /// Attaches wrapper evidence. Admission independently checks coverage and validity.
+    fn set_dependency_evidence(
+        &mut self,
+        _evidence: Arc<DependencyEvidence>,
+    ) -> Result<(), ProofError> {
+        Err(ProofError::MissingEvidence)
+    }
+
     /// Attaches frame validation metadata.
     fn set_frame_validation(
         &mut self,
@@ -1750,6 +1773,8 @@ pub struct EthPooledTransaction<T = TransactionSigned> {
 
     /// Optional validation metadata for an EIP-8141 frame transaction.
     pub frame_validation: Option<Arc<FrameValidation>>,
+    /// Shared immutable witnesses for EIP-8288 dependencies, excluded from the transaction hash.
+    pub dependency_evidence: Option<Arc<DependencyEvidence>>,
 }
 
 impl<T: SignedTransaction> EthPooledTransaction<T> {
@@ -1796,6 +1821,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             blob_sidecar,
             blob_cell_availability,
             frame_validation: None,
+            dependency_evidence: None,
         }
     }
 
@@ -1889,6 +1915,21 @@ impl PoolTransaction for EthPooledTransaction {
         self.frame_validation.as_ref()
     }
 
+    fn dependency_evidence(&self) -> Option<&Arc<DependencyEvidence>> {
+        self.dependency_evidence.as_ref()
+    }
+
+    fn set_dependency_evidence(
+        &mut self,
+        evidence: Arc<DependencyEvidence>,
+    ) -> Result<(), ProofError> {
+        if !self.is_eip8141() {
+            return Err(ProofError::Coverage);
+        }
+        self.dependency_evidence = Some(evidence);
+        Ok(())
+    }
+
     fn set_frame_validation(&mut self, metadata: Arc<FrameValidation>) -> Result<(), &'static str> {
         if !self.is_eip8141() {
             return Err("frame validation metadata requires an EIP-8141 transaction");
@@ -1920,7 +1961,7 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn encoded_length_eth72(&self) -> Option<usize> {
-        if self.is_eip4844() {
+        if self.is_blob_transaction() {
             self.blobless_encoded_length.map(NonZeroUsize::get)
         } else {
             Some(self.encoded_length)
@@ -1951,6 +1992,7 @@ impl<T: InMemorySize> InMemorySize for EthPooledTransaction<T> {
     #[inline]
     fn size(&self) -> usize {
         self.in_memory_size +
+            self.dependency_evidence.as_ref().map_or(0, |evidence| evidence.size()) +
             self.frame_validation.as_ref().map_or(0, |metadata| {
                 // Admission metadata can exceed the wire payload for code/storage-heavy prefixes.
                 // Include its allocation in pool pressure accounting without changing encoded
@@ -2622,7 +2664,12 @@ mod tests {
         let consensus = TransactionSigned::Eip8141(tx.clone().seal_slow());
         let pooled = PooledTransactionVariant::from(TxEip8141WithSidecar::new(tx, sidecar.clone()));
         assert_eq!(EthPooledTransaction::pooled_into_consensus(pooled.clone()), consensus);
+        let mut without_blobs = pooled.clone();
+        without_blobs.clear_eip7594_blobs();
+        let blobless_length = without_blobs.encode_2718_len();
+        assert_eq!(EthPooledTransaction::pooled_without_blobs(pooled.clone()), Some(without_blobs));
         let pooled = EthPooledTransaction::from_pooled(Recovered::new_unchecked(pooled, sender));
+        assert_eq!(pooled.encoded_length_eth72(), Some(blobless_length));
         assert_eq!(
             pooled.blob_sidecar.maybe_sidecar(),
             Some(&BlobTransactionSidecarVariant::Eip7594(sidecar)),

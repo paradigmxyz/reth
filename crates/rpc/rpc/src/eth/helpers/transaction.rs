@@ -1056,7 +1056,7 @@ mod tests {
             let mut genesis = ChainSpecBuilder::mainnet().build().genesis.clone();
             genesis.timestamp = 0;
             genesis.config.bogota_time = Some(2);
-            genesis.config.eip8253_accounts = Some(vec![sender]);
+            genesis.config.zero_nonce_storage_accounts = Some(vec![sender]);
             let spec = ChainSpecBuilder::mainnet()
                 .genesis(genesis)
                 .amsterdam_activated()
@@ -1131,7 +1131,7 @@ mod tests {
         let mut genesis = ChainSpecBuilder::mainnet().build().genesis.clone();
         genesis.timestamp = 0;
         genesis.config.bogota_time = Some(2);
-        genesis.config.eip8253_accounts = Some(vec![sender]);
+        genesis.config.zero_nonce_storage_accounts = Some(vec![sender]);
         let spec = ChainSpecBuilder::mainnet()
             .genesis(genesis)
             .amsterdam_activated()

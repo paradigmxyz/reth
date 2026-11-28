@@ -862,7 +862,9 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             },
             ValidationApiError::Payload(err) => match err {
                 error @ NewPayloadError::Eth(_) => invalid_params_rpc_err(error.to_string()),
-                error @ NewPayloadError::Other(_) => internal_rpc_err(error.to_string()),
+                error @ (NewPayloadError::Other(_) | NewPayloadError::Unavailable(_)) => {
+                    internal_rpc_err(error.to_string())
+                }
             },
         }
     }

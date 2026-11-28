@@ -231,14 +231,13 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
             {
                 update.bytecodes.insert(code_hash, code.clone());
             } else if let Some(change) = account_changes.code_changes().last() &&
-                let Some(hash) = change.adopted_code_hash() &&
+                let Some(hash) = change.new_code_hash() &&
                 hash != KECCAK256_EMPTY
             {
                 let supplied_codes = supplied_codes.get_or_insert_with(|| {
                     let mut codes = B256Map::<&CodeChange>::default();
                     for supplied in bal.iter().flat_map(AccountChanges::code_changes) {
-                        if supplied.adopted_code_hash().is_none() && !supplied.new_code().is_empty()
-                        {
+                        if supplied.new_code_hash().is_none() && !supplied.new_code().is_empty() {
                             codes
                                 .entry(supplied.code_hash())
                                 .and_modify(|earliest| {

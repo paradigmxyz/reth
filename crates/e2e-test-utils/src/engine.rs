@@ -1,6 +1,5 @@
 //! Version-agnostic access to the consensus engine of a test node.
 
-use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatus};
 use reth_engine_primitives::{
     BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ConsensusEngineHandle,
@@ -54,9 +53,9 @@ impl<T: PayloadTypes> EngineTestContext<T> {
         block: SealedBlock<
             <<T::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-        block_access_list: Option<Bytes>,
+        extras: impl Into<alloy_rpc_types_engine::PayloadExtras>,
     ) -> Result<PayloadStatus, BeaconOnNewPayloadError> {
-        self.new_payload(T::block_to_payload(block, block_access_list)).await
+        self.new_payload(T::block_to_payload(block, extras.into())).await
     }
 
     /// Sends a forkchoice update without payload attributes to the engine like

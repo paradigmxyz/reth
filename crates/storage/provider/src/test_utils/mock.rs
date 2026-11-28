@@ -82,6 +82,8 @@ pub struct MockEthProvider<T: NodePrimitives = EthPrimitives, ChainSpec = reth_c
     pending_block_num_hash: Arc<Mutex<Option<BlockNumHash>>>,
     /// Local BAL store handle
     pub bal_store: BalStoreHandle,
+    /// Supplemental proofs keyed by block hash.
+    pub dependency_proofs: Arc<Mutex<B256Map<Bytes>>>,
     /// Whether database provider creation succeeds.
     database_provider_available: Arc<AtomicBool>,
     /// Whether snap state reads should fail for handler error-path tests.
@@ -140,6 +142,7 @@ where
             next_chain_info: self.next_chain_info.clone(),
             pending_block_num_hash: self.pending_block_num_hash.clone(),
             bal_store: self.bal_store.clone(),
+            dependency_proofs: self.dependency_proofs.clone(),
             database_provider_available: self.database_provider_available.clone(),
             snap_state_reads_fail: self.snap_state_reads_fail.clone(),
             snap_state_range_available: self.snap_state_range_available.clone(),
@@ -172,6 +175,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             next_chain_info: Default::default(),
             pending_block_num_hash: Default::default(),
             bal_store: Default::default(),
+            dependency_proofs: Default::default(),
             database_provider_available: Default::default(),
             snap_state_reads_fail: Default::default(),
             snap_state_range_available: Default::default(),
@@ -361,6 +365,7 @@ impl<T: NodePrimitives, ChainSpec> MockEthProvider<T, ChainSpec> {
             next_chain_info: self.next_chain_info,
             pending_block_num_hash: self.pending_block_num_hash,
             bal_store: self.bal_store,
+            dependency_proofs: self.dependency_proofs,
             database_provider_available: self.database_provider_available,
             snap_state_reads_fail: self.snap_state_reads_fail,
             snap_state_range_available: self.snap_state_range_available,
@@ -1423,6 +1428,18 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> NodePrimitivesProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Primitives = T;
+}
+
+impl<T: NodePrimitives, C: Send + Sync> reth_storage_api::DependencyProofProvider
+    for MockEthProvider<T, C>
+{
+    fn dependency_proof(&self, hash: B256) -> ProviderResult<Option<Bytes>> {
+        Ok(self.dependency_proofs.lock().get(&hash).cloned())
+    }
+    fn insert_dependency_proof(&self, hash: B256, proof: Bytes) -> ProviderResult<()> {
+        self.dependency_proofs.lock().insert(hash, proof);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

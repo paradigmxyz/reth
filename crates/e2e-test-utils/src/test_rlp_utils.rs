@@ -57,6 +57,8 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             requests_hash: None,
             block_access_list_hash: None,
             slot_number: None,
+            dependency_proof_hash: None,
+            block_deps_hash: None,
         };
 
         // Set required fields based on chain spec

@@ -18,7 +18,7 @@
 #![warn(unused_crate_dependencies)]
 
 use alloy_genesis::Genesis;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::B256;
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -122,10 +122,13 @@ impl PayloadTypes for CustomEngineTypes {
         block: SealedBlock<
                 <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
             >,
-        _bal: Option<Bytes>,
+        extras: alloy_rpc_types::engine::PayloadExtras,
     ) -> ExecutionData {
-        let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+        let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
+            block.hash(),
+            &block.into_block(),
+            extras,
+        );
         ExecutionData { payload, sidecar }
     }
 }
@@ -137,6 +140,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
     type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
+    type ExecutionPayloadEnvelopeV7 = alloy_rpc_types::engine::ExecutionPayloadEnvelopeV7;
 }
 
 /// Custom engine validator

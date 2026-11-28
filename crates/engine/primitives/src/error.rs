@@ -41,6 +41,7 @@ impl From<InsertBlockProcessingError> for BeaconOnNewPayloadError {
     fn from(error: InsertBlockProcessingError) -> Self {
         match error {
             InsertBlockProcessingError::MalformedInput(error) => Self::InvalidParams(error),
+            InsertBlockProcessingError::Unavailable(error) => Self::Internal(error),
             InsertBlockProcessingError::Fatal(error) => Self::internal(error),
         }
     }
@@ -97,12 +98,12 @@ pub enum InsertBlockErrorKind {
 impl InsertBlockErrorKind {
     /// Returns whether the error must be reported as an invalid payload.
     pub const fn is_validation_error(&self) -> bool {
-        matches!(
-            self,
-            Self::Consensus(_) |
-                Self::BlockAccessListDecode(_) |
-                Self::Execution(BlockExecutionError::Validation(_))
-        )
+        match self {
+            Self::Consensus(err) => !err.is_dependency_proof_unavailable(),
+            Self::BlockAccessListDecode(_) |
+            Self::Execution(BlockExecutionError::Validation(_)) => true,
+            _ => false,
+        }
     }
 
     /// Returns an [`InsertBlockValidationError`] if the failure must be reported as an invalid
@@ -117,6 +118,9 @@ impl InsertBlockErrorKind {
         match self {
             Self::BlockAccessListDecode(error) => {
                 Ok(InsertBlockValidationError::BlockAccessListDecode(error))
+            }
+            Self::Consensus(err) if err.is_dependency_proof_unavailable() => {
+                Err(InsertBlockProcessingError::Unavailable(Box::new(err)))
             }
             Self::Consensus(err) => Ok(InsertBlockValidationError::Consensus(err)),
             Self::Execution(err) => match err {
@@ -161,6 +165,9 @@ impl BlockAccessListDecodeError {
 /// without terminating the engine task.
 #[derive(Debug, thiserror::Error)]
 pub enum InsertBlockProcessingError {
+    /// Required supplemental data or a local verifier is unavailable; retry without invalidating.
+    #[error(transparent)]
+    Unavailable(Box<dyn core::error::Error + Send + Sync>),
     /// Supplemental input is malformed, but the block itself is not known to be invalid.
     #[error(transparent)]
     MalformedInput(Box<dyn core::error::Error + Send + Sync>),
@@ -220,5 +227,19 @@ mod tests {
                 .ensure_validation_error(),
             Err(InsertBlockProcessingError::Fatal(InsertBlockFatalError::Provider(_)))
         ));
+    }
+    #[test]
+    fn unavailable_proofs_are_processing_errors() {
+        for error in [
+            ConsensusError::DependencyProofUnavailable(alloy_primitives::B256::ZERO),
+            ConsensusError::DependencyProofUnsupported,
+        ] {
+            let error = InsertBlockErrorKind::Consensus(error);
+            assert!(!error.is_validation_error());
+            assert!(matches!(
+                error.ensure_validation_error(),
+                Err(InsertBlockProcessingError::Unavailable(_))
+            ));
+        }
     }
 }

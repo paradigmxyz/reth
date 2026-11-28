@@ -4,6 +4,7 @@ mod blobs;
 mod custom_genesis;
 mod dev;
 mod eip6780;
+mod eip8288_payload;
 mod eth;
 mod executor_replay;
 mod exex;

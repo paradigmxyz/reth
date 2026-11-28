@@ -12,9 +12,10 @@ use alloy_eips::{
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, BlockHash, Bytes, B128, B256, U256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadInputV2,
-    ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4, ForkchoiceState, ForkchoiceUpdated,
-    ForkchoiceUpdatedResponseV2, PayloadId, PayloadStatus, PayloadStatusV2,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadBodiesV2, ExecutionPayloadBodiesV3,
+    ExecutionPayloadInputV2, ExecutionPayloadV1, ExecutionPayloadV3, ExecutionPayloadV4,
+    ExecutionPayloadV5, ForkchoiceState, ForkchoiceUpdated, ForkchoiceUpdatedResponseV2,
+    InclusionListV1, PayloadId, PayloadStatus, PayloadStatusV2,
 };
 use alloy_rpc_types_eth::{
     state::StateOverride, BlockOverrides, EIP1186AccountProofResponse, Filter, Index, SyncStatus,
@@ -85,6 +86,48 @@ pub trait EngineApi<Engine: EngineTypes> {
         parent_beacon_block_root: B256,
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
+
+    /// Imports a payload with its separate EIP-8288 dependency proof.
+    #[method(name = "newPayloadV7")]
+    async fn new_payload_v7(
+        &self,
+        payload: ExecutionPayloadV5,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_lists: Vec<InclusionListV1>,
+    ) -> RpcResult<PayloadStatusV2>;
+
+    /// Starts proof-carrying payload construction. Only empty inclusion lists are supported.
+    #[method(name = "forkchoiceUpdatedV6")]
+    async fn fork_choice_updated_v6(
+        &self,
+        state: ForkchoiceState,
+        attrs: Option<Engine::PayloadAttributes>,
+        custody_columns: Option<B128>,
+    ) -> RpcResult<ForkchoiceUpdatedResponseV2>;
+
+    /// Returns the built payload and its separate dependency proof.
+    #[method(name = "getPayloadV7")]
+    async fn get_payload_v7(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV7>;
+
+    /// Returns bodies with available dependency proofs, preserving unavailable entries.
+    #[method(name = "getPayloadBodiesByHashV3")]
+    async fn get_payload_bodies_by_hash_v3(
+        &self,
+        hashes: Vec<BlockHash>,
+    ) -> RpcResult<ExecutionPayloadBodiesV3>;
+
+    /// Returns canonical bodies with available dependency proofs.
+    #[method(name = "getPayloadBodiesByRangeV3")]
+    async fn get_payload_bodies_by_range_v3(
+        &self,
+        start: U64,
+        count: U64,
+    ) -> RpcResult<ExecutionPayloadBodiesV3>;
 
     /// Post Bogota payload handler stub.
     ///

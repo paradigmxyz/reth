@@ -35,7 +35,7 @@ alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # alloy
-alloy-eips.workspace = true
+alloy-eips = { workspace = true, features = ["eip8288-proofs"] }
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 

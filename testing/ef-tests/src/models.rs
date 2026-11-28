@@ -208,6 +208,10 @@ pub struct Header {
     pub block_access_list_hash: Option<B256>,
     /// Slot number.
     pub slot_number: Option<U256>,
+    /// Dependency proof commitment.
+    pub dependency_proof_hash: Option<B256>,
+    /// Canonical dependency list commitment.
+    pub block_deps_hash: Option<B256>,
 }
 
 impl TryFrom<Header> for SealedHeader {
@@ -248,6 +252,8 @@ impl TryFrom<Header> for SealedHeader {
             requests_hash: value.requests_hash,
             block_access_list_hash: value.block_access_list_hash,
             slot_number: value.slot_number.map(|v| quantity(v, "slotNumber")).transpose()?,
+            dependency_proof_hash: value.dependency_proof_hash,
+            block_deps_hash: value.block_deps_hash,
         };
         Ok(Self::new(header, value.hash))
     }

@@ -7,8 +7,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 mod evm_config;
 
 use alloy_consensus::Header;
-use alloy_primitives::Bytes;
-use alloy_rpc_types::engine::ExecutionData;
+use alloy_rpc_types::engine::{ExecutionData, PayloadExtras};
 use clap::Parser;
 use evm_config::{BbEvmConfig, BigBlockData};
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
@@ -48,7 +47,7 @@ impl PayloadTypes for BbPayloadTypes {
         _block: SealedBlock<
                 <<Self::BuiltPayload as reth_node_api::BuiltPayload>::Primitives as reth_node_api::NodePrimitives>::Block,
             >,
-        _bal: Option<Bytes>,
+        _extras: PayloadExtras,
     ) -> Self::ExecutionData {
         unreachable!()
     }

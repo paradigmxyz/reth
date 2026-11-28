@@ -3,8 +3,8 @@ use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated};
 use jsonrpsee_core::RpcResult;
 use reth_engine_primitives::ConsensusEngineHandle;
-use reth_payload_primitives::PayloadTypes;
-use reth_primitives_traits::SealedBlock;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_primitives_traits::{AlloyBlockHeader, Block as _, NodePrimitives, SealedBlock};
 use reth_rpc_api::{RethEngineApiServer, RethNewPayloadInput, RethPayloadStatus};
 use tracing::trace;
 
@@ -38,10 +38,19 @@ impl<Payload: PayloadTypes> RethEngineApiServer<Payload::ExecutionData> for Reth
 
         let payload = match input {
             RethNewPayloadInput::ExecutionData(data) => data,
-            RethNewPayloadInput::BlockRlp { block: block_rlp, bal } => {
-                let block = Decodable::decode(&mut block_rlp.as_ref())
+            RethNewPayloadInput::BlockRlp { block: block_rlp, bal, dependency_proof } => {
+                let block: <<Payload::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block = Decodable::decode(&mut block_rlp.as_ref())
                     .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
-                Payload::block_to_payload(SealedBlock::new_unhashed(block), bal)
+                if block.header().dependency_proof_hash().is_some() && dependency_proof.is_none() {
+                    return Err(jsonrpsee_types::ErrorObject::owned(
+                        -32602,
+                        "missing dependencyProof for an EIP-8288 block",
+                        None::<()>,
+                    ));
+                }
+                let mut extras = alloy_rpc_types_engine::PayloadExtras::from(bal);
+                extras.dependency_proof = dependency_proof;
+                Payload::block_to_payload(SealedBlock::new_unhashed(block), extras)
             }
         };
 

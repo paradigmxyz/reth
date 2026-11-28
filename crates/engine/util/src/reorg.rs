@@ -195,7 +195,7 @@ where
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
                             cause: cause.clone(),
-                            payload: T::block_to_payload(reorg_block, encoded_bal),
+                            payload: T::block_to_payload(reorg_block, encoded_bal.into()),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state

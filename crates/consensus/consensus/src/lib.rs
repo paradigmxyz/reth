@@ -40,7 +40,10 @@ use alloc::{
 use alloy_consensus::Header;
 use alloy_eip7928::BlockAccessListGasError;
 use alloy_primitives::{BlockHash, BlockNumber, Bloom, B256};
-use core::{error::Error, fmt::Display};
+use core::{error::Error, fmt::Display, future::Future, pin::Pin};
+
+/// Preparation of supplemental consensus data without holding a database write transaction.
+pub type SupplementalDataFuture = Pin<Box<dyn Future<Output = Result<(), ConsensusError>> + Send>>;
 
 /// Pre-computed receipt root and logs bloom.
 ///
@@ -80,6 +83,8 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
     /// If `receipt_root_bloom` is provided, the implementation should use the pre-computed
     /// receipt root and logs bloom instead of computing them from the receipts.
     ///
+    /// Importers and executors must also call [`Consensus::validate_block_supplemental_data`].
+    ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_post_execution(
         &self,
@@ -93,6 +98,23 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
+    /// Fetches and persists required supplemental data before opening an execution transaction.
+    /// Local unavailability is retryable and must not invalidate the canonical block.
+    fn prepare_block_range_supplemental_data(
+        &self,
+        _range: core::ops::RangeInclusive<u64>,
+    ) -> SupplementalDataFuture {
+        Box::pin(async { Ok(()) })
+    }
+
+    /// Fetches supplemental data for a downloaded header before executing its block.
+    fn prepare_block_supplemental_data(
+        &self,
+        _header: SealedHeader<B::Header>,
+    ) -> SupplementalDataFuture {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
@@ -111,6 +133,17 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
+
+    /// Requires supplemental consensus data before a block is accepted or executed.
+    ///
+    /// Body downloaders do not call this: supplemental data is not part of the block body.
+    /// Local unavailability must be reported separately from invalid block data.
+    fn validate_block_supplemental_data(
+        &self,
+        _block: &SealedBlock<B>,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
 
     /// Returns `true` if the given consensus error is transient and may resolve on its own.
     ///
@@ -505,9 +538,40 @@ pub enum ConsensusError {
     /// Any additional consensus error, for example L2-specific errors.
     #[error(transparent)]
     Other(#[from] Arc<dyn Error + Send + Sync>),
+    /// Dependency-proof fields are invalid before the explicit devnet activation.
+    #[error("unexpected EIP-8288 dependency proof")]
+    UnexpectedDependencyProof,
+    /// The dependency commitment does not match the transactions.
+    #[error("block dependency commitment mismatch")]
+    DependencyCommitmentMismatch,
+    /// The proof bytes do not match the header commitment.
+    #[error("dependency proof commitment mismatch")]
+    DependencyProofCommitmentMismatch,
+    /// Supplemental proof data is unavailable locally; the block is not known to be invalid.
+    #[error("dependency proof unavailable for {0}")]
+    DependencyProofUnavailable(B256),
+    /// Local storage or verifier failure; this must never invalidate a block.
+    #[error("dependency proof processing unavailable: {0}")]
+    DependencyProofProcessing(Arc<dyn core::error::Error + Send + Sync>),
+    /// Activated headers require both dependency proof commitments, including empty blocks.
+    #[error("missing EIP-8288 dependency proof commitments")]
+    MissingDependencyProof,
+    /// The selected build cannot verify dependency proofs.
+    #[error("EIP-8288 proof verification requires std")]
+    DependencyProofUnsupported,
 }
 
 impl ConsensusError {
+    /// Returns whether proof processing failed locally instead of disproving block validity.
+    pub const fn is_dependency_proof_unavailable(&self) -> bool {
+        matches!(
+            self,
+            Self::DependencyProofUnavailable(_) |
+                Self::DependencyProofProcessing(_) |
+                Self::DependencyProofUnsupported
+        )
+    }
+
     /// Returns a new [`ConsensusError::Other`] instance with the given error.
     pub fn other<E>(error: E) -> Self
     where

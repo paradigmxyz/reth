@@ -11,22 +11,22 @@
 
 extern crate alloc;
 
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload, PayloadExtras};
+use reth_engine_primitives::EngineTypes;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
+
+pub use alloy_rpc_types_engine::{
+    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
+    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadEnvelopeV7,
+    ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
+};
+
 mod payload;
-use alloy_primitives::Bytes;
 pub use payload::{BlobSidecars, EthBuiltPayload};
 
 mod error;
 pub use error::*;
-
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
-pub use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6, ExecutionPayloadV1,
-    PayloadAttributes as EthPayloadAttributes,
-};
-use reth_engine_primitives::EngineTypes;
-use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -53,9 +53,9 @@ where
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-        bal: Option<Bytes>,
+        extras: PayloadExtras,
     ) -> Self::ExecutionData {
-        T::block_to_payload(block, bal)
+        T::block_to_payload(block, extras)
     }
 }
 
@@ -69,7 +69,8 @@ where
         + TryInto<ExecutionPayloadEnvelopeV3>
         + TryInto<ExecutionPayloadEnvelopeV4>
         + TryInto<ExecutionPayloadEnvelopeV5>
-        + TryInto<ExecutionPayloadEnvelopeV6>,
+        + TryInto<ExecutionPayloadEnvelopeV6>
+        + TryInto<ExecutionPayloadEnvelopeV7>,
 {
     type ExecutionPayloadEnvelopeV1 = ExecutionPayloadV1;
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
@@ -77,6 +78,7 @@ where
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
     type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
+    type ExecutionPayloadEnvelopeV7 = ExecutionPayloadEnvelopeV7;
 }
 
 /// A default payload type for [`EthEngineTypes`]
@@ -93,12 +95,12 @@ impl PayloadTypes for EthPayloadTypes {
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-        bal: Option<Bytes>,
+        extras: PayloadExtras,
     ) -> Self::ExecutionData {
         let (payload, sidecar) = ExecutionPayload::from_block_unchecked_with_extras(
             block.hash(),
             &block.into_block(),
-            bal,
+            extras,
         );
         ExecutionData { payload, sidecar }
     }

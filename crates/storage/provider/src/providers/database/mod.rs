@@ -13,14 +13,19 @@ use crate::{
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
-use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
 use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
-use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
+use reth_db_api::{
+    database::Database,
+    models::StoredBlockBodyIndices,
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_errors::{RethError, RethResult};
 use reth_execution_types::RecoveredBlockAndExecutionOutput;
 use reth_node_types::{
@@ -32,7 +37,7 @@ use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChainStateBlockReader, ChainStateBlockWriter, DBProvider,
-    NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
+    DependencyProofProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_storage_overlay::OverlayManager;
@@ -1064,6 +1069,19 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             database_provider_metrics: self.database_provider_metrics.clone(),
             read_only_sync: self.read_only_sync.clone(),
         }
+    }
+}
+
+impl<N: ProviderNodeTypes> DependencyProofProvider for ProviderFactory<N> {
+    fn dependency_proof(&self, hash: B256) -> ProviderResult<Option<Bytes>> {
+        Ok(self.provider()?.tx_ref().get::<tables::DependencyProofs>(hash)?.map(Bytes::from))
+    }
+
+    fn insert_dependency_proof(&self, hash: B256, proof: Bytes) -> ProviderResult<()> {
+        let provider = self.provider_rw()?;
+        provider.tx_ref().put::<tables::DependencyProofs>(hash, proof.to_vec())?;
+        provider.commit()?;
+        Ok(())
     }
 }
 

@@ -37,6 +37,8 @@ pub(crate) fn create_header() -> Header {
         requests_hash: None,
         block_access_list_hash: None,
         slot_number: None,
+        dependency_proof_hash: None,
+        block_deps_hash: None,
     }
 }
 
@@ -146,6 +148,8 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         requests_hash: None,
         block_access_list_hash: None,
         slot_number: None,
+        dependency_proof_hash: None,
+        block_deps_hash: None,
     };
 
     // Create test body

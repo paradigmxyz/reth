@@ -64,7 +64,8 @@ pub trait EngineTypes:
                           + TryInto<Self::ExecutionPayloadEnvelopeV3>
                           + TryInto<Self::ExecutionPayloadEnvelopeV4>
                           + TryInto<Self::ExecutionPayloadEnvelopeV5>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV6>,
+                          + TryInto<Self::ExecutionPayloadEnvelopeV6>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV7>,
     > + DeserializeOwned
     + Serialize
 {
@@ -102,6 +103,14 @@ pub trait EngineTypes:
         + 'static;
     /// Execution Payload V5 envelope type.
     type ExecutionPayloadEnvelopeV5: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution payload envelope carrying a separate dependency proof.
+    type ExecutionPayloadEnvelopeV7: DeserializeOwned
         + Serialize
         + Clone
         + Unpin
@@ -181,6 +190,14 @@ pub trait EngineApiValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static
 pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
+
+    /// Whether successful conversion verifies all supplemental consensus data.
+    ///
+    /// Importers may skip repeating those checks for converted payloads when this is `true`.
+    /// Downloaded blocks still require independent supplemental consensus validation.
+    fn validates_block_supplemental_data(&self) -> bool {
+        false
+    }
 
     /// Converts the given payload into a sealed block without recovering signatures.
     ///

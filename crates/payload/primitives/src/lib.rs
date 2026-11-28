@@ -14,6 +14,7 @@
 extern crate alloc;
 
 use alloy_primitives::Bytes;
+use alloy_rpc_types_engine::PayloadExtras;
 use reth_chainspec::EthereumHardforks;
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
@@ -49,11 +50,12 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
     type PayloadAttributes: PayloadAttributes + Unpin;
 
     /// Converts a sealed block into the execution payload format.
+    /// The caller must supply the complete BAL and dependency proof required by the block's fork.
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-        bal: Option<Bytes>,
+        extras: PayloadExtras,
     ) -> Self::ExecutionData;
 }
 
@@ -216,32 +218,26 @@ pub fn validate_payload_timestamp(
 
     let is_bogota = chain_spec.is_bogota_active_at_timestamp(timestamp);
 
-    // The frames devnet currently activates EIP-8141 under Bogota while
-    // driving the Amsterdam engine methods (`newPayloadV5` and
-    // `forkchoiceUpdatedV4`). Keep those method versions accepted
-    // temporarily so the execution fixtures can reach frame validation.
-
-    if !is_bogota &&
-        matches!(
-            (version, kind),
-            (EngineApiMessageVersion::V5, MessageValidationKind::PayloadAttributes) |
-                (EngineApiMessageVersion::V6, MessageValidationKind::Payload)
-        )
-    {
-        // From the Engine API spec:
-        // <https://github.com/ethereum/execution-apis/blob/main/src/engine/bogota.md>
-        //
-        // For `engine_newPayloadV6`:
-        //
-        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
-        //    payload does not fall within the time frame of the Bogota fork.
-        //
-        // For `engine_forkchoiceUpdatedV5`:
-        //
-        // 2. Client software MUST return -38005: Unsupported fork error if the payloadAttributes is
-        //    set and the payloadAttributes.timestamp does not fall within the time frame of the
-        //    Bogota fork.
-        return Err(EngineObjectValidationError::UnsupportedFork)
+    // This devnet activates EIP-8288 together with frame transactions at Bogota.
+    // New proof-carrying methods replace the older payload/attributes schemas at activation.
+    // Bogota and EIP-8288 activate together on this branch, so the intermediate
+    // flat-inclusion-list methods have no active interval.
+    if matches!(
+        (version, kind),
+        (EngineApiMessageVersion::V5, MessageValidationKind::PayloadAttributes) |
+            (EngineApiMessageVersion::V6, MessageValidationKind::Payload)
+    ) {
+        return Err(EngineObjectValidationError::UnsupportedFork);
+    }
+    let requires_proof = matches!(
+        (version, kind),
+        (
+            EngineApiMessageVersion::V7,
+            MessageValidationKind::Payload | MessageValidationKind::GetPayload
+        ) | (EngineApiMessageVersion::V6, MessageValidationKind::PayloadAttributes)
+    );
+    if requires_proof != is_bogota {
+        return Err(EngineObjectValidationError::UnsupportedFork);
     }
 
     Ok(())
@@ -281,7 +277,7 @@ pub fn validate_block_access_list_presence(
             }
         }
 
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 | EngineApiMessageVersion::V7 => {
             if !has_block_access_list {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoBlockAccessListPostAmsterdam))
@@ -339,7 +335,7 @@ pub fn validate_slot_number_presence(
             }
         }
 
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 | EngineApiMessageVersion::V7 => {
             if !has_slot_number {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoSlotNumberPostAmsterdam))
@@ -383,7 +379,8 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
         EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 |
+        EngineApiMessageVersion::V7 => {
             if !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -483,7 +480,8 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
         EngineApiMessageVersion::V3 |
         EngineApiMessageVersion::V4 |
         EngineApiMessageVersion::V5 |
-        EngineApiMessageVersion::V6 => {
+        EngineApiMessageVersion::V6 |
+        EngineApiMessageVersion::V7 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -613,6 +611,8 @@ pub enum EngineApiMessageVersion {
     ///
     /// Added in the Amsterdam hardfork.
     V6 = 6,
+    /// Version 7 transports EIP-8288 dependency proofs separately from the block.
+    V7 = 7,
 }
 
 impl EngineApiMessageVersion {
@@ -653,7 +653,9 @@ impl EngineApiMessageVersion {
             Self::V2 => "engine_newPayloadV2",
             Self::V3 => "engine_newPayloadV3",
             Self::V4 => "engine_newPayloadV4",
-            Self::V5 | Self::V6 => "engine_newPayloadV5",
+            Self::V5 => "engine_newPayloadV5",
+            Self::V6 => "engine_newPayloadV6",
+            Self::V7 => "engine_newPayloadV7",
         }
     }
 }
@@ -834,48 +836,25 @@ mod tests {
     fn validate_bogota_staggered_version_restrictions() {
         let chain_spec = ChainSpecBuilder::mainnet().bogota_activated().build();
 
-        // The frames devnet temporarily uses the Amsterdam method versions
-        // while Bogota is active.
-        let res = validate_payload_timestamp(
-            &chain_spec,
-            EngineApiMessageVersion::V5,
-            0,
-            MessageValidationKind::Payload,
-        );
-        assert_matches!(res, Ok(()));
-
-        let res = validate_payload_timestamp(
-            &chain_spec,
-            EngineApiMessageVersion::V4,
-            0,
-            MessageValidationKind::PayloadAttributes,
-        );
-        assert_matches!(res, Ok(()));
-
-        // the Bogota-specific methods are accepted
-        let res = validate_payload_timestamp(
-            &chain_spec,
-            EngineApiMessageVersion::V6,
-            0,
-            MessageValidationKind::Payload,
-        );
-        assert_matches!(res, Ok(()));
-        let res = validate_payload_timestamp(
-            &chain_spec,
-            EngineApiMessageVersion::V5,
-            0,
-            MessageValidationKind::PayloadAttributes,
-        );
-        assert_matches!(res, Ok(()));
-
-        // Bogota defines no new getPayload version, `engine_getPayloadV6` remains valid
-        let res = validate_payload_timestamp(
-            &chain_spec,
-            EngineApiMessageVersion::V6,
-            0,
-            MessageValidationKind::GetPayload,
-        );
-        assert_matches!(res, Ok(()));
+        for (version, kind) in [
+            (EngineApiMessageVersion::V5, MessageValidationKind::Payload),
+            (EngineApiMessageVersion::V4, MessageValidationKind::PayloadAttributes),
+            (EngineApiMessageVersion::V6, MessageValidationKind::Payload),
+            (EngineApiMessageVersion::V5, MessageValidationKind::PayloadAttributes),
+            (EngineApiMessageVersion::V6, MessageValidationKind::GetPayload),
+        ] {
+            assert_matches!(
+                validate_payload_timestamp(&chain_spec, version, 0, kind),
+                Err(EngineObjectValidationError::UnsupportedFork)
+            );
+        }
+        for (version, kind) in [
+            (EngineApiMessageVersion::V7, MessageValidationKind::Payload),
+            (EngineApiMessageVersion::V6, MessageValidationKind::PayloadAttributes),
+            (EngineApiMessageVersion::V7, MessageValidationKind::GetPayload),
+        ] {
+            assert_matches!(validate_payload_timestamp(&chain_spec, version, 0, kind), Ok(()));
+        }
     }
 
     #[test]

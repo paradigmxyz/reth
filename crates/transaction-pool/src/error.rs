@@ -1,8 +1,7 @@
 //! Transaction pool errors
 
+use crate::{ProofError, TxEip8141ValidationError};
 use std::any::Any;
-
-use crate::TxEip8141ValidationError;
 
 use alloy_eips::eip4844::BlobTransactionValidationError;
 use alloy_primitives::{Address, TxHash, U256};
@@ -259,6 +258,12 @@ pub enum Eip8141PoolTransactionError {
     /// The transaction does not satisfy public-pool policy at the current head.
     #[error("EIP-8141 public mempool policy: {0}")]
     PublicMempoolPolicy(&'static str),
+    /// Dependency evidence is missing, invalid, or does not cover the transaction.
+    #[error(transparent)]
+    DependencyEvidence(#[from] ProofError),
+    /// Dependency frames require the embedding client's proof-verification support.
+    #[error("EIP-8288 dependency frames are disabled")]
+    DependencyFramesDisabled,
 }
 
 /// Represents errors that can happen when validating transactions for the pool
@@ -459,6 +464,8 @@ impl InvalidPoolTransactionError {
             },
             Self::Eip8141(eip8141_err) => match eip8141_err {
                 Eip8141PoolTransactionError::InvalidTransaction(_) => true,
+                Eip8141PoolTransactionError::DependencyEvidence(_) |
+                Eip8141PoolTransactionError::DependencyFramesDisabled |
                 Eip8141PoolTransactionError::PublicMempoolValidationUnavailable |
                 Eip8141PoolTransactionError::PublicMempoolPolicy(_) => false,
             },

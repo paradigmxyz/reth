@@ -4,6 +4,9 @@ use thiserror::Error;
 /// conversion.
 #[derive(Error, Debug)]
 pub enum BuiltPayloadConversionError {
+    /// The built payload lacks its required supplemental dependency proof.
+    #[error("missing dependency proof")]
+    MissingDependencyProof,
     /// Unexpected EIP-4844 sidecars in the built payload.
     #[error("unexpected EIP-4844 sidecars")]
     UnexpectedEip4844Sidecars,

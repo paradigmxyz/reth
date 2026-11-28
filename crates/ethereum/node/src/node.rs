@@ -8,7 +8,7 @@ use crate::{
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardfork, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -21,7 +21,14 @@ use reth_evm_ethereum::RethEvmFactory;
 use reth_evm_ethereum::{
     JitBackend, JitMetrics, JitMode, RethEvmFactory, RuntimeConfig, RuntimeTuning,
 };
-use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_network::{
+    primitives::BasicNetworkPrimitives,
+    protocol::IntoRlpxSubProtocol,
+    transactions::dependencies::{
+        DependencyAdmission, DependencyProofProtocolHandler, DependencyProtocolHandler,
+    },
+    NetworkHandle, NetworkProtocols, PeersInfo,
+};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
@@ -62,7 +69,7 @@ use reth_transaction_pool::{
 use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 #[cfg(feature = "jit")]
 use tracing::warn;
-use tracing::{debug, info};
+use tracing::{debug, info, Instrument};
 
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 
@@ -344,12 +351,38 @@ where
             ctx.node.evm_config().clone(),
             ctx.config.rpc.flashbots_config(),
             ctx.node.task_executor().clone(),
-            Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+            Arc::new(
+                EthereumEngineValidator::new(ctx.config.chain.clone()).with_dependency_proofs(
+                    reth_provider::DependencyProofStore::new(ctx.node.provider().clone()),
+                ),
+            ),
             ctx.sender_recovery_cache.clone(),
         );
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+
+        let dependency_rpc =
+            if ctx.config.chain.fork(EthereumHardfork::Bogota).as_timestamp().is_some() {
+                let mut module =
+                    jsonrpsee::RpcModule::new(DependencyAdmission::new(ctx.node.pool().clone()));
+                module.register_async_method(
+                    "eth_sendDependencyWrapper",
+                    |params, context| async move {
+                        let raw: alloy_primitives::Bytes = params.one()?;
+                        context.submit(raw).await.map_err(|error| {
+                            jsonrpsee::types::ErrorObjectOwned::owned(
+                                -32000,
+                                error.to_string(),
+                                None::<()>,
+                            )
+                        })
+                    },
+                )?;
+                Some(module)
+            } else {
+                None
+            };
 
         let testing_skip_invalid_transactions = ctx.config.rpc.testing_skip_invalid_transactions;
         let testing_gas_limit_override = ctx.config.rpc.testing_gas_limit;
@@ -371,6 +404,9 @@ where
             })
             .map_auth_http_middleware(|middleware| Stack::new(ssz_proxy_layer, middleware))
             .launch_add_ons_with(ctx, move |container| {
+                if let Some(module) = dependency_rpc {
+                    container.modules.merge_if_module_configured(RethRpcModule::Eth, module)?;
+                }
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -768,7 +804,47 @@ where
         pool: Pool,
     ) -> eyre::Result<Self::Network> {
         let network = ctx.network_builder().await?;
+        let admission = ctx
+            .chain_spec()
+            .fork(EthereumHardfork::Bogota)
+            .as_timestamp()
+            .is_some()
+            .then(|| DependencyAdmission::new(pool.clone()));
         let handle = ctx.start_network(network, pool);
+        if admission.is_some() {
+            let (handler, fetcher, task) =
+                DependencyProofProtocolHandler::new(ctx.provider().clone());
+            reth_provider::DependencyProofProvider::set_dependency_proof_fetcher(
+                ctx.provider(),
+                fetcher,
+            )?;
+            handle.add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
+            let span = tracing::Span::current();
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "eip8288-proof-retrieval",
+                move |shutdown| async move {
+                    tokio::select! { _ = shutdown => {}, _ = task.instrument(span) => {} }
+                },
+            );
+        }
+        if let Some(admission) = admission &&
+            !handle.tx_gossip_disabled()
+        {
+            let (handler, events) = DependencyProtocolHandler::channel();
+            info!(target: "reth::eip8288", profile = alloy_eips::eip8288::PROFILE,
+                "Enabled experimental dependency wrapper transport");
+            handle.add_rlpx_sub_protocol(handler.into_rlpx_sub_protocol());
+            let span = tracing::Span::current();
+            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+                "eip8288-aggregation",
+                move |shutdown| async move {
+                    tokio::select! {
+                        _ = shutdown => {},
+                        _ = admission.run(events).instrument(span) => {},
+                    }
+                },
+            );
+        }
         info!(target: "reth::cli", enode=%handle.local_node_record(), "P2P networking initialized");
         Ok(handle)
     }
@@ -789,7 +865,9 @@ where
     type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
-        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))
+        Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec()).with_dependency_proofs(
+            reth_provider::DependencyProofStore::new(ctx.provider().clone()),
+        )))
     }
 }
 
@@ -811,6 +889,8 @@ where
     type Validator = EthereumEngineValidator<Types::ChainSpec>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
+        Ok(EthereumEngineValidator::new(ctx.config.chain.clone()).with_dependency_proofs(
+            reth_provider::DependencyProofStore::new(ctx.node.provider().clone()),
+        ))
     }
 }

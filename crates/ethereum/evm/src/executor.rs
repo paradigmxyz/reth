@@ -1321,7 +1321,7 @@ mod tests {
             (1, None, 1, 0, false),
         ] {
             let mut genesis = alloy_genesis::Genesis::default();
-            genesis.config.eip8253_accounts = Some(vec![address]);
+            genesis.config.zero_nonce_storage_accounts = Some(vec![address]);
             let chain_spec = ChainSpecBuilder::mainnet()
                 .genesis(genesis)
                 .amsterdam_activated()
@@ -1377,7 +1377,7 @@ mod tests {
     #[test]
     fn eip8253_requires_parent_timestamp_for_transition_detection() {
         let mut genesis = alloy_genesis::Genesis::default();
-        genesis.config.eip8253_accounts = Some(vec![Address::with_last_byte(0x42)]);
+        genesis.config.zero_nonce_storage_accounts = Some(vec![Address::with_last_byte(0x42)]);
         let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
             ChainSpecBuilder::mainnet()
                 .genesis(genesis)
@@ -1408,7 +1408,7 @@ mod tests {
         let target = sender.create(0);
         for timestamp in [9, 10] {
             let mut genesis = alloy_genesis::Genesis::default();
-            genesis.config.eip8253_accounts = Some(vec![target]);
+            genesis.config.zero_nonce_storage_accounts = Some(vec![target]);
             let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
                 ChainSpecBuilder::mainnet()
                     .genesis(genesis)
@@ -1475,10 +1475,10 @@ mod tests {
         for empty_override in [false, true] {
             let mut chain_spec = ChainSpecBuilder::mainnet().with_bogota_at(10).build();
             if empty_override {
-                chain_spec.genesis.config.eip8253_accounts = Some(vec![]);
+                chain_spec.genesis.config.zero_nonce_storage_accounts = Some(vec![]);
             }
             let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(chain_spec));
-            let addresses = &alloy_genesis::EIP8253_MAINNET_ACCOUNTS;
+            let addresses = &alloy_eips::eip8253::MAINNET_ACCOUNTS;
             let original = AccountInfo::default().with_balance(U256::from(19));
             let mut db = InMemoryDB::default();
             for address in addresses {
@@ -1567,7 +1567,7 @@ mod tests {
         let recipient = Address::with_last_byte(0x43);
         let mut genesis = alloy_genesis::Genesis::default();
         genesis.config.chain_id = 1;
-        genesis.config.eip8253_accounts = Some(vec![sender]);
+        genesis.config.zero_nonce_storage_accounts = Some(vec![sender]);
         let config = crate::EthEvmConfig::new(Arc::new(
             ChainSpecBuilder::mainnet()
                 .genesis(genesis)

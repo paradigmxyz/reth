@@ -124,6 +124,15 @@ pub enum EngineObjectValidationError {
 /// * The absence of a field that is required in the given engine method version
 #[derive(thiserror::Error, Debug)]
 pub enum VersionSpecificValidationError {
+    /// The proof-carrying attributes schema requires counted inclusion lists.
+    #[error("missing inclusionLists")]
+    MissingInclusionLists,
+    /// The V6 attributes schema requires a target gas limit.
+    #[error("missing targetGasLimit")]
+    MissingTargetGasLimit,
+    /// Inclusion-list enforcement is not enabled on this development branch.
+    #[error("nonempty inclusion lists are not supported on this branch")]
+    UnsupportedInclusionLists,
     /// Thrown if the pre-V3 `PayloadAttributes` or `ExecutionPayload` contains a parent beacon
     /// block root
     #[error("parent beacon block root not supported before V3")]
@@ -159,6 +168,9 @@ pub enum VersionSpecificValidationError {
 /// Error validating payload received over `newPayload` API.
 #[derive(thiserror::Error, Debug)]
 pub enum NewPayloadError {
+    /// Supplemental data, durable storage, or a verifier is unavailable locally.
+    #[error("payload processing unavailable: {0}")]
+    Unavailable(Box<dyn core::error::Error + Send + Sync>),
     /// Payload validation error.
     #[error(transparent)]
     Eth(#[from] PayloadError),
@@ -196,7 +208,11 @@ impl NewPayloadError {
 
 impl From<NewPayloadError> for PayloadStatusEnum {
     fn from(error: NewPayloadError) -> Self {
-        Self::Invalid { validation_error: error.to_string() }
+        if matches!(error, NewPayloadError::Unavailable(_)) {
+            Self::Syncing
+        } else {
+            Self::Invalid { validation_error: error.to_string() }
+        }
     }
 }
 

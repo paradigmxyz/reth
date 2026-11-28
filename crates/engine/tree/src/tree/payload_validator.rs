@@ -981,6 +981,8 @@ where
                 "convert_and_validate",
             )
             .entered();
+            let supplemental_verified = matches!(&input, BlockOrPayload::Payload(_)) &&
+                validator.validates_block_supplemental_data();
             let block = match input {
                 BlockOrPayload::Block(block) => Arc::new(block.split().0),
                 BlockOrPayload::Payload(payload) => {
@@ -1004,6 +1006,11 @@ where
 
             if let Err(e) =
                 consensus.validate_block_pre_execution_with_tx_root(&block, None)
+                    .and_then(|()| {
+                        if supplemental_verified { Ok(()) } else {
+                            consensus.validate_block_supplemental_data(&block)
+                        }
+                    })
             {
                 error!(target: "engine::tree::payload_validator", block = ?block.block_with_parent(), %e, "Failed to validate block");
                 return Err(InsertBlockError::consensus_error(e, Arc::unwrap_or_clone(block)).into())
@@ -1774,6 +1781,11 @@ pub trait EngineValidator<
     N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
 >: Send + Sync + 'static
 {
+    /// Whether successful payload conversion verifies supplemental consensus data.
+    fn validates_block_supplemental_data(&self) -> bool {
+        false
+    }
+
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the
@@ -1878,6 +1890,10 @@ where
     ) -> Result<SealedBlock<N::Block>, NewPayloadError> {
         let block = self.validator.convert_payload_to_block(payload)?;
         Ok(Arc::unwrap_or_clone(block))
+    }
+
+    fn validates_block_supplemental_data(&self) -> bool {
+        self.validator.validates_block_supplemental_data()
     }
 
     fn validate_payload(

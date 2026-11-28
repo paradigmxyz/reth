@@ -41,6 +41,8 @@ pub enum RethNewPayloadInput<ExecutionData> {
         block: Bytes,
         /// RLP-encoded block access list bytes.
         bal: Option<Bytes>,
+        /// Separately transported dependency proof, required for EIP-8288 blocks.
+        dependency_proof: Option<Bytes>,
     },
 }
 
@@ -54,11 +56,21 @@ where
     {
         match self {
             Self::ExecutionData(data) => data.serialize(serializer),
-            Self::BlockRlp { block, bal: None } => block.serialize(serializer),
-            Self::BlockRlp { block, bal: Some(bal) } => {
-                let mut state = serializer.serialize_struct("BlockRlp", 2)?;
+            Self::BlockRlp { block, bal: None, dependency_proof: None } => {
+                block.serialize(serializer)
+            }
+            Self::BlockRlp { block, bal, dependency_proof } => {
+                let mut state = serializer.serialize_struct(
+                    "BlockRlp",
+                    1 + usize::from(bal.is_some()) + usize::from(dependency_proof.is_some()),
+                )?;
                 state.serialize_field("block", block)?;
-                state.serialize_field("bal", bal)?;
+                if let Some(bal) = bal {
+                    state.serialize_field("bal", bal)?;
+                }
+                if let Some(proof) = dependency_proof {
+                    state.serialize_field("dependencyProof", proof)?;
+                }
                 state.end()
             }
         }
@@ -81,14 +93,20 @@ where
                 block: Bytes,
                 #[serde(default)]
                 bal: Option<Bytes>,
+                #[serde(default, rename = "dependencyProof")]
+                dependency_proof: Option<Bytes>,
             },
             LegacyBlockRlp(Bytes),
         }
 
         Ok(match RethNewPayloadInputSerde::deserialize(deserializer)? {
             RethNewPayloadInputSerde::ExecutionData(data) => Self::ExecutionData(data),
-            RethNewPayloadInputSerde::BlockRlp { block, bal } => Self::BlockRlp { block, bal },
-            RethNewPayloadInputSerde::LegacyBlockRlp(block) => Self::BlockRlp { block, bal: None },
+            RethNewPayloadInputSerde::BlockRlp { block, bal, dependency_proof } => {
+                Self::BlockRlp { block, bal, dependency_proof }
+            }
+            RethNewPayloadInputSerde::LegacyBlockRlp(block) => {
+                Self::BlockRlp { block, bal: None, dependency_proof: None }
+            }
         })
     }
 }
@@ -147,6 +165,7 @@ mod tests {
         let input = RethNewPayloadInput::<TestExecutionData>::BlockRlp {
             block: Bytes::from_static(&[1]),
             bal: Some(Bytes::from_static(&[2])),
+            dependency_proof: None,
         };
 
         assert_eq!(serde_json::to_string(&input).unwrap(), r#"{"block":"0x01","bal":"0x02"}"#);
@@ -158,6 +177,7 @@ mod tests {
         let input = RethNewPayloadInput::<TestExecutionData>::BlockRlp {
             block: Bytes::from_static(&[1]),
             bal: None,
+            dependency_proof: None,
         };
 
         let serialized = serde_json::to_string(&input).unwrap();
@@ -166,12 +186,13 @@ mod tests {
         let input =
             serde_json::from_str::<RethNewPayloadInput<TestExecutionData>>(&serialized).unwrap();
 
-        let RethNewPayloadInput::BlockRlp { block, bal } = input else {
+        let RethNewPayloadInput::BlockRlp { block, bal, dependency_proof } = input else {
             panic!("expected block rlp input")
         };
 
         assert_eq!(block, Bytes::from_static(&[1]));
         assert_eq!(bal, None);
+        assert_eq!(dependency_proof, None);
     }
 
     #[test]
@@ -180,12 +201,13 @@ mod tests {
             serde_json::from_str::<RethNewPayloadInput<TestExecutionData>>(r#"{"block":"0x01"}"#)
                 .unwrap();
 
-        let RethNewPayloadInput::BlockRlp { block, bal } = input else {
+        let RethNewPayloadInput::BlockRlp { block, bal, dependency_proof } = input else {
             panic!("expected block rlp input")
         };
 
         assert_eq!(block, Bytes::from_static(&[1]));
         assert_eq!(bal, None);
+        assert_eq!(dependency_proof, None);
     }
 
     #[test]
@@ -193,11 +215,27 @@ mod tests {
         let input = serde_json::from_value::<RethNewPayloadInput<TestExecutionData>>(json!("0x01"))
             .unwrap();
 
-        let RethNewPayloadInput::BlockRlp { block, bal } = input else {
+        let RethNewPayloadInput::BlockRlp { block, bal, dependency_proof } = input else {
             panic!("expected block rlp input")
         };
 
         assert_eq!(block, Bytes::from_static(&[1]));
         assert_eq!(bal, None);
+        assert_eq!(dependency_proof, None);
+    }
+    #[test]
+    fn empty_dependency_proof_is_preserved_with_block_rlp() {
+        let input = RethNewPayloadInput::<TestExecutionData>::BlockRlp {
+            block: Bytes::from_static(&[1]),
+            bal: None,
+            dependency_proof: Some(Bytes::new()),
+        };
+        let value = serde_json::to_value(input).unwrap();
+        assert_eq!(value, json!({"block":"0x01", "dependencyProof":"0x"}));
+        let decoded =
+            serde_json::from_value::<RethNewPayloadInput<TestExecutionData>>(value).unwrap();
+        assert!(
+            matches!(decoded, RethNewPayloadInput::BlockRlp { dependency_proof: Some(proof), .. } if proof.is_empty())
+        );
     }
 }

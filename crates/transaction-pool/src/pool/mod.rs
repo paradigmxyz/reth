@@ -86,8 +86,8 @@ use crate::{
     validate::{
         FrameDependencies, TransactionValidationOutcome, ValidPoolTransaction, ValidTransaction,
     },
-    CanonicalStateUpdate, EthPoolTransaction, PoolConfig, SubPoolLimit, TransactionOrdering,
-    TransactionValidator,
+    CanonicalStateUpdate, DependencyEvidence, EthPoolTransaction, PoolConfig, SubPoolLimit,
+    TransactionOrdering, TransactionValidator,
 };
 use alloy_consensus::Transaction;
 
@@ -157,6 +157,9 @@ where
     blob_store: S,
     /// The internal pool that manages all transactions.
     pool: RwLock<TxPool<T>>,
+    /// One bounded aggregate shared with payload construction; ordinary transactions do not use
+    /// it.
+    pub(crate) dependency_aggregate: RwLock<Option<Arc<DependencyEvidence>>>,
     /// Withdrawn frames awaiting revalidation; always lock after `pool` when holding both.
     frame_revalidation: Mutex<FrameRevalidationQueue<T::Transaction>>,
     /// Pool settings.
@@ -191,6 +194,7 @@ where
             event_listener: Default::default(),
             has_event_listeners: AtomicBool::new(false),
             pool: RwLock::new(TxPool::new(ordering, config.clone())),
+            dependency_aggregate: Default::default(),
             frame_revalidation: Default::default(),
             pending_transaction_listener: Default::default(),
             transaction_listener: Default::default(),

@@ -547,6 +547,12 @@ tables! {
         type Key = String;
         type Value = Vec<u8>;
     }
+    /// Verified EIP-8288 dependency proofs, retained indefinitely and keyed by block hash.
+    /// Empty values represent available empty proofs; missing keys represent unavailable data.
+    table DependencyProofs {
+        type Key = BlockHash;
+        type Value = Vec<u8>;
+    }
 }
 
 /// Packed-encoding view of the [`AccountsTrie`] table.
