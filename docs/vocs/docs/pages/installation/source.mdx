@@ -113,6 +113,42 @@ the highest performance out of your build:
 RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 ```
 
+**Profile-guided optimization**
+
+Profile-guided optimization (PGO) records which branches a real workload takes, then
+rebuilds with that knowledge so the compiler can lay out code around the paths you
+actually execute. It is a two-pass build with a training run in between:
+
+```bash
+rustup component add llvm-tools-preview
+
+make pgo-instrument   # pass 1: build an instrumented reth
+# run the instrumented binary against traffic that resembles your workload,
+# then stop it
+make pgo-build        # pass 2: merge the recording and rebuild optimised
+```
+
+The passes are separate commands because the training run is yours to perform. A
+profile only helps if it was recorded on representative traffic, so there is no
+useful profile to ship with the source; one trained on the wrong workload can make
+things slower.
+
+Training does not need to be long or precisely timed — it only has to reach the
+code paths you care about. Both passes keep whatever `RUSTFLAGS` you already use,
+so `-C target-cpu=native` continues to apply.
+
+Two notes if you are adapting this by hand rather than using the Makefile targets:
+
+-   Pass an explicit `--target`. Without it `RUSTFLAGS` also reaches host artifacts,
+    so Cargo builds instrumented build scripts and proc macros and then runs them
+    during the build. The binary then lands in `target/<triple>/release/`, not
+    `target/release/`.
+-   On `aarch64-unknown-linux-*`, link pass 1 with
+    `-Clink-arg=-fuse-ld=lld`. The instrumented binary outgrows aarch64's ±128 MB
+    branch range and GNU `ld` fails with `R_AARCH64_CALL26` rather than inserting
+    range-extension thunks. `-Ccode-model=large` is not a substitute; on aarch64 it
+    rejects ELF TLS, which transitive dependencies use.
+
 **Features**
 
 The following performance features are enabled by default: `jemalloc` (except on Windows), `asm-keccak`, and `min-trace-logs`.
