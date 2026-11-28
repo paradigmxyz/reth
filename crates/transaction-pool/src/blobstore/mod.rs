@@ -1,11 +1,11 @@
 //! Storage for blob data of EIP4844 transactions.
 
+pub use alloy_eips::eip7594::BlobTransactionCellSidecar;
 use alloy_eips::{
     eip4844::{env_settings::EnvKzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
     eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
 };
 use alloy_primitives::{map::FbBuildHasher, TxHash, B256};
-pub use cells::BlobTxCellSidecar;
 pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -64,7 +64,7 @@ impl BlobCellAvailability {
 
     /// Returns true if all blob cells are available.
     pub fn is_full(&self) -> bool {
-        self.get().bits() == u128::MAX
+        self.get() == BlobCellMask::ALL
     }
 }
 
@@ -144,7 +144,11 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts a validated sidecar that keeps only some cells, unless `tx` has a sidecar already.
     ///
     /// The default rebuilds the blobs and inserts the full sidecar, so it fails with too few cells.
-    fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
+    fn insert_cells(
+        &self,
+        tx: B256,
+        data: BlobTransactionCellSidecar,
+    ) -> Result<(), BlobStoreError> {
         if self.contains(tx)? {
             return Ok(())
         }
@@ -383,7 +387,7 @@ impl RebuiltSidecars {
     pub(crate) fn get_or_rebuild(
         &self,
         tx: TxHash,
-        cells: &BlobTxCellSidecar,
+        cells: &BlobTransactionCellSidecar,
     ) -> Option<Arc<BlobTransactionSidecarVariant>> {
         if let Some(sidecar) = self.cache.lock().sidecars.get(&tx) {
             return Some(Arc::clone(sidecar))
@@ -466,7 +470,7 @@ mod tests {
     }
 
     // An in-memory and a disk store for `cells`.
-    fn stores(cells: &BlobTxCellSidecar) -> Vec<TestStore> {
+    fn stores(cells: &BlobTransactionCellSidecar) -> Vec<TestStore> {
         let (full, _) = fixture();
         let full = BlobTransactionSidecarVariant::Eip7594(full.clone());
         let dir = tempfile::tempdir().unwrap();
@@ -480,7 +484,7 @@ mod tests {
             },
             TestStore {
                 store: Box::new(disk),
-                cells_size: 1 + alloy_rlp::Encodable::length(cells),
+                cells_size: disk::StoredSidecar::encode_cells(cells).len(),
                 full_size: full.rlp_encoded_fields_length(),
                 _dir: Some(dir),
             },

@@ -386,11 +386,11 @@ impl Cells {
                 .cell_mask
                 .mask_at(request_index)
                 .ok_or(Error::Custom("invalid cell mask identifier"))?;
-            let bits = BlobCellMask::new(mask).bits();
-            if bits & !BlobCellMask::new(requested).bits() != 0 {
+            let mask = BlobCellMask::new(mask);
+            if !mask.is_subset_of(BlobCellMask::new(requested)) {
                 return Err(Error::Custom("unrequested cell index"))
             }
-            let count = bits.count_ones() as usize;
+            let count = mask.count();
             if (count == 0 && !self.cells[index].is_empty()) ||
                 (count != 0 &&
                     (self.cells[index].is_empty() ||
@@ -453,11 +453,6 @@ fn decode_bounded_list<T: Decodable>(buf: &mut &[u8], max: usize) -> alloy_rlp::
         values.push(T::decode(&mut payload)?);
     }
     Ok(values)
-}
-
-/// Converts a mask to its wire cells bitmap, the inverse of [`BlobCellMask::new`].
-pub fn encode_cell_mask(mask: BlobCellMask) -> B128 {
-    B128::from(mask.bits().to_le_bytes())
 }
 
 #[cfg(test)]

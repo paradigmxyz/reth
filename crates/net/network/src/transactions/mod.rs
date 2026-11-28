@@ -49,7 +49,7 @@ use crate::{
 };
 use alloy_eips::{
     eip2718::{Encodable2718, Typed2718},
-    eip7594::{BlobCellMask, CELLS_PER_EXT_BLOB},
+    eip7594::BlobCellMask,
 };
 use alloy_primitives::{
     bytes::BufMut,
@@ -60,7 +60,7 @@ use alloy_rlp::Encodable;
 use constants::SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE;
 use futures::{stream::FuturesUnordered, Future, StreamExt};
 use reth_eth_wire::{
-    encode_cell_mask, BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion, GetCells,
+    BroadcastPoolTransactions, Cells, EthNetworkPrimitives, EthVersion, GetCells,
     GetPooledTransactions, LazyEncoded, LazyEncodedTransaction, NetworkPrimitives,
     NewPooledTransactionHashes, NewPooledTransactionHashes66, NewPooledTransactionHashes68,
     NewPooledTransactionHashes72, PooledTransactions, Transactions,
@@ -2177,7 +2177,8 @@ impl PooledTransactionsHashesBuilder {
                 let Some(size) = eth72_size else { return };
                 // The mask only describes blob transactions, so others join any announcement.
                 let cell_mask = (ty == EIP4844_TX_TYPE_ID).then(|| {
-                    cell_mask.map_or(NewPooledTransactionHashes72::ALL_CELLS_MASK, encode_cell_mask)
+                    cell_mask
+                        .map_or(NewPooledTransactionHashes72::ALL_CELLS_MASK, BlobCellMask::to_b128)
                 });
                 let index = messages
                     .iter()
@@ -2254,7 +2255,7 @@ impl PooledTransactionsHashesBuilder {
 /// Returns whether a transaction with `cell_mask` can be served with its blobs, as eth/66 to eth/71
 /// peers need.
 fn can_serve_blobs(cell_mask: Option<BlobCellMask>) -> bool {
-    cell_mask.is_none_or(|mask| mask.count() >= CELLS_PER_EXT_BLOB / 2)
+    cell_mask.is_none_or(BlobCellMask::is_recoverable)
 }
 
 /// How we received the transactions.
@@ -3398,7 +3399,7 @@ mod tests {
             tx.blob_cell_availability = Some(BlobCellAvailability::new(mask));
             valid_eth_pool_transaction(tx)
         };
-        let all = BlobCellMask::from_bits(u128::MAX);
+        let all = BlobCellMask::ALL;
         let custody = BlobCellMask::from_bits(0b11);
         let plain =
             valid_eth_pool_transaction(TransactionGenerator::new(rand::rng()).gen_eip1559_pooled());
@@ -3427,7 +3428,7 @@ mod tests {
             assert_eq!(
                 announced,
                 [
-                    (vec![*sampler.hash(), *plain.hash()], Some(encode_cell_mask(custody))),
+                    (vec![*sampler.hash(), *plain.hash()], Some(custody.to_b128())),
                     (vec![*provider.hash()], Some(NewPooledTransactionHashes72::ALL_CELLS_MASK)),
                 ]
             );

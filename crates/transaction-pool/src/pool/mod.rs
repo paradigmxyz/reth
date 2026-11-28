@@ -1762,7 +1762,7 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use super::{AddedPendingTransaction, AddedTransaction};
     use crate::{
-        blobstore::{BlobStore, BlobTxCellSidecar, InMemoryBlobStore, PooledBlobSidecar},
+        blobstore::{BlobStore, BlobTransactionCellSidecar, InMemoryBlobStore, PooledBlobSidecar},
         identifier::SenderId,
         test_utils::{
             testing_pool, MockTransaction, MockTransactionFactory, TestPool, TestPoolBuilder,
@@ -2197,7 +2197,7 @@ mod tests {
         let blob_store = test_pool.blob_store();
         blob_store.delete(hashes[1]).unwrap();
         let mask = BlobCellMask::from_bits(0b11);
-        let cells = BlobTxCellSidecar::new(
+        let cells = BlobTransactionCellSidecar::new(
             vec![Bytes48::repeat_byte(2)],
             vec![Bytes48::repeat_byte(3); CELLS_PER_EXT_BLOB],
             vec![Cell::repeat_byte(4); mask.count()],
