@@ -185,9 +185,13 @@ impl BlobStore for InMemoryBlobStore {
     fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
         let store = self.inner.store.read();
         let mut cells = self.inner.cells.write();
-        if !store.contains_key(&tx) && !cells.contains_key(&tx) {
+        // A full sidecar holds every cell, while older cells of a readmitted transaction may miss
+        // some that its new availability claims.
+        if !store.contains_key(&tx) {
             self.inner.size_tracker.add_size(data.size());
-            cells.insert(tx, Arc::new(data));
+            if let Some(replaced) = cells.insert(tx, Arc::new(data)) {
+                self.inner.size_tracker.sub_size(replaced.size());
+            }
             self.inner.size_tracker.update_len(store.len() + cells.len());
         }
         Ok(())

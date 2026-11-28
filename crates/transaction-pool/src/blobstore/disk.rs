@@ -709,13 +709,10 @@ impl DiskFileBlobStoreInner {
         Ok(true)
     }
 
-    // Writes a cell sidecar to disk, unless the transaction already has a sidecar.
+    // Writes a cell sidecar to disk, replacing older cells of the transaction but not a full
+    // sidecar, and keeps a readmitted transaction's sidecar from a pending deletion.
     fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
         let path = self.blob_disk_file(tx);
-        // The blob cache can outlive a deleted sidecar, so only the file counts.
-        if path.is_file() {
-            return Ok(())
-        }
         let mut buf = Vec::with_capacity(1 + data.length());
         buf.push(CELL_SIDECAR_TAG);
         data.encode(&mut buf);
@@ -728,14 +725,32 @@ impl DiskFileBlobStoreInner {
             // Recorded and counted under the lock, so a full sidecar written next replaces this
             // file and its size.
             let _lock = self.file_lock.write();
-            // A full sidecar may have been written since.
-            if path.exists() {
-                return Ok(())
-            }
-            fs::write(&path, &buf).map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
+            self.txs_to_delete.write().remove(&tx);
+            // The blob cache can outlive a deleted sidecar, so only the file counts.
+            let replaced = if path.exists() {
+                // A full sidecar holds every cell.
+                if !self.cell_sidecars.read().contains_key(&tx) {
+                    return Ok(())
+                }
+                Some(fs::metadata(&path).map_or(0, |meta| meta.len()))
+            } else {
+                None
+            };
+            // Older cells are replaced through a staging file, so a failed write keeps them.
+            let written = match replaced {
+                Some(_) => {
+                    let tmp = path.with_extension("tmp");
+                    fs::write(&tmp, &buf).and_then(|()| fs::rename(&tmp, &path))
+                }
+                None => fs::write(&path, &buf),
+            };
+            written.map_err(|e| DiskFileBlobStoreError::WriteFile(tx, path, e))?;
             self.cell_sidecars.write().insert(tx, file);
             self.size_tracker.add_size(buf.len());
-            self.size_tracker.inc_len(1);
+            match replaced {
+                Some(size) => self.size_tracker.sub_size(size as usize),
+                None => self.size_tracker.inc_len(1),
+            }
         }
         Ok(())
     }
@@ -1610,5 +1625,27 @@ mod tests {
 
         assert_eq!(store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(), vec![None]);
         assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![false]);
+    }
+
+    #[test]
+    fn disk_readmitted_tx_keeps_its_sidecar_over_a_pending_deletion() {
+        let (store, _dir) = tmp_store();
+        let cell_mask = BlobCellMask::from_bits(1);
+        let cells = single_cell_sidecar();
+        let (sidecar, _, _) = eip7594_single_blob_sidecar();
+        let (stored_cells, stored_full) = (TxHash::random(), TxHash::random());
+        store.insert_cells(stored_cells, cells.clone()).unwrap();
+        store.insert(stored_full, sidecar.clone().into()).unwrap();
+        store.delete_all(vec![stored_cells, stored_full]).unwrap();
+
+        // Both are readmitted as cells before the cleanup runs.
+        store.insert_cells(stored_cells, cells.clone()).unwrap();
+        store.insert_cells(stored_full, cells.clone()).unwrap();
+        store.cleanup();
+
+        assert_eq!(store.get_cells(stored_cells, cell_mask).unwrap(), cells.get_cells(cell_mask));
+        store.clear_cache();
+        assert_eq!(store.get(stored_full).unwrap().as_deref(), Some(&sidecar));
+        assert_eq!(store.blobs_len(), 2);
     }
 }

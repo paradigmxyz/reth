@@ -181,7 +181,8 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts multiple blob sidecars into the store
     fn insert_all(&self, txs: Vec<(B256, PooledBlobSidecar)>) -> Result<(), BlobStoreError>;
 
-    /// Inserts a validated sidecar that keeps only some cells, unless `tx` has a sidecar already.
+    /// Inserts a validated sidecar that keeps only some cells, replacing older cells of `tx` but
+    /// not its full sidecar.
     ///
     /// The default joins or rebuilds the blobs and inserts the full sidecar, so it fails with too
     /// few cells.
@@ -636,6 +637,23 @@ mod tests {
                     proofs: vec![Some(proofs[0]), Some(proofs[1])],
                 })]
             );
+        }
+    }
+
+    #[test]
+    fn stores_replace_older_cells_of_a_readmitted_tx() {
+        let (full, _) = fixture();
+        let full = Arc::new(BlobTransactionSidecarVariant::Eip7594(full.clone()));
+        let one_column = subset(BlobCellMask::from_bits(1));
+        let data = subset(BlobCellMask::from_bits(u64::MAX.into()));
+
+        for TestStore { store, cells_size, _dir, .. } in stores(&data) {
+            let tx = B256::random();
+            // Cells kept from an earlier admission of the same transaction.
+            store.insert_cells(tx, one_column.clone()).unwrap();
+            store.insert_cells(tx, data.clone()).unwrap();
+            assert_eq!(store.get(tx).unwrap(), Some(full.clone()));
+            assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(cells_size)));
         }
     }
 }
