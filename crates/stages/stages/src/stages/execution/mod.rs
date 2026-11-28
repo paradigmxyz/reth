@@ -832,6 +832,7 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
+    use alloy_consensus::Header;
     use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -841,13 +842,14 @@ mod tests {
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
-    use reth_ethereum_primitives::Block;
+    use reth_ethereum_primitives::{Block, BlockBody};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Block as _, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
+        providers::BlockchainProvider,
         test_utils::{create_test_provider_factory, create_test_provider_factory_with_chain_spec},
-        AccountReader, BlockWriter, DatabaseProviderFactory, ReceiptProvider,
-        StaticFileProviderFactory,
+        AccountReader, BlockWriter, DatabaseProviderFactory, DependencyProofProvider,
+        DependencyProofStore, ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
     use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
@@ -874,6 +876,65 @@ mod tests {
             MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             ExExManagerHandle::empty(),
         )
+    }
+
+    #[tokio::test]
+    async fn invalid_empty_block_reaches_execution_without_fetching_a_proof() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().bogota_activated().build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+        let writer = factory.database_provider_rw().unwrap();
+        let genesis = Block { header: Header::default(), body: BlockBody::default() }
+            .seal_slow()
+            .try_recover()
+            .unwrap();
+        let block = Block {
+            header: Header {
+                number: 1,
+                parent_hash: genesis.hash(),
+                timestamp: 1,
+                gas_limit: 30_000_000,
+                dependency_proof_hash: Some(B256::repeat_byte(1)),
+                block_deps_hash: Some(alloy_eips::eip8288::dependency_digest(&[])),
+                ..Default::default()
+            },
+            body: BlockBody::default(),
+        }
+        .seal_slow()
+        .try_recover()
+        .unwrap();
+        writer.insert_block(&genesis).unwrap();
+        writer.insert_block(&block).unwrap();
+        writer.commit().unwrap();
+        factory.static_file_provider().commit().unwrap();
+        let provider = BlockchainProvider::new(factory.clone()).unwrap();
+        assert!(provider.dependency_proof_requests(1..=1).unwrap().is_empty());
+        let consensus = Arc::new(
+            EthBeaconConsensus::new(chain_spec.clone())
+                .with_dependency_proofs(DependencyProofStore::new(provider)),
+        );
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            reth_consensus::Consensus::<Block>::prepare_block_range_supplemental_data(
+                consensus.as_ref(),
+                1..=1,
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let mut execution_stage = stage();
+        execution_stage.evm_config = EthEvmConfig::new(chain_spec);
+        execution_stage.consensus = consensus;
+        let provider = factory.database_provider_rw().unwrap();
+        let error = execution_stage
+            .execute(&provider, ExecInput { target: Some(1), checkpoint: None })
+            .unwrap_err();
+        assert_matches!(
+            error,
+            StageError::Block { block: invalid, error: BlockErrorKind::Validation(
+                reth_consensus::ConsensusError::DependencyProofCommitmentMismatch
+            ) } if invalid.block.hash == block.hash()
+        );
     }
 
     #[test]

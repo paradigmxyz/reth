@@ -12,7 +12,10 @@
 extern crate alloc;
 
 use alloc::{fmt::Debug, sync::Arc};
-use alloy_consensus::{constants::MAXIMUM_EXTRA_DATA_SIZE, EMPTY_OMMER_ROOT_HASH};
+use alloy_consensus::{
+    constants::{EMPTY_TRANSACTIONS, KECCAK_EMPTY, MAXIMUM_EXTRA_DATA_SIZE},
+    EMPTY_OMMER_ROOT_HASH,
+};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::B256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -40,6 +43,8 @@ use alloy_primitives::Bytes;
 use alloc::boxed::Box;
 #[cfg(feature = "std")]
 use core::ops::RangeInclusive;
+#[cfg(feature = "std")]
+use reth_chainspec::EthereumHardfork;
 #[cfg(feature = "std")]
 use reth_consensus::SupplementalDataFuture;
 #[cfg(feature = "std")]
@@ -221,18 +226,17 @@ where
         &self,
         range: RangeInclusive<u64>,
     ) -> SupplementalDataFuture {
+        if self
+            .chain_spec
+            .ethereum_fork_activation(EthereumHardfork::Bogota)
+            .as_timestamp()
+            .is_none()
+        {
+            return Box::pin(async { Ok(()) });
+        }
         let proofs = self.proofs.clone();
         Box::pin(async move {
-            // A pre-activation range needs no supplemental downloads.
             let end = *range.end();
-            let store = proofs.clone();
-            let last = tokio::task::spawn_blocking(move || store.requests(end..=end))
-                .await
-                .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?
-                .map_err(|error| ConsensusError::DependencyProofProcessing(Arc::new(error)))?;
-            if last.is_empty() {
-                return Ok(())
-            }
             let mut start = *range.start();
             while start <= end {
                 let batch_end = start.saturating_add(127).min(end);
@@ -321,6 +325,15 @@ where
         }
         if dependencies_active && (proof_hash.is_none() || deps_hash.is_none()) {
             return Err(ConsensusError::MissingDependencyProof);
+        }
+        // Empty transaction roots establish both commitments without supplemental proof data.
+        if dependencies_active && header.transactions_root() == EMPTY_TRANSACTIONS {
+            if deps_hash != Some(alloy_eips::eip8288::dependency_digest(&[])) {
+                return Err(ConsensusError::DependencyCommitmentMismatch);
+            }
+            if proof_hash != Some(KECCAK_EMPTY) {
+                return Err(ConsensusError::DependencyProofCommitmentMismatch);
+            }
         }
 
         let is_post_merge = self.chain_spec.is_paris_active_at_block(header.number());
@@ -541,6 +554,7 @@ mod tests {
         struct Store {
             proof: Mutex<Option<Bytes>>,
             fetcher: Arc<Fetcher>,
+            requests: Vec<(u64, DependencyProofRequest)>,
         }
 
         impl DependencyProofProvider for Store {
@@ -561,6 +575,17 @@ mod tests {
             fn dependency_proof_fetcher(&self) -> Option<Arc<dyn DependencyProofFetcher>> {
                 Some(self.fetcher.clone())
             }
+            fn dependency_proof_requests(
+                &self,
+                range: RangeInclusive<u64>,
+            ) -> reth_storage_api::errors::provider::ProviderResult<Vec<DependencyProofRequest>>
+            {
+                Ok(self
+                    .requests
+                    .iter()
+                    .filter_map(|(number, request)| range.contains(number).then_some(*request))
+                    .collect())
+            }
         }
 
         #[tokio::test]
@@ -573,6 +598,7 @@ mod tests {
             for local in [None, Some(Bytes::from_static(b"corrupt"))] {
                 let store = Arc::new(Store {
                     proof: Mutex::new(local),
+                    requests: Vec::new(),
                     fetcher: Arc::new(Fetcher {
                         response: Some(proof.clone()),
                         calls: AtomicUsize::new(0),
@@ -595,6 +621,7 @@ mod tests {
             for response in [None, Some(Bytes::from_static(b"wrong"))] {
                 let store = Arc::new(Store {
                     proof: Mutex::new(None),
+                    requests: Vec::new(),
                     fetcher: Arc::new(Fetcher { response, calls: AtomicUsize::new(0) }),
                 });
                 assert!(
@@ -603,6 +630,35 @@ mod tests {
                 );
                 assert_eq!(*store.proof.lock().unwrap(), None);
             }
+        }
+
+        #[tokio::test]
+        async fn empty_range_suffix_does_not_skip_earlier_proofs() {
+            let proof = Bytes::from_static(b"proof");
+            let request = DependencyProofRequest {
+                block_hash: B256::repeat_byte(1),
+                commitment: alloy_primitives::keccak256(&proof),
+            };
+            let store = Arc::new(Store {
+                proof: Mutex::new(None),
+                fetcher: Arc::new(Fetcher {
+                    response: Some(proof.clone()),
+                    calls: AtomicUsize::new(0),
+                }),
+                requests: vec![(1, request)],
+            });
+            let consensus = EthBeaconConsensus::new(Arc::new(
+                ChainSpecBuilder::mainnet().bogota_activated().build(),
+            ))
+            .with_dependency_proofs(DependencyProofStore::new(store.clone()));
+            reth_consensus::Consensus::<EthBlock>::prepare_block_range_supplemental_data(
+                &consensus,
+                1..=3,
+            )
+            .await
+            .unwrap();
+            assert_eq!(store.fetcher.calls.load(Ordering::Relaxed), 1);
+            assert_eq!(*store.proof.lock().unwrap(), Some(proof));
         }
     }
 
@@ -690,6 +746,39 @@ mod tests {
             consensus.validate_header(&SealedHeader::seal_slow(header)),
             Err(ConsensusError::MissingDependencyProof)
         ));
+    }
+
+    #[test]
+    fn empty_transaction_roots_reject_invalid_dependency_commitments_before_download() {
+        let consensus = EthBeaconConsensus::new(Arc::new(
+            ChainSpecBuilder::mainnet().bogota_activated().build(),
+        ));
+        let mut header = valid_prague_header();
+        header.timestamp = 1;
+        header.gas_limit = 30_000_000;
+        header.block_access_list_hash = Some(alloy_eips::eip7928::EMPTY_BLOCK_ACCESS_LIST_HASH);
+        header.slot_number = Some(1);
+        header.dependency_proof_hash = Some(KECCAK_EMPTY);
+        header.block_deps_hash = Some(alloy_eips::eip8288::dependency_digest(&[]));
+        assert_eq!(header.transactions_root, EMPTY_TRANSACTIONS);
+        consensus.validate_header(&SealedHeader::seal_slow(header.clone())).unwrap();
+
+        header.dependency_proof_hash = Some(B256::repeat_byte(1));
+        assert!(matches!(
+            consensus.validate_header(&SealedHeader::seal_slow(header.clone())),
+            Err(ConsensusError::DependencyProofCommitmentMismatch)
+        ));
+        header.dependency_proof_hash = Some(KECCAK_EMPTY);
+        header.block_deps_hash = Some(B256::repeat_byte(2));
+        assert!(matches!(
+            consensus.validate_header(&SealedHeader::seal_slow(header.clone())),
+            Err(ConsensusError::DependencyCommitmentMismatch)
+        ));
+
+        // A nonempty body is needed to determine the dependency set of a nonempty root.
+        header.transactions_root = B256::repeat_byte(3);
+        header.dependency_proof_hash = Some(B256::repeat_byte(1));
+        consensus.validate_header(&SealedHeader::seal_slow(header)).unwrap();
     }
 
     fn valid_prague_header() -> reth_primitives_traits::Header {

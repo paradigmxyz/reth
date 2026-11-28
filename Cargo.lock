@@ -152,7 +152,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -179,7 +179,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -193,7 +193,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -307,7 +307,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -336,7 +336,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -389,7 +389,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -403,7 +403,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -428,7 +428,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -440,7 +440,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks 0.2.13",
@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -537,7 +537,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -580,7 +580,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -605,7 +605,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -617,7 +617,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -628,7 +628,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -639,7 +639,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus-any",
  "alloy-network-primitives",
@@ -653,7 +653,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -672,7 +672,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -684,7 +684,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -704,7 +704,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -726,7 +726,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -740,7 +740,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -753,7 +753,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -764,7 +764,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -775,7 +775,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -789,7 +789,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -877,7 +877,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -900,7 +900,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -915,7 +915,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -935,7 +935,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -974,7 +974,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.6.1"
-source = "git+https://github.com/Rimeeeeee/alloy?rev=1693db2d786152d6ed1d718a8294c609db91afb0#1693db2d786152d6ed1d718a8294c609db91afb0"
+source = "git+https://github.com/Rimeeeeee/alloy?rev=a1979b3b98d7c1b2606a362c51aeb705167102d5#a1979b3b98d7c1b2606a362c51aeb705167102d5"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
@@ -3754,7 +3754,7 @@ dependencies = [
 [[package]]
 name = "evm2"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -3796,7 +3796,7 @@ dependencies = [
 [[package]]
 name = "evm2-inspectors"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-consensus",
  "alloy-eip2930",
@@ -3819,7 +3819,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "evm2",
  "evm2-jit-backend",
@@ -3834,7 +3834,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-backend"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "eyre",
  "ruint",
@@ -3843,12 +3843,12 @@ dependencies = [
 [[package]]
 name = "evm2-jit-build"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 
 [[package]]
 name = "evm2-jit-builtins"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3861,7 +3861,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-codegen"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-primitives",
  "bitflags 2.13.2",
@@ -3884,7 +3884,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-context"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-primitives",
  "evm2",
@@ -3894,7 +3894,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-llvm"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-primitives",
  "cc",
@@ -3907,7 +3907,7 @@ dependencies = [
 [[package]]
 name = "evm2-jit-runtime"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "alloy-primitives",
  "crossbeam-channel",
@@ -3934,7 +3934,7 @@ dependencies = [
 [[package]]
 name = "evm2-macros"
 version = "0.1.0"
-source = "git+https://github.com/Rimeeeeee/evm2?rev=387760b30cb33a058350bdd6548e85c470bbcaf5#387760b30cb33a058350bdd6548e85c470bbcaf5"
+source = "git+https://github.com/Rimeeeeee/evm2?rev=aacb988e8467f7265f54517af57b87601204fc0e#aacb988e8467f7265f54517af57b87601204fc0e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -8360,7 +8360,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs"
 version = "0.8.2"
-source = "git+https://github.com/Rimeeeeee/reth-core?rev=2b17b0128dcc9b578649a023001fe74321df661b#2b17b0128dcc9b578649a023001fe74321df661b"
+source = "git+https://github.com/Rimeeeeee/reth-core?rev=ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35#ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -8380,7 +8380,7 @@ dependencies = [
 [[package]]
 name = "reth-codecs-derive"
 version = "0.8.2"
-source = "git+https://github.com/Rimeeeeee/reth-core?rev=2b17b0128dcc9b578649a023001fe74321df661b#2b17b0128dcc9b578649a023001fe74321df661b"
+source = "git+https://github.com/Rimeeeeee/reth-core?rev=ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35#ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10191,7 +10191,7 @@ dependencies = [
 [[package]]
 name = "reth-primitives-traits"
 version = "0.8.2"
-source = "git+https://github.com/Rimeeeeee/reth-core?rev=2b17b0128dcc9b578649a023001fe74321df661b#2b17b0128dcc9b578649a023001fe74321df661b"
+source = "git+https://github.com/Rimeeeeee/reth-core?rev=ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35#ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35"
 dependencies = [
  "alloy-consensus",
  "alloy-eip7928",
@@ -10706,7 +10706,7 @@ dependencies = [
 [[package]]
 name = "reth-rpc-traits"
 version = "0.8.2"
-source = "git+https://github.com/Rimeeeeee/reth-core?rev=2b17b0128dcc9b578649a023001fe74321df661b#2b17b0128dcc9b578649a023001fe74321df661b"
+source = "git+https://github.com/Rimeeeeee/reth-core?rev=ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35#ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -11294,7 +11294,7 @@ dependencies = [
 [[package]]
 name = "reth-zstd-compressors"
 version = "0.8.2"
-source = "git+https://github.com/Rimeeeeee/reth-core?rev=2b17b0128dcc9b578649a023001fe74321df661b#2b17b0128dcc9b578649a023001fe74321df661b"
+source = "git+https://github.com/Rimeeeeee/reth-core?rev=ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35#ab87fdc3f6b159e2f9f1f0b5abeebc3043daab35"
 dependencies = [
  "zstd",
 ]

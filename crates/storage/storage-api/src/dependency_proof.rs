@@ -38,7 +38,7 @@ pub trait DependencyProofProvider: Send + Sync {
     fn insert_dependency_proof(&self, hash: B256, proof: Bytes) -> ProviderResult<()>;
 
     /// Returns proof commitments for a bounded range of canonical blocks, omitting pre-activation
-    /// headers.
+    /// headers and headers with an empty transaction root, which need no proof download.
     fn dependency_proof_requests(
         &self,
         _range: RangeInclusive<u64>,

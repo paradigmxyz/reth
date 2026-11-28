@@ -11,7 +11,7 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
     TransactionVariant, TransactionsProvider,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
+use alloy_consensus::{constants::EMPTY_TRANSACTIONS, transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
 use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes, TxHash, TxNumber, B256};
 use reth_chain_state::{
@@ -1112,6 +1112,7 @@ impl<N: ProviderNodeTypes> DependencyProofProvider for BlockchainProvider<N> {
             .provider()?
             .sealed_headers_range(range)?
             .into_iter()
+            .filter(|header| header.transactions_root() != EMPTY_TRANSACTIONS)
             .filter_map(|header| {
                 header.dependency_proof_hash().map(|commitment| DependencyProofRequest {
                     block_hash: header.hash(),

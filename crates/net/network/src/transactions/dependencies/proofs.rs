@@ -34,6 +34,7 @@ const MAX_SERVING: usize = 2;
 const MAX_MESSAGE: usize = MAX_DEPENDENCY_PROOF_BYTES + 34;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const PEER_TIMEOUT: Duration = Duration::from_secs(3);
+const REQUEST_INTERVAL: Duration = Duration::from_secs(1);
 
 /// The node's bounded source of commitment-authenticated peer proofs.
 #[derive(Debug)]
@@ -183,6 +184,7 @@ enum Event {
 struct Peer {
     outgoing: mpsc::Sender<BytesMut>,
     next_serve: Instant,
+    next_request: Instant,
 }
 
 struct Pending {
@@ -252,14 +254,14 @@ async fn run<P: DependencyProofProvider + Clone + 'static>(
                 None => return,
                 Some(Event::Opened(id, outgoing)) => {
                     peers.retain(|_, peer| !peer.outgoing.is_closed());
-                    if peers.len() < MAX_PEERS { peers.insert(id, Peer { outgoing, next_serve: Instant::now() }); }
+                    if peers.len() < MAX_PEERS { peers.insert(id, Peer { outgoing, next_serve: Instant::now(), next_request: Instant::now() }); }
                 },
                 Some(Event::Message(id, message)) => {
                     if !peers.contains_key(&id) { continue }
                     let hash = B256::from_slice(&message[1..33]);
                     if message[0] == 0 {
                         if let Some(peer) = peers.get_mut(&id) && peer.next_serve <= Instant::now() && serving.len() < MAX_SERVING {
-                            peer.next_serve = Instant::now() + Duration::from_secs(1);
+                            peer.next_serve = Instant::now() + REQUEST_INTERVAL;
                             let provider = provider.clone();
                             let span = tracing::Span::current();
                             serving.push(async move {
@@ -307,15 +309,26 @@ async fn run<P: DependencyProofProvider + Clone + 'static>(
                 for download in pending.values_mut() {
                     if download.next_try > Instant::now() { continue }
                     download.peer = None;
+                    // Availability and request failures are transient; revisit peers after a round.
+                    if peers.keys().all(|id| download.tried.contains(id)) {
+                        download.tried.clear();
+                    }
                     let start = last_peer.map_or(Unbounded, Excluded);
-                    if let Some((id, peer)) = peers.range((start, Unbounded)).chain(peers.iter()).find(|(id, _)| !download.tried.contains(*id)) {
-                        last_peer = Some(*id);
-                        download.tried.insert(*id);
+                    if let Some(id) = peers.range((start, Unbounded)).chain(peers.iter())
+                        .find(|(id, peer)| !download.tried.contains(*id) && peer.next_request <= Instant::now())
+                        .map(|(id, _)| *id) && let Some(peer) = peers.get_mut(&id)
+                    {
                         let mut message = BytesMut::with_capacity(33);
                         message.extend_from_slice(&[0]);
                         message.extend_from_slice(download.request.block_hash.as_slice());
                         match peer.outgoing.try_send(message) {
-                            Ok(()) => { download.peer = Some(*id); download.next_try = Instant::now() + PEER_TIMEOUT; },
+                            Ok(()) => {
+                                last_peer = Some(id);
+                                download.tried.insert(id);
+                                download.peer = Some(id);
+                                download.next_try = Instant::now() + PEER_TIMEOUT;
+                                peer.next_request = Instant::now() + REQUEST_INTERVAL;
+                            },
                             Err(error) => debug!(target: "reth::eip8288", %error, "Proof request queue unavailable"),
                         }
                     }
@@ -369,6 +382,94 @@ mod tests {
         assert!(authenticated(request, proof));
         assert!(!authenticated(request, b"changed"));
         assert!(!authenticated(request, &vec![0; MAX_DEPENDENCY_PROOF_BYTES + 1]));
+    }
+
+    #[tokio::test]
+    async fn single_peer_retries_unavailable_and_unresponsive_proofs() {
+        for unavailable in [false, true] {
+            let (handler, fetcher, driver) = DependencyProofProtocolHandler::new(EmptyProofs);
+            let driver = tokio::spawn(driver);
+            let peer = PeerId::repeat_byte(1);
+            let (sender, mut messages) = mpsc::channel(2);
+            handler.0.send(Event::Opened(peer, sender)).await.unwrap();
+            let proof = Bytes::from_static(b"authenticated proof");
+            let request = DependencyProofRequest {
+                block_hash: B256::repeat_byte(3),
+                commitment: keccak256(&proof),
+            };
+            let requester = Arc::clone(&fetcher);
+            let started = Instant::now();
+            let fetched = tokio::spawn(async move { requester.fetch(request).await });
+            let message =
+                tokio::time::timeout(PEER_TIMEOUT, messages.recv()).await.unwrap().unwrap();
+            assert_eq!(&message[1..], request.block_hash.as_slice());
+            if unavailable {
+                handler
+                    .0
+                    .send(Event::Message(
+                        peer,
+                        encode_response(request.block_hash, None).freeze().into(),
+                    ))
+                    .await
+                    .unwrap();
+            }
+            let message = tokio::time::timeout(PEER_TIMEOUT + REQUEST_INTERVAL, messages.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(&message[1..], request.block_hash.as_slice());
+            assert!(started.elapsed() >= if unavailable { REQUEST_INTERVAL } else { PEER_TIMEOUT });
+            assert!(started.elapsed() < REQUEST_TIMEOUT);
+            handler
+                .0
+                .send(Event::Message(
+                    peer,
+                    encode_response(request.block_hash, Some(&proof)).freeze().into(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(fetched.await.unwrap().unwrap(), Some(proof));
+            driver.abort();
+            assert!(driver.await.unwrap_err().is_cancelled());
+        }
+    }
+
+    #[tokio::test]
+    async fn consecutive_fetches_share_the_peer_cooldown() {
+        let (handler, fetcher, driver) = DependencyProofProtocolHandler::new(EmptyProofs);
+        let driver = tokio::spawn(driver);
+        let peer = PeerId::repeat_byte(1);
+        let (sender, mut messages) = mpsc::channel(2);
+        handler.0.send(Event::Opened(peer, sender)).await.unwrap();
+        let mut previous = None;
+        for index in [1, 2] {
+            let proof = Bytes::from_static(b"authenticated proof");
+            let request = DependencyProofRequest {
+                block_hash: B256::repeat_byte(index),
+                commitment: keccak256(&proof),
+            };
+            let requester = Arc::clone(&fetcher);
+            let started = Instant::now();
+            let fetched = tokio::spawn(async move { requester.fetch(request).await });
+            let message =
+                tokio::time::timeout(PEER_TIMEOUT, messages.recv()).await.unwrap().unwrap();
+            assert_eq!(&message[1..], request.block_hash.as_slice());
+            if let Some(previous) = previous {
+                assert!(Instant::now() - previous >= REQUEST_INTERVAL);
+            }
+            previous = Some(started);
+            handler
+                .0
+                .send(Event::Message(
+                    peer,
+                    encode_response(request.block_hash, Some(&proof)).freeze().into(),
+                ))
+                .await
+                .unwrap();
+            assert_eq!(fetched.await.unwrap().unwrap(), Some(proof));
+        }
+        driver.abort();
+        assert!(driver.await.unwrap_err().is_cancelled());
     }
 
     #[tokio::test]
