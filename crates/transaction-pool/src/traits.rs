@@ -383,7 +383,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     }
 
     /// Returns pooled transactions for eth/72 peers, converted with
-    /// [`PoolTransaction::pooled_without_blobs`]. The default counts blobs against the size limit.
+    /// [`PoolTransaction::pooled_without_blobs`]. Only the encoded bytes served count towards the
+    /// response size limit.
     ///
     /// Consumer: P2P
     fn get_pooled_transaction_elements_without_blobs(
@@ -391,10 +392,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled> {
-        self.get_pooled_transaction_elements(tx_hashes, limit)
-            .into_iter()
-            .filter_map(Self::Transaction::pooled_without_blobs)
-            .collect()
+        default_pooled_transaction_elements_without_blobs(self, tx_hashes, limit)
     }
 
     /// Returns the pooled transaction variant for the given transaction hash.
@@ -789,6 +787,33 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Returns the blob store used by the pool.
     fn blob_store(&self) -> Box<dyn BlobStore>;
+}
+
+/// Default for [`TransactionPool::get_pooled_transaction_elements_without_blobs`], kept separate so
+/// it can be tested against a pool that overrides the method.
+fn default_pooled_transaction_elements_without_blobs<P: TransactionPool>(
+    pool: &P,
+    tx_hashes: Vec<TxHash>,
+    limit: GetPooledTransactionLimit,
+) -> Vec<PoolPooledTx<P>> {
+    // Select by the cached eth/72 size first, so unservable transactions are not charged and only
+    // served sidecars are loaded, in a single lookup.
+    let txs = pool.get_all(tx_hashes);
+    let mut served = Vec::with_capacity(txs.len());
+    served.extend(
+        txs.iter()
+            .filter(|tx| tx.propagate)
+            .filter_map(|tx| Some((*tx.hash(), tx.transaction.encoded_length_eth72()?)))
+            // Stops after the transaction that crosses the limit.
+            .scan(0, |size, (hash, len)| {
+                let full = limit.exceeds(*size);
+                *size += len;
+                (!full).then_some(hash)
+            }),
+    );
+    let mut pooled = Vec::with_capacity(served.len());
+    pool.append_pooled_transaction_elements(&served, GetPooledTransactionLimit::None, &mut pooled);
+    pooled.into_iter().filter_map(P::Transaction::pooled_without_blobs).collect()
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
@@ -2125,7 +2150,10 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blobstore::BlobCellAvailability;
+    use crate::{
+        blobstore::BlobCellAvailability,
+        test_utils::{testing_pool, MockTransaction},
+    };
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844,
         TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
@@ -2371,5 +2399,23 @@ mod tests {
                 served.as_ref().map(Encodable2718::encode_2718_len)
             );
         }
+    }
+
+    #[tokio::test]
+    async fn without_blobs_skips_unservable_before_limit() {
+        let pool = testing_pool();
+        let blob = MockTransaction::eip4844().with_size(1);
+        let blob = pool.add_external_transaction(blob).await.unwrap().hash;
+        let first = MockTransaction::eip1559().with_size(1);
+        let first = pool.add_external_transaction(first).await.unwrap().hash;
+        let second = MockTransaction::eip1559().with_size(1);
+        let second = pool.add_external_transaction(second).await.unwrap().hash;
+
+        let response = default_pooled_transaction_elements_without_blobs(
+            &pool,
+            vec![blob, first, second],
+            GetPooledTransactionLimit::ResponseSizeSoftLimit(0),
+        );
+        assert_eq!(response.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>(), [first]);
     }
 }
