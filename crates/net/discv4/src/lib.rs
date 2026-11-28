@@ -3215,19 +3215,8 @@ mod tests {
                 assert_eq!(service.queued_pings.len(), num_inserted);
             }
         }
-    }
 
-    #[tokio::test]
-    async fn test_reserved_pings_for_lookup_and_renewal() {
-        let (_, mut service) = create_discv4().await;
-        let local_addr = service.local_addr();
-
-        // Fill the unreserved slots and the queue with pings to unproven nodes.
-        while service.queued_pings.len() < MAX_QUEUED_PINGS {
-            service.add_node(NodeRecord::new(local_addr, PeerId::random()));
-        }
-        assert_eq!(service.pending_pings.len(), MAX_NODES_PING - RESERVED_PINGS);
-
+        // Lookups and renewals to proven endpoints can still use the reserved slots.
         let lookup = NodeRecord::new("127.0.0.2:30303".parse().unwrap(), PeerId::random());
         let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
         service.try_ping(lookup, PingReason::Lookup(lookup, ctx));
