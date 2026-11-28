@@ -1,6 +1,6 @@
 //! Configuration for `eth` namespace APIs.
 
-use std::time::Duration;
+use std::{num::NonZeroU32, time::Duration};
 
 use crate::{
     EthStateCacheConfig, FeeHistoryCacheConfig, ForwardConfig, GasPriceOracleConfig,
@@ -92,6 +92,9 @@ pub struct EthConfig {
     pub rpc_max_simulate_blocks: u64,
     /// Maximum bytes a single traced transaction may record. `None` is unlimited.
     pub rpc_max_trace_bytes: Option<usize>,
+    /// Memory, in MiB, the heavy requests of the RPC servers may hold at once. `None` does not
+    /// budget memory.
+    pub rpc_memory_budget_mb: Option<NonZeroU32>,
     /// Whether to compute state roots for `eth_simulateV1` responses.
     pub compute_state_root_for_eth_simulate: bool,
     ///
@@ -161,6 +164,7 @@ impl Default for EthConfig {
             rpc_gas_cap: RPC_DEFAULT_GAS_CAP.into(),
             rpc_max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_max_trace_bytes: None,
+            rpc_memory_budget_mb: None,
             compute_state_root_for_eth_simulate: false,
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
@@ -236,6 +240,13 @@ impl EthConfig {
     /// Configures the maximum bytes a single traced transaction may record. `None` is unlimited.
     pub const fn rpc_max_trace_bytes(mut self, max_trace_bytes: Option<usize>) -> Self {
         self.rpc_max_trace_bytes = max_trace_bytes;
+        self
+    }
+
+    /// Configures the memory, in MiB, the heavy requests of the RPC servers may hold at once.
+    /// `None` does not budget memory.
+    pub const fn rpc_memory_budget_mb(mut self, memory_budget_mb: Option<NonZeroU32>) -> Self {
+        self.rpc_memory_budget_mb = memory_budget_mb;
         self
     }
 

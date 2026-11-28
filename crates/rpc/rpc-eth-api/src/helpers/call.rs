@@ -35,6 +35,7 @@ use reth_rpc_eth_types::{
         attach_bal_before_tx,
     },
     error::{AsEthApiError, FromEthApiError},
+    memory_budget::{calls_gas, execution_weight_mib, state_override_weight_mib},
     simulate::{self, EthSimulateError, SimulatedState},
     utils::CallManyBudget,
     EthApiError, RpcInvalidTransactionError, StateCacheDb,
@@ -87,11 +88,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 return Err(EthApiError::InvalidParams(String::from("calls are empty.")).into())
             }
 
-            let permit = self
-                .acquire_owned_blocking_io()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
-
+            let calls = block_state_calls.iter().map(|block| block.calls.len()).sum::<usize>();
+            let gas =
+                calls_gas(self.call_gas_limit(), block_state_calls.iter().flat_map(|b| &b.calls));
             let base_block = self
                 .recovered_block(block)
                 .await?
@@ -102,8 +101,21 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             // could return a newer block than `parent`.
             let state_at = if block.is_pending() { block } else { parent.hash().into() };
 
+            // A chain past the block limit is rejected before it waits for the budget.
+            let blocks = simulate::simulated_block_count(&block_state_calls, parent.number());
+            if blocks > max_simulate_blocks {
+                return Err(EthApiError::other(EthSimulateError::TooManyBlocks).into())
+            }
+            let weight = block_state_calls.iter().fold(
+                execution_weight_mib(calls as u64, gas, blocks),
+                |weight, block| {
+                    weight.saturating_add(state_override_weight_mib(block.state_overrides.as_ref()))
+                },
+            );
+            let admission = self.admit(self.blocking_io_task_guard(), weight).await?;
+
             self.spawn_with_state_at_block(state_at, move |this, db| {
-                let _permit = permit;
+                let _admission = admission;
                 let state_provider = db.db.into_inner().into_inner().0;
                 let mut db = CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
                     (&state_provider).into_evm_state_provider(),
@@ -312,11 +324,13 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                 return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
             }
             let mut budget = CallManyBudget::for_bundles(&bundles, self.call_gas_limit())?;
-
-            let permit = self
-                .acquire_owned_blocking_io()
-                .await
-                .map_err(|_| EthApiError::InternalEthError)?;
+            let calls =
+                bundles.iter().map(|bundle| bundle.transactions.len().max(1)).sum::<usize>();
+            let gas =
+                calls_gas(self.call_gas_limit(), bundles.iter().flat_map(|b| &b.transactions));
+            let weight = execution_weight_mib(calls as u64, gas, 0)
+                .saturating_add(state_override_weight_mib(state_override.as_ref()));
+            let admission = self.admit(self.blocking_io_task_guard(), weight).await?;
 
             let StateContext { transaction_index, block_number } =
                 state_context.unwrap_or_default();
@@ -361,7 +375,7 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
             }
 
             self.spawn_with_state_at_block(at, move |this, mut db| {
-                let _permit = permit;
+                let _admission = admission;
                 let mut all_results = Vec::with_capacity(bundles.len());
 
                 if replay_block_txs {

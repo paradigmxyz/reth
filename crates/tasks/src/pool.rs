@@ -45,6 +45,11 @@ impl BlockingTaskGuard {
         Self(Arc::new(Semaphore::new(max_blocking_tasks)))
     }
 
+    /// Returns the semaphore that holds the permits.
+    pub const fn semaphore(&self) -> &Arc<Semaphore> {
+        &self.0
+    }
+
     /// See also [`Semaphore::acquire_owned`]
     pub async fn acquire_owned(self) -> Result<OwnedSemaphorePermit, AcquireError> {
         self.0.acquire_owned().await

@@ -1411,6 +1411,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
         .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
         .max_trace_bytes(self.config.rpc_max_trace_bytes)
         .max_response_size(self.config.max_response_size)
+        .memory_budget_mb(self.config.rpc_memory_budget_mb)
         .compute_state_root_for_eth_simulate(self.config.compute_state_root_for_eth_simulate)
         .eth_proof_window(self.config.eth_proof_window)
         .fee_history_cache_config(self.config.fee_history_cache)

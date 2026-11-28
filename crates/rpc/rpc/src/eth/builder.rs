@@ -21,7 +21,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, Runtime};
-use std::{sync::Arc, time::Duration};
+use std::{num::NonZeroU32, sync::Arc, time::Duration};
 
 /// A helper to build the `EthApi` handler instance.
 ///
@@ -35,6 +35,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     max_simulate_blocks: u64,
     max_trace_bytes: Option<usize>,
     max_response_size: Option<usize>,
+    memory_budget_mb: Option<NonZeroU32>,
     compute_state_root_for_eth_simulate: bool,
     eth_proof_window: u64,
     fee_history_cache_config: FeeHistoryCacheConfig,
@@ -93,6 +94,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -120,6 +122,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -160,6 +163,7 @@ where
             max_simulate_blocks: DEFAULT_MAX_SIMULATE_BLOCKS,
             max_trace_bytes: None,
             max_response_size: None,
+            memory_budget_mb: None,
             compute_state_root_for_eth_simulate: false,
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             blocking_task_pool: None,
@@ -203,6 +207,7 @@ where
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -230,6 +235,7 @@ where
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -264,6 +270,7 @@ where
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -291,6 +298,7 @@ where
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             fee_history_cache_config,
@@ -364,6 +372,13 @@ where
     /// debug trace response. `None` is unlimited.
     pub const fn max_response_size(mut self, max_response_size: Option<usize>) -> Self {
         self.max_response_size = max_response_size;
+        self
+    }
+
+    /// Sets the memory, in MiB, the heavy requests of the API may hold at once. `None` does not
+    /// budget memory.
+    pub const fn memory_budget_mb(mut self, memory_budget_mb: Option<NonZeroU32>) -> Self {
+        self.memory_budget_mb = memory_budget_mb;
         self
     }
 
@@ -565,6 +580,7 @@ where
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             blocking_task_pool,
@@ -618,6 +634,7 @@ where
             max_simulate_blocks,
             max_trace_bytes,
             max_response_size,
+            memory_budget_mb,
             compute_state_root_for_eth_simulate,
             eth_proof_window,
             pending_block_kind,

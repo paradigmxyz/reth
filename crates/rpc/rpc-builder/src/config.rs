@@ -108,6 +108,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .rpc_gas_cap(self.rpc_gas_cap)
             .rpc_max_simulate_blocks(self.rpc_max_simulate_blocks)
             .rpc_max_trace_bytes(self.max_trace_bytes())
+            .rpc_memory_budget_mb(self.memory_budget_mb())
             .compute_state_root_for_eth_simulate(self.rpc_compute_state_root_for_eth_simulate)
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())

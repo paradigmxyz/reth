@@ -75,7 +75,7 @@ mod tests {
         node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
         EthApiTypes,
     };
-    use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock};
+    use reth_rpc_eth_types::{EthApiSettings, EthStateCache, PendingBlock, RpcMemoryBudget};
     use reth_rpc_server_types::constants::DEFAULT_MAX_PROOF_SLOTS;
     use reth_storage_api::{StateProviderBox, StateProviderFactory};
     use reth_tasks::{
@@ -86,7 +86,7 @@ mod tests {
         test_utils::{testing_pool, MockTransaction, TestPool},
         TransactionOrigin, TransactionPool,
     };
-    use std::{future::Future, sync::Arc, time::Duration};
+    use std::{future::Future, num::NonZeroU32, sync::Arc, time::Duration};
     use tokio::sync::{Mutex, Semaphore};
 
     fn noop_eth_api() -> EthApi<
@@ -159,6 +159,28 @@ mod tests {
             panic!("expected over-limit request to be rejected");
         };
         assert_eq!(err.to_string(), "storage key count 1025 exceeds limit 1024");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_get_proof_fails_while_memory_budget_is_in_use() {
+        let provider = MockEthProvider::default();
+        let evm_config = EthEvmConfig::new(provider.chain_spec());
+        let eth_api = EthApi::<_, EthRpcConverter<ChainSpec>>::builder(
+            provider,
+            testing_pool(),
+            NoopNetwork::default(),
+            evm_config,
+        )
+        .memory_budget_mb(NonZeroU32::new(8))
+        .build();
+        let _held = eth_api.memory_budget().unwrap().acquire(8).await.unwrap();
+
+        let keys = vec![JsonStorageKey::from(B256::ZERO)];
+        let err = eth_api.get_proof(Address::random(), keys, None).unwrap().await.unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "request needs 5 MiB of the RPC memory budget, which is in use"
+        );
     }
 
     #[test]
@@ -337,6 +359,10 @@ mod tests {
 
         fn blocking_io_task_guard(&self) -> &Arc<Semaphore> {
             self.inner.blocking_io_task_guard()
+        }
+
+        fn memory_budget(&self) -> Option<&RpcMemoryBudget> {
+            self.inner.memory_budget()
         }
     }
 

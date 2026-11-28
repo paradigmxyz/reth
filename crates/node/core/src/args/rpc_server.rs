@@ -26,6 +26,7 @@ use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 use std::{
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr},
+    num::NonZeroU32,
     path::PathBuf,
     sync::OnceLock,
     time::Duration,
@@ -106,6 +107,7 @@ pub struct DefaultRpcServerArgs {
     rpc_tx_fee_cap: u128,
     rpc_max_simulate_blocks: u64,
     rpc_max_trace_bytes: Option<usize>,
+    rpc_memory_budget: u32,
     rpc_compute_state_root_for_eth_simulate: bool,
     rpc_eth_proof_window: u64,
     rpc_proof_permits: usize,
@@ -362,6 +364,12 @@ impl DefaultRpcServerArgs {
         self
     }
 
+    /// Set the default memory budget of heavy requests in MiB, 0 to not budget memory
+    pub const fn with_rpc_memory_budget(mut self, v: u32) -> Self {
+        self.rpc_memory_budget = v;
+        self
+    }
+
     /// Set whether to compute state roots for `eth_simulateV1` responses by default.
     pub const fn with_rpc_compute_state_root_for_eth_simulate(mut self, v: bool) -> Self {
         self.rpc_compute_state_root_for_eth_simulate = v;
@@ -459,6 +467,7 @@ impl Default for DefaultRpcServerArgs {
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_max_trace_bytes: None,
+            rpc_memory_budget: 0,
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
@@ -767,6 +776,18 @@ pub struct RpcServerArgs {
     )]
     pub rpc_max_trace_bytes: Option<usize>,
 
+    /// Memory in MiB that tracing, proof, simulation and multi-call requests may hold at once, 0
+    /// to not budget memory.
+    ///
+    /// Each request takes the memory its parameters allow it to hold at most until its work is
+    /// done, and fails with a `-32005` error if that memory does not free up within 200ms.
+    #[arg(
+        long = "rpc.memory-budget",
+        value_name = "MB",
+        default_value_t = DefaultRpcServerArgs::get_global().rpc_memory_budget
+    )]
+    pub rpc_memory_budget: u32,
+
     /// Compute state roots for `eth_simulateV1` responses.
     #[arg(
         long = "rpc.compute-state-root-for-eth-simulate",
@@ -1043,6 +1064,12 @@ impl RpcServerArgs {
             ),
         }
     }
+
+    /// Returns the memory budget of heavy requests in MiB, `None` when `--rpc.memory-budget 0`
+    /// disables it.
+    pub const fn memory_budget_mb(&self) -> Option<NonZeroU32> {
+        NonZeroU32::new(self.rpc_memory_budget)
+    }
 }
 
 impl Default for RpcServerArgs {
@@ -1087,6 +1114,7 @@ impl Default for RpcServerArgs {
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
             rpc_max_trace_bytes,
+            rpc_memory_budget,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1138,6 +1166,7 @@ impl Default for RpcServerArgs {
             rpc_tx_fee_cap,
             rpc_max_simulate_blocks,
             rpc_max_trace_bytes,
+            rpc_memory_budget,
             rpc_compute_state_root_for_eth_simulate,
             rpc_eth_proof_window,
             rpc_proof_permits,
@@ -1458,6 +1487,21 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_memory_budget() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.memory_budget_mb(), None);
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.memory-budget", "2048"])
+                .args;
+        assert_eq!(args.memory_budget_mb(), NonZeroU32::new(2048));
+
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.memory-budget", "0"]).args;
+        assert_eq!(args.memory_budget_mb(), None);
+    }
+
+    #[test]
     fn test_rpc_server_args() {
         let args = RpcServerArgs {
             http: true,
@@ -1505,6 +1549,7 @@ mod tests {
             rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
             rpc_max_simulate_blocks: 256,
             rpc_max_trace_bytes: Some(1 << 20),
+            rpc_memory_budget: 2048,
             rpc_compute_state_root_for_eth_simulate: false,
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
@@ -1598,6 +1643,8 @@ mod tests {
             "256",
             "--rpc.max-trace-bytes",
             "1048576",
+            "--rpc.memory-budget",
+            "2048",
             "--rpc.eth-proof-window",
             "100000",
             "--rpc.proof-permits",
