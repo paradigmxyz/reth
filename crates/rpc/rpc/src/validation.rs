@@ -43,11 +43,11 @@ use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{
     BlockReaderIdExt, HashedPostStateProvider, StateProvider, StateProviderFactory,
 };
-use reth_tasks::Runtime;
+use reth_tasks::{cancel::is_cancelled, CancelOnDrop, Runtime};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock};
+use std::{sync::Arc, thread::available_parallelism};
+use tokio::sync::{oneshot, RwLock, Semaphore};
 use tracing::warn;
 
 mod blob_cache;
@@ -91,6 +91,9 @@ where
             cached_state: Default::default(),
             validated_blobs: Default::default(),
             task_spawner,
+            validation_permits: Arc::new(Semaphore::new(
+                available_parallelism().map_or(1, usize::from),
+            )),
             sender_recovery_cache,
             metrics: Default::default(),
         });
@@ -143,23 +146,41 @@ where
 
     /// Runs the validation on a blocking task.
     ///
-    /// The validation is skipped if the request is dropped before it starts and stopped if the
-    /// request is dropped while the validation waits for the cached reads.
+    /// At most as many validations as available cores run at once, because the work is CPU bound.
+    /// A permit is acquired before the blocking task is spawned, so queued requests do not occupy
+    /// a blocking thread.
+    ///
+    /// The validation is skipped if the request is dropped before it starts and stopped after
+    /// the block was executed if the request is dropped while it runs.
     async fn spawn_validation<F>(&self, validation: F) -> RpcResult<()>
     where
         F: Future<Output = Result<(), ValidationApiError>> + Send + 'static,
     {
-        let (mut tx, rx) = oneshot::channel();
+        let permit = self
+            .validation_permits
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| internal_rpc_err("Validation permits closed"))?;
 
-        self.task_spawner.spawn_blocking_task(async move {
-            let result = tokio::select! {
-                biased;
-                _ = tx.closed() => return,
-                result = validation => result.map_err(ErrorObject::from),
-            };
+        let (tx, rx) = oneshot::channel();
+        let cancel = CancelOnDrop::default();
+        let request = cancel.clone();
+        let handle = self.task_spawner.handle().clone();
+
+        self.task_spawner.spawn_blocking_task_fn(move || {
+            // Held until the validation finishes.
+            let _permit = permit;
+            if tx.is_closed() {
+                return
+            }
+            // The scope has to wrap `block_on`, because the validation runs while it polls.
+            let result = cancel.scope(|| handle.block_on(validation)).map_err(ErrorObject::from);
             let _ = tx.send(result);
         });
 
+        // Cancels the validation once the request is dropped.
+        let _request = request;
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
 }
@@ -255,6 +276,11 @@ where
             let mut executor = self.evm_config.batch_executor(cached_db);
 
             let result = executor.execute_one(&block)?;
+
+            // Nobody waits for the result of a dropped request, so skip the remaining work.
+            if is_cancelled() {
+                return Err(ValidationApiError::Cancelled)
+            }
 
             // The executor rebuilds the block access list whenever the block header contains a
             // BAL hash. Comparing the rebuilt hash against the header post execution also
@@ -701,6 +727,8 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     validated_blobs: BlobValidationCache,
     /// Task spawner for blocking operations
     task_spawner: Runtime,
+    /// Bounds the number of validations that run concurrently.
+    validation_permits: Arc<Semaphore>,
     /// Cache of recovered transaction senders shared with transaction ingress and payload
     /// execution, if enabled.
     sender_recovery_cache: Option<SenderRecoveryCache>,
@@ -823,6 +851,8 @@ pub enum ValidationApiError {
     InvalidBlockAccessList(alloy_rlp::Error),
     #[error("block accesses blacklisted address: {_0}")]
     Blacklist(Address),
+    #[error("validation cancelled")]
+    Cancelled,
     #[error(transparent)]
     Blob(#[from] BlobTransactionValidationError),
     #[error(transparent)]
@@ -852,6 +882,7 @@ impl From<ValidationApiError> for ErrorObject<'static> {
             ValidationApiError::MissingLatestBlock |
             ValidationApiError::MissingParentBlock |
             ValidationApiError::BlockTooOld |
+            ValidationApiError::Cancelled |
             ValidationApiError::Provider(_) => internal_rpc_err(error.to_string()),
             ValidationApiError::Execution(err) => match err {
                 error @ BlockExecutionError::Validation(_) => {
@@ -898,9 +929,16 @@ mod tests {
     use reth_payload_primitives::NewPayloadError;
     use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
     use reth_provider::test_utils::MockEthProvider;
-    use reth_tasks::Runtime;
+    use reth_tasks::{cancel::is_cancelled, Runtime};
     use reth_trie_common::bundle_state::{AccountStatus, BundleAccount, BundleState};
-    use std::sync::Arc;
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
+    use tokio::sync::oneshot;
 
     fn test_execution_payload() -> ExecutionPayload {
         ExecutionPayload::V1(ExecutionPayloadV1 {
@@ -1385,5 +1423,57 @@ mod tests {
         let cache = api.cached_reads(head).await;
         assert_eq!(cache.gas, 20);
         assert_eq!(cache.reads.accounts.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn spawn_validation_waits_for_a_permit() {
+        let api = test_validation_api(MockEthProvider::default());
+        let permits = api.validation_permits.available_permits();
+        let held = api.validation_permits.clone().acquire_many_owned(permits as u32).await.unwrap();
+
+        let ran = Arc::new(AtomicBool::new(false));
+        let flag = ran.clone();
+        let mut request = Box::pin(api.spawn_validation(async move {
+            flag.store(true, Ordering::SeqCst);
+            Ok(())
+        }));
+
+        // The request stays queued as long as all permits are taken.
+        tokio::time::timeout(Duration::from_millis(100), &mut request).await.unwrap_err();
+        assert!(!ran.load(Ordering::SeqCst));
+
+        // A dropped request that is still queued never starts its validation.
+        drop(request);
+        drop(held);
+        api.spawn_validation(async { Ok(()) }).await.unwrap();
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn spawn_validation_cancels_when_the_request_is_dropped() {
+        let api = test_validation_api(MockEthProvider::default());
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel::<()>();
+        let (cancelled_tx, cancelled_rx) = oneshot::channel();
+
+        let request = tokio::spawn({
+            let api = api.clone();
+            async move {
+                api.spawn_validation(async move {
+                    started_tx.send(()).unwrap();
+                    release_rx.await.unwrap();
+                    cancelled_tx.send(is_cancelled()).unwrap();
+                    Ok(())
+                })
+                .await
+            }
+        });
+
+        started_rx.await.unwrap();
+        request.abort();
+        request.await.unwrap_err();
+        release_tx.send(()).unwrap();
+
+        assert!(cancelled_rx.await.unwrap());
     }
 }
