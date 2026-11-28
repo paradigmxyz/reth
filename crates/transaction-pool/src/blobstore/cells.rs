@@ -618,23 +618,28 @@ pub(crate) mod tests {
     #[test]
     fn extend_rejects_a_bad_proof_of_a_rebuilt_cell() {
         let (_, all) = fixture();
-        let mask = BlobCellMask::from_bits(u64::MAX.into());
         let mut proofs = all.proofs().to_vec();
-        // A valid proof of another cell of the second blob, for a column that isn't kept.
+        // A valid proof of another cell of the second blob, for column 127, which isn't kept.
         proofs[2 * CELLS_PER_EXT_BLOB - 1] = proofs[2 * CELLS_PER_EXT_BLOB - 2];
-        let cells = BlobTxCellSidecar::new(
-            all.commitments().to_vec(),
-            proofs,
-            all.get_cells(mask).unwrap(),
-            mask,
-        )
-        .unwrap();
 
-        // The kept cells match their proofs, so only the extension catches it.
-        cells.validate(&all.versioned_hashes().collect::<Vec<_>>(), settings()).unwrap();
-        assert!(matches!(
-            cells.extend(settings()),
-            Err(BlobTransactionValidationError::InvalidProof)
-        ));
+        // The data columns are extended from the blob, and every other column is recovered.
+        for mask in
+            [BlobCellMask::from_bits(u64::MAX.into()), BlobCellMask::from_bits(u128::MAX / 3)]
+        {
+            let cells = BlobTxCellSidecar::new(
+                all.commitments().to_vec(),
+                proofs.clone(),
+                all.get_cells(mask).unwrap(),
+                mask,
+            )
+            .unwrap();
+
+            // The kept cells match their proofs, so only the extension catches it.
+            cells.validate(&all.versioned_hashes().collect::<Vec<_>>(), settings()).unwrap();
+            assert!(matches!(
+                cells.extend(settings()),
+                Err(BlobTransactionValidationError::InvalidProof)
+            ));
+        }
     }
 }
