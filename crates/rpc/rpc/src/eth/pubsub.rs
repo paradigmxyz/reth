@@ -564,6 +564,14 @@ impl SharedFeed {
     }
 }
 
+/// Most addresses, and most values in each topic position, a logs subscription may filter on.
+///
+/// Matches geth's limit for log filters.
+const MAX_SUBSCRIPTION_FILTER_VALUES: usize = 1_000;
+
+/// Most transaction hashes a `transactionReceipts` subscription may filter on.
+const MAX_SUBSCRIPTION_TRANSACTION_HASHES: usize = 1_000;
+
 /// An `eth_subscribe` request with its parameters resolved for the requested kind.
 enum Subscription {
     NewHeads,
@@ -583,7 +591,19 @@ impl Subscription {
             (SubscriptionKind::NewHeads, _) => Ok(Self::NewHeads),
             // Alloy decodes an object with `transactionHashes` as receipt params and drops its
             // `address` and `topics`, so it is rejected instead of being served as every log.
-            (SubscriptionKind::Logs, Params::Logs(filter)) => Ok(Self::Logs(filter)),
+            (SubscriptionKind::Logs, Params::Logs(filter)) => {
+                if filter.address.len() > MAX_SUBSCRIPTION_FILTER_VALUES ||
+                    filter
+                        .topics
+                        .iter()
+                        .any(|topic| topic.len() > MAX_SUBSCRIPTION_FILTER_VALUES)
+                {
+                    return Err(invalid_params_rpc_err(format!(
+                        "logs filter exceeds {MAX_SUBSCRIPTION_FILTER_VALUES} values per field"
+                    )))
+                }
+                Ok(Self::Logs(filter))
+            }
             (SubscriptionKind::Logs, Params::None) => Ok(Self::Logs(Box::default())),
             (SubscriptionKind::NewPendingTransactions, Params::Bool(true)) => {
                 Ok(Self::FullPendingTransactions)
@@ -593,6 +613,15 @@ impl Subscription {
             }
             (SubscriptionKind::Syncing, _) => Ok(Self::Syncing),
             (SubscriptionKind::TransactionReceipts, Params::TransactionReceipts(filter)) => {
+                if filter
+                    .transaction_hashes
+                    .as_ref()
+                    .is_some_and(|hashes| hashes.len() > MAX_SUBSCRIPTION_TRANSACTION_HASHES)
+                {
+                    return Err(invalid_params_rpc_err(format!(
+                        "transactionReceipts filter exceeds {MAX_SUBSCRIPTION_TRANSACTION_HASHES} hashes"
+                    )))
+                }
                 Ok(Self::TransactionReceipts(filter))
             }
             // Alloy decodes objects without transactionHashes as log filters. Like geth, ignore
@@ -853,6 +882,54 @@ mod tests {
         for notifications in receipts.chain([&mut heads, &mut hashes, &mut full]) {
             assert!(notifications.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn subscription_filters_are_capped() {
+        let addresses: Vec<alloy_primitives::Address> = (0..=MAX_SUBSCRIPTION_FILTER_VALUES as u64)
+            .map(|i| alloy_primitives::Address::left_padding_from(&i.to_be_bytes()))
+            .collect();
+        let mut filter =
+            Filter::new().address(addresses[..MAX_SUBSCRIPTION_FILTER_VALUES].to_vec());
+        assert!(Subscription::from_params(
+            SubscriptionKind::Logs,
+            Some(Params::Logs(Box::new(filter.clone())))
+        )
+        .is_ok());
+        filter = filter.address(addresses);
+        assert!(Subscription::from_params(
+            SubscriptionKind::Logs,
+            Some(Params::Logs(Box::new(filter)))
+        )
+        .is_err());
+
+        let topics: Vec<alloy_primitives::B256> = (0..=MAX_SUBSCRIPTION_FILTER_VALUES as u64)
+            .map(|i| alloy_primitives::B256::from(alloy_primitives::U256::from(i)))
+            .collect();
+        let filter = Filter::new().event_signature(topics);
+        assert!(Subscription::from_params(
+            SubscriptionKind::Logs,
+            Some(Params::Logs(Box::new(filter)))
+        )
+        .is_err());
+
+        let hashes: Vec<TxHash> = (0..=MAX_SUBSCRIPTION_TRANSACTION_HASHES as u64)
+            .map(|i| TxHash::from(alloy_primitives::U256::from(i)))
+            .collect();
+        let ok = TransactionReceiptsParams {
+            transaction_hashes: Some(hashes[..MAX_SUBSCRIPTION_TRANSACTION_HASHES].to_vec()),
+        };
+        assert!(Subscription::from_params(
+            SubscriptionKind::TransactionReceipts,
+            Some(Params::TransactionReceipts(ok))
+        )
+        .is_ok());
+        let too_many = TransactionReceiptsParams { transaction_hashes: Some(hashes) };
+        assert!(Subscription::from_params(
+            SubscriptionKind::TransactionReceipts,
+            Some(Params::TransactionReceipts(too_many))
+        )
+        .is_err());
     }
 
     #[test]
