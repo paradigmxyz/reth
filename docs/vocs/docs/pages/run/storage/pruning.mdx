@@ -14,8 +14,8 @@ data is retained.
 ## Basic concepts
 
 -   Archive node - retains all historical data from genesis.
--   Full node - keeps current state and a 10,064-block historical state window,
-    while pruning selected historical data.
+-   Full node - keeps current state and a 262,144-block historical state window
+    (the EIP-8252 reorg retention window), while pruning selected historical data.
 -   Minimal node - uses the most aggressive built-in pruning profile for small
     disk usage.
 -   Custom-pruned node - uses [custom pruning configuration](/run/configuration#the-prune-section)
@@ -53,9 +53,9 @@ Full mode configures:
 
 -   sender recovery pruning: full
 -   transaction lookup pruning: disabled
--   receipts pruning: retain the last 10,064 blocks
--   account history pruning: retain the last 10,064 blocks
--   storage history pruning: retain the last 10,064 blocks
+-   receipts pruning: retain the last 262,144 blocks (EIP-8252 reorg retention window)
+-   account history pruning: retain the last 262,144 blocks (EIP-8252 reorg retention window)
+-   storage history pruning: retain the last 262,144 blocks (EIP-8252 reorg retention window)
 -   bodies pruning: prune pre-Merge bodies on chains with a Paris activation
 
 ### Minimal Storage Mode
@@ -114,26 +114,26 @@ The following tables describe RPC methods available in the full node.
 
 | RPC                                 | Note                                                       |
 | ----------------------------------- | ---------------------------------------------------------- |
-| `debug_accountAt`                   | Only for the last 10064 blocks                             |
-| `debug_accountInfoAt`               | Only for the last 10064 blocks                             |
+| `debug_accountAt`                   | Only for the last 262144 blocks                             |
+| `debug_accountInfoAt`               | Only for the last 262144 blocks                             |
 | `debug_chainConfig`                 |                                                            |
-| `debug_codeByHash`                  | Only for the last 10064 blocks                             |
+| `debug_codeByHash`                  | Only for the last 262144 blocks                             |
 | `debug_dbGet`                       |                                                            |
-| `debug_executionWitness`            | Only for the last 10064 blocks                             |
-| `debug_executionWitnessByBlockHash` | Only for the last 10064 blocks                             |
+| `debug_executionWitness`            | Only for the last 262144 blocks                             |
+| `debug_executionWitnessByBlockHash` | Only for the last 262144 blocks                             |
 | `debug_getBadBlocks`                |                                                            |
 | `debug_getRawBlock`                 |                                                            |
 | `debug_getRawHeader`                |                                                            |
-| `debug_getRawReceipts`              | Only for the last 10064 blocks                             |
+| `debug_getRawReceipts`              | Only for the last 262144 blocks                             |
 | `debug_getRawTransaction`           |                                                            |
 | `debug_getRawTransactions`          |                                                            |
-| `debug_stateRootWithUpdates`        | Only for the last 10064 blocks                             |
-| `debug_traceBlock`                  | Only for the last 10064 blocks                             |
-| `debug_traceBlockByHash`            | Only for the last 10064 blocks                             |
-| `debug_traceBlockByNumber`          | Only for the last 10064 blocks                             |
-| `debug_traceCall`                   | Only for the last 10064 blocks                             |
-| `debug_traceCallMany`               | Only for the last 10064 blocks                             |
-| `debug_traceTransaction`            | Only for the last 10064 blocks                             |
+| `debug_stateRootWithUpdates`        | Only for the last 262144 blocks                             |
+| `debug_traceBlock`                  | Only for the last 262144 blocks                             |
+| `debug_traceBlockByHash`            | Only for the last 262144 blocks                             |
+| `debug_traceBlockByNumber`          | Only for the last 262144 blocks                             |
+| `debug_traceCall`                   | Only for the last 262144 blocks                             |
+| `debug_traceCallMany`               | Only for the last 262144 blocks                             |
+| `debug_traceTransaction`            | Only for the last 262144 blocks                             |
 
 #### `eth` namespace
 
@@ -141,28 +141,28 @@ The following tables describe RPC methods available in the full node.
 | ----------------------------------------- | ---------------------------------------------------------- |
 | `eth_accounts`                            |                                                            |
 | `eth_blockNumber`                         |                                                            |
-| `eth_call`                                | Only for the last 10064 blocks                             |
+| `eth_call`                                | Only for the last 262144 blocks                             |
 | `eth_chainId`                             |                                                            |
-| `eth_createAccessList`                    | Only for the last 10064 blocks                             |
-| `eth_estimateGas`                         | Only for the last 10064 blocks                             |
+| `eth_createAccessList`                    | Only for the last 262144 blocks                             |
+| `eth_estimateGas`                         | Only for the last 262144 blocks                             |
 | `eth_feeHistory`                          |                                                            |
 | `eth_gasPrice`                            |                                                            |
-| `eth_getBalance`                          | Only for the last 10064 blocks                             |
+| `eth_getBalance`                          | Only for the last 262144 blocks                             |
 | `eth_getBlockByHash`                      |                                                            |
 | `eth_getBlockByNumber`                    |                                                            |
-| `eth_getBlockReceipts`                    | Only for the last 10064 blocks                             |
+| `eth_getBlockReceipts`                    | Only for the last 262144 blocks                             |
 | `eth_getBlockTransactionCountByHash`      |                                                            |
 | `eth_getBlockTransactionCountByNumber`    |                                                            |
 | `eth_getCode`                             |                                                            |
 | `eth_getFilterChanges`                    |                                                            |
-| `eth_getFilterLogs`                       | Only for the last 10064 blocks                             |
-| `eth_getLogs`                             | Only for the last 10064 blocks                             |
-| `eth_getStorageAt`                        | Only for the last 10064 blocks                             |
+| `eth_getFilterLogs`                       | Only for the last 262144 blocks                             |
+| `eth_getLogs`                             | Only for the last 262144 blocks                             |
+| `eth_getStorageAt`                        | Only for the last 262144 blocks                             |
 | `eth_getTransactionByBlockHashAndIndex`   |                                                            |
 | `eth_getTransactionByBlockNumberAndIndex` |                                                            |
 | `eth_getTransactionByHash`                |                                                            |
-| `eth_getTransactionCount`                 | Only for the last 10064 blocks                             |
-| `eth_getTransactionReceipt`               | Only for the last 10064 blocks                             |
+| `eth_getTransactionCount`                 | Only for the last 262144 blocks                             |
+| `eth_getTransactionReceipt`               | Only for the last 262144 blocks                             |
 | `eth_getUncleByBlockHashAndIndex`         |                                                            |
 | `eth_getUncleByBlockNumberAndIndex`       |                                                            |
 | `eth_getUncleCountByBlockHash`            |                                                            |
@@ -195,17 +195,17 @@ The following tables describe RPC methods available in the full node.
 
 | RPC / Segment                   | Note                           |
 | ------------------------------- | ------------------------------ |
-| `trace_block`                   | Only for the last 10064 blocks |
-| `trace_blockOpcodeGas`          | Only for the last 10064 blocks |
-| `trace_call`                    | Only for the last 10064 blocks |
-| `trace_callMany`                | Only for the last 10064 blocks |
-| `trace_filter`                  | Only for the last 10064 blocks |
-| `trace_get`                     | Only for the last 10064 blocks |
-| `trace_rawTransaction`          | Only for the last 10064 blocks |
-| `trace_replayBlockTransactions` | Only for the last 10064 blocks |
-| `trace_replayTransaction`       | Only for the last 10064 blocks |
-| `trace_transaction`             | Only for the last 10064 blocks |
-| `trace_transactionOpcodeGas`    | Only for the last 10064 blocks |
+| `trace_block`                   | Only for the last 262144 blocks |
+| `trace_blockOpcodeGas`          | Only for the last 262144 blocks |
+| `trace_call`                    | Only for the last 262144 blocks |
+| `trace_callMany`                | Only for the last 262144 blocks |
+| `trace_filter`                  | Only for the last 262144 blocks |
+| `trace_get`                     | Only for the last 262144 blocks |
+| `trace_rawTransaction`          | Only for the last 262144 blocks |
+| `trace_replayBlockTransactions` | Only for the last 262144 blocks |
+| `trace_replayTransaction`       | Only for the last 262144 blocks |
+| `trace_transaction`             | Only for the last 262144 blocks |
+| `trace_transactionOpcodeGas`    | Only for the last 262144 blocks |
 
 #### `txpool` namespace
 

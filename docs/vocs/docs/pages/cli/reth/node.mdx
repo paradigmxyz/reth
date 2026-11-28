@@ -979,7 +979,7 @@ Dev testnet:
 
 Pruning:
       --full
-          Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are stored
+          Run full node. Account and storage history are retained for the most recent [`REORG_RETENTION_WINDOW`] blocks (EIP-8252), so the post-state of any block within that window can be reconstructed without re-syncing
 
       --minimal
           Run minimal storage mode with maximum pruning and smaller static files.

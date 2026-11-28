@@ -16,6 +16,26 @@ pub const MINIMUM_UNWIND_SAFE_DISTANCE: u64 = 32 * 2 + 10_000;
 /// specifically when `canonical_block_by_hash` needs to reconstruct `ExecutedBlock` from disk.
 pub const MINIMUM_DISTANCE: u64 = 64;
 
+/// EIP-8252 reorg state retention window, measured in blocks.
+///
+/// EIP-8252 ("Execution-Layer Reorg State Retention Window") mandates that, for every canonical
+/// block with number `n` in `[head - REORG_RETENTION_WINDOW, head]`, an execution-layer client
+/// MUST be able to reconstruct that block's post-state without re-syncing. The window is measured
+/// from the chain head (not from the finalized block) and spans the maximum non-finality period
+/// bounded by the consensus-layer inactivity leak:
+///
+/// `8192 epochs * 32 slots/epoch = 262_144 blocks` (= 2^18, ~36.4 days at 12s slots).
+///
+/// This is the default amount of account and storage history a full node retains, so that it can
+/// unwind to and reconstruct the post-state of any block inside the window. State older than this
+/// window MAY be discarded.
+///
+/// It is intentionally decoupled from [`MINIMUM_UNWIND_SAFE_DISTANCE`], which is only the minimum
+/// reorg / manual-unwind safety margin (a much smaller value) and serves a different purpose.
+///
+/// See <https://eips.ethereum.org/EIPS/eip-8252>.
+pub const REORG_RETENTION_WINDOW: u64 = 8192 * 32;
+
 /// Type of history that can be pruned
 #[derive(Debug, Error, PartialEq, Eq, Clone)]
 pub enum UnwindTargetPrunedError {
@@ -249,6 +269,13 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
     use serde::Deserialize;
+
+    #[test]
+    fn reorg_retention_window_matches_eip8252() {
+        // EIP-8252: 8192 epochs * 32 slots/epoch = 2^18 = 262_144 blocks.
+        assert_eq!(REORG_RETENTION_WINDOW, 262_144);
+        assert_eq!(REORG_RETENTION_WINDOW, 1 << 18);
+    }
 
     #[test]
     fn test_deserialize_opt_prune_mode_with_min_blocks() {

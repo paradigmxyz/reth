@@ -418,7 +418,7 @@ mod tests {
         empty_manifest, history_checkpoints, set_history_checkpoints, set_layout,
     };
     use reth_db::{models::StoredBlockBodyIndices, test_utils::create_test_rw_db, Database};
-    use reth_prune_types::UnwindTargetPrunedError;
+    use reth_prune_types::{UnwindTargetPrunedError, REORG_RETENTION_WINDOW};
 
     #[test]
     fn write_prune_checkpoints_sets_all_segments() -> eyre::Result<()> {
@@ -574,17 +574,19 @@ mod tests {
 
         assert_eq!(config.prune.segments.sender_recovery, Some(PruneMode::Full));
         assert_eq!(config.prune.segments.transaction_lookup, None);
+        // EIP-8252: the full preset retains receipts/account/storage history for the reorg
+        // retention window so any block inside it can be unwound to and reconstructed.
         assert_eq!(
             config.prune.segments.receipts,
-            Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE))
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
         );
         assert_eq!(
             config.prune.segments.account_history,
-            Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE))
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
         );
         assert_eq!(
             config.prune.segments.storage_history,
-            Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE))
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
         );
 
         let paris_block = chain_spec

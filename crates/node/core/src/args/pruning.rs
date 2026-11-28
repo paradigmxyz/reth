@@ -7,6 +7,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{
     PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
+    REORG_RETENTION_WINDOW,
 };
 use std::{collections::BTreeMap, ops::Not, sync::OnceLock};
 
@@ -70,9 +71,15 @@ impl Default for DefaultPruningValues {
             full_prune_modes: PruneModes {
                 sender_recovery: Some(PruneMode::Full),
                 transaction_lookup: None,
-                receipts: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
-                account_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
-                storage_history: Some(PruneMode::Distance(MINIMUM_UNWIND_SAFE_DISTANCE)),
+                // EIP-8252: a full node must retain enough history to reconstruct the post-state of
+                // any canonical block within the reorg retention window (262_144 blocks from head).
+                // Receipts share the window because unwinding to a block inside it removes receipts
+                // above that block, which would otherwise fail against the pruned receipts anchor.
+                // This is decoupled from the much smaller `MINIMUM_UNWIND_SAFE_DISTANCE`
+                // reorg-safety margin used for other segments.
+                receipts: Some(PruneMode::Distance(REORG_RETENTION_WINDOW)),
+                account_history: Some(PruneMode::Distance(REORG_RETENTION_WINDOW)),
+                storage_history: Some(PruneMode::Distance(REORG_RETENTION_WINDOW)),
                 // This field is ignored when full_bodies_history_use_pre_merge is true
                 bodies_history: None,
                 receipts_log_filter: Default::default(),
@@ -143,8 +150,9 @@ impl PruneConfigKind {
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
 #[command(next_help_heading = "Pruning")]
 pub struct PruningArgs {
-    /// Run full node. Only the most recent [`MINIMUM_UNWIND_SAFE_DISTANCE`] block states are
-    /// stored.
+    /// Run full node. Account and storage history are retained for the most recent
+    /// [`REORG_RETENTION_WINDOW`] blocks (EIP-8252), so the post-state of any block within that
+    /// window can be reconstructed without re-syncing.
     #[arg(long, default_value_t = false, conflicts_with = "minimal")]
     pub full: bool,
 
@@ -477,6 +485,37 @@ mod tests {
         let mut config = ReceiptsLogPruneConfig::default();
         config.0.insert(Address::with_last_byte(3), PruneMode::Before(5000000));
         assert_eq!(args.receipts_log_filter, Some(config));
+    }
+
+    #[test]
+    fn full_node_retains_eip8252_reorg_window() {
+        let chain_spec = MAINNET.as_ref();
+        let full_config =
+            PruningArgs { full: true, ..Default::default() }.prune_config(chain_spec).unwrap();
+
+        // EIP-8252: a full node must be able to reconstruct the post-state of any canonical block
+        // within REORG_RETENTION_WINDOW blocks of head, i.e. retain at least that much
+        // account/storage history by default. Receipts share the window so an unwind into it does
+        // not fail against the pruned receipts anchor.
+        assert_eq!(
+            full_config.segments.account_history,
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
+        );
+        assert_eq!(
+            full_config.segments.storage_history,
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
+        );
+        assert_eq!(
+            full_config.segments.receipts,
+            Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
+        );
+
+        for mode in [full_config.segments.account_history, full_config.segments.storage_history] {
+            match mode {
+                Some(PruneMode::Distance(distance)) => assert!(distance >= REORG_RETENTION_WINDOW),
+                other => panic!("expected distance-based history pruning, got {other:?}"),
+            }
+        }
     }
 
     #[test]
