@@ -199,7 +199,15 @@ where
                 self.inner.set_committed();
                 Err(Error::BotchedTransaction)
             }
-            Err(e) => Err(e),
+            Err(e) => {
+                // MDBX ends the transaction on every failed commit except a thread mismatch. A
+                // second abort in `Drop` would fail with `BadTxn`, or abort the next write
+                // transaction, which reuses the same handle.
+                if e.to_err_code() != ffi::MDBX_THREAD_MISMATCH {
+                    self.inner.set_committed();
+                }
+                Err(e)
+            }
         }
     }
 

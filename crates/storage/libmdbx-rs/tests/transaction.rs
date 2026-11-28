@@ -380,3 +380,41 @@ fn test_stat_dupsort() {
         assert_eq!(stat.entries(), 8);
     }
 }
+
+/// A failed commit already ends the transaction, so dropping a cursor that outlives it must not
+/// abort the next write transaction, which reuses the same handle.
+#[test]
+fn test_failed_commit_does_not_abort_next_txn() {
+    const MAP_SIZE: usize = 1024 * 1024;
+
+    let dir = tempdir().unwrap();
+    let env = Environment::builder()
+        .set_geometry(Geometry {
+            size: Some(MAP_SIZE..=MAP_SIZE),
+            page_size: Some(PageSize::Set(4096)),
+            ..Default::default()
+        })
+        .open(dir.path())
+        .unwrap();
+
+    // Write one key per commit until a commit itself runs out of space.
+    let cursor = (0u32..2_000)
+        .find_map(|i| {
+            let txn = env.begin_rw_txn().unwrap();
+            let db = txn.open_db(None).unwrap();
+            txn.put(db.dbi(), i.to_be_bytes(), [0; 1_000], WriteFlags::empty()).unwrap();
+            let cursor = txn.cursor(db.dbi()).unwrap();
+            txn.commit().err().map(|err| {
+                assert_eq!(err, Error::MapFull);
+                cursor
+            })
+        })
+        .expect("a commit fails with MapFull");
+
+    let txn = env.begin_rw_txn().unwrap();
+    // Releases the last reference to the failed transaction.
+    drop(cursor);
+    let db = txn.open_db(None).unwrap();
+    assert_eq!(txn.get::<()>(db.dbi(), &0u32.to_be_bytes()).unwrap(), Some(()));
+    txn.commit().unwrap();
+}
