@@ -22,6 +22,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 reth-tracing.workspace = true
+futures-util = { workspace = true, features = ["async-await"] }
 tokio = { workspace = true, features = ["macros", "sync", "test-util"] }
 
 [features]
