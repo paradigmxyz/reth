@@ -112,7 +112,7 @@ pub enum EthApiError {
     #[error("excess blob gas missing in the EVM's environment after Cancun")]
     ExcessBlobGasNotSet,
     /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
-    /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
+    /// `eth_sendTransaction`, `eth_simulateV1`) contains conflicting fields (legacy, EIP-1559).
     #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
     ConflictingFeeFieldsInRequest,
     /// Errors related to invalid transactions
