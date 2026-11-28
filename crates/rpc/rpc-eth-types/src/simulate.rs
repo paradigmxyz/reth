@@ -8,13 +8,22 @@ use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
-use alloy_primitives::{keccak256, map::AddressMap, Address, Bytes, TxKind, U256};
+use alloy_primitives::{
+    keccak256,
+    map::{AddressMap, AddressSet},
+    Address, Bytes, Log, TxKind, U256,
+};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{
+    bytecode::Bytecode,
+    interpreter::{InstrStop, Interpreter, Message, MessageResult},
+    precompiles::MovePrecompileError,
+    EvmFeatures, EvmTypes, Inspector, InspectorConfig, TxResult,
+};
 use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
@@ -299,6 +308,153 @@ pub fn apply_precompile_overrides(
     Ok(())
 }
 
+/// Installs the inspector that runs empty code for a delegation to an active native precompile.
+///
+/// `native_precompiles` is the fork set captured before this block's `movePrecompileToAddress`
+/// moves. A `code` override removes that precompile for this block only; the next block builds a
+/// fresh EVM and restores the fork set. The override bytecode stays in state.
+///
+/// The inspector is installed when a traced transfer log is requested or an active native
+/// precompile holds code. Other simulations keep the fast path.
+pub fn install_precompile_delegation_inspector(
+    evm: &mut impl RethEvm,
+    native_precompiles: &[Address],
+    state_overrides: Option<&StateOverride>,
+    trace_transfers: bool,
+) -> Result<(), EthApiError> {
+    if let Some(state_overrides) = state_overrides {
+        for (address, account) in state_overrides {
+            if account.code.is_some() {
+                evm.remove_precompile(address);
+            }
+        }
+    }
+
+    let active_with_code = active_native_precompiles_with_code(evm, native_precompiles)?;
+    if trace_transfers || !active_with_code.is_empty() {
+        evm.set_inspector(PrecompileDelegationInspector::new(active_with_code, trace_transfers));
+    }
+    Ok(())
+}
+
+/// Native precompiles that are still active and have non-empty code.
+///
+/// Delegation to one of these addresses executes empty code. A move destination outside this set
+/// is omitted, so a delegation there runs the account code.
+fn active_native_precompiles_with_code(
+    evm: &mut impl RethEvm,
+    native_precompiles: &[Address],
+) -> Result<AddressSet, BlockExecutionError> {
+    let mut active_with_code = AddressSet::default();
+    for address in native_precompiles {
+        if evm.has_precompile(address) &&
+            let Some(info) = evm.account_info(address)? &&
+            !info.is_empty_code_hash()
+        {
+            active_with_code.insert(*address);
+        }
+    }
+    Ok(active_with_code)
+}
+
+/// Clears bytecode loaded for a delegation to an active native precompile.
+///
+/// Direct calls still dispatch on the original callee, so an active precompile runs unchanged.
+/// The account code is left in state.
+///
+/// When `transfers` is set, its hooks run after that adjustment and keep the `traceTransfers` logs.
+struct PrecompileDelegationInspector {
+    /// Active native precompiles whose accounts hold code.
+    active_with_code: AddressSet,
+    /// Collects `traceTransfers` logs when the request asked for them.
+    transfers: Option<TransferInspector>,
+}
+
+impl PrecompileDelegationInspector {
+    fn new(active_with_code: AddressSet, trace_transfers: bool) -> Self {
+        Self {
+            active_with_code,
+            transfers: trace_transfers.then(|| TransferInspector::new(false).with_logs(true)),
+        }
+    }
+
+    /// Returns the traced transfer logs, or `None` when transfers are not being traced.
+    fn take_transfer_logs(&mut self) -> Option<Vec<Log>> {
+        self.transfers.as_mut().map(TransferInspector::take_logs)
+    }
+}
+
+impl<T: EvmTypes> Inspector<T> for PrecompileDelegationInspector {
+    fn inspector_config(&self) -> InspectorConfig {
+        InspectorConfig::without_steps()
+    }
+
+    fn log(&mut self, log: &Log, host: &mut T::Host<'_>) {
+        if let Some(transfers) = &mut self.transfers {
+            <TransferInspector as Inspector<T>>::log(transfers, log, host);
+        }
+    }
+
+    fn call(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &mut Message<T>,
+    ) -> Option<MessageResult<T>> {
+        // `code_address` differs from the callee only after EIP-7702 resolution. A direct call
+        // keeps them equal and still dispatches the precompile.
+        if message.code_address != message.call_target &&
+            self.active_with_code.contains(&message.code_address)
+        {
+            message.code = Bytecode::default();
+        }
+        self.transfers.as_mut().and_then(|transfers| transfers.call(interp, message))
+    }
+
+    fn call_end(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &Message<T>,
+        result: &mut MessageResult<T>,
+    ) {
+        if let Some(transfers) = &mut self.transfers {
+            transfers.call_end(interp, message, result);
+        }
+    }
+
+    fn create(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &mut Message<T>,
+    ) -> Option<MessageResult<T>> {
+        self.transfers.as_mut().and_then(|transfers| transfers.create(interp, message))
+    }
+
+    fn create_end(
+        &mut self,
+        interp: &mut Interpreter<'_, '_, T>,
+        message: &Message<T>,
+        result: &mut MessageResult<T>,
+    ) {
+        if let Some(transfers) = &mut self.transfers {
+            transfers.create_end(interp, message, result);
+        }
+    }
+
+    fn selfdestruct(
+        &mut self,
+        contract: &Address,
+        target: &Address,
+        value: &U256,
+        host: &mut T::Host<'_>,
+    ) {
+        if let Some(transfers) = &mut self.transfers {
+            <TransferInspector as Inspector<T>>::selfdestruct(
+                transfers, contract, target, value, host,
+            );
+        }
+    }
+}
+
 /// Converts all [`TransactionRequest`]s into [`Recovered`] transactions and applies them to the
 /// given [`BlockBuilder`].
 ///
@@ -407,13 +563,13 @@ where
         })?;
 
         // The transfer tracer keeps the transaction's logs, with the synthetic transfer logs
-        // among them, outside the EVM's own logs.
-        // SAFETY: `TransferInspector` has no lifetime parameters.
-        if let Some(logs) = unsafe {
-            builder
-                .evm_mut()
-                .with_inspector(|inspector: &mut TransferInspector| inspector.take_logs())
-        } && let Some(result) = results.last_mut()
+        // among them, outside the EVM's own logs. Absent when this block is not tracing transfers.
+        // SAFETY: `PrecompileDelegationInspector` has no lifetime parameters.
+        if let Some(Some(logs)) = (unsafe {
+            builder.evm_mut().with_inspector(|inspector: &mut PrecompileDelegationInspector| {
+                inspector.take_transfer_logs()
+            })
+        }) && let Some(result) = results.last_mut()
         {
             result.logs = logs;
         }
@@ -726,8 +882,8 @@ impl SimulatedState {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
-        SimulatedState, INTERNAL_ERROR_CODE,
+        apply_precompile_overrides, install_precompile_delegation_inspector, sanitize_chain,
+        EthSimulateError, ProviderResult, SimulatedState, INTERNAL_ERROR_CODE,
     };
     use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
@@ -735,7 +891,7 @@ mod tests {
     use alloy_primitives::{
         address, keccak256,
         map::{AddressMap, B256Map},
-        Address, B256, U256,
+        Address, Bytes, B256, U256,
     };
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
@@ -885,6 +1041,36 @@ mod tests {
         let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
         assert!(!precompiles.contains(&source));
         assert!(precompiles.contains(&dest));
+    }
+
+    #[test]
+    fn code_override_removes_only_that_precompile() {
+        let sha256 = Address::with_last_byte(2);
+        let ecrecover = Address::with_last_byte(1);
+        let plain = address!("00000000000000000000000000000000000000c3");
+        let mut state_overrides = StateOverride::default();
+        state_overrides.insert(
+            sha256,
+            AccountOverride { code: Some(Bytes::from_static(&[0x00])), ..Default::default() },
+        );
+        state_overrides.insert(
+            ecrecover,
+            AccountOverride { balance: Some(U256::from(1)), ..Default::default() },
+        );
+        state_overrides.insert(
+            plain,
+            AccountOverride { code: Some(Bytes::from_static(&[0x00])), ..Default::default() },
+        );
+        let mut evm = test_evm();
+        let native: Vec<_> =
+            evm.precompiles().precompile_ids().into_iter().map(|(address, _)| address).collect();
+
+        install_precompile_delegation_inspector(&mut evm, &native, Some(&state_overrides), false)
+            .unwrap();
+
+        let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
+        assert!(!precompiles.contains(&sha256));
+        assert!(precompiles.contains(&ecrecover));
     }
 
     #[test]

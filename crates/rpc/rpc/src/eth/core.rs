@@ -1877,6 +1877,133 @@ mod tests {
                 assert_eq!(U256::from_be_slice(&result.return_data[..32]), U256::from(index + 1));
                 assert_eq!(U256::from_be_slice(&result.return_data[32..]), U256::from(1));
             }
+            let first = &blocks[0].calls[0];
+            if trace_transfers {
+                assert!(
+                    first.logs.iter().any(|log| log.address() == Address::repeat_byte(0xee)),
+                    "{:?}",
+                    first.logs
+                );
+            } else {
+                assert!(first.logs.is_empty(), "{:?}", first.logs);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn simulate_delegation_to_restored_precompile_runs_empty_code() {
+        // Block 1 overrides SHA-256 (0x02) with bytecode that returns 0x2a and delegates 0xc3 to
+        // it. Block 2 does not override 0x02: the delegation must return empty code, while a
+        // direct call runs SHA-256. Block 3 moves the precompile, so the delegation runs the code
+        // that stayed in state.
+        let sender = alloy_primitives::address!("c000000000000000000000000000000000000000");
+        let delegator = alloy_primitives::address!("c300000000000000000000000000000000000000");
+        let precompile = Address::with_last_byte(0x02);
+        let moved = alloy_primitives::address!("0000000000000000000000000000000000123456");
+        let delegation = evm2::bytecode::Bytecode::new_eip7702(precompile).bytes().clone();
+        let override_code = alloy_primitives::bytes!("602a60005260206000f3");
+        let mut override_word = [0u8; 32];
+        override_word[31] = 0x2a;
+        let override_return = Bytes::from(override_word);
+        let sha256_input = alloy_primitives::bytes!("1234");
+        let sha256_output = Bytes::copy_from_slice(
+            alloy_primitives::b256!(
+                "3a103a4e5729ad68c02a678ae39accfbc0ae208096437401b7ceab63cca0622f"
+            )
+            .as_slice(),
+        );
+        let call = |to, nonce, input: Bytes| {
+            TransactionRequest::default()
+                .with_from(sender)
+                .with_to(to)
+                .with_nonce(nonce)
+                .with_gas_limit(100_000)
+                .with_gas_price(0)
+                .input(input.into())
+        };
+
+        let genesis =
+            Genesis::default().with_gas_limit(30_000_000).with_base_fee(Some(0)).extend_accounts([
+                (sender, GenesisAccount::default().with_balance(U256::from(1_000_000))),
+            ]);
+        let chain_spec =
+            Arc::new(ChainSpecBuilder::mainnet().prague_activated().genesis(genesis).build());
+        let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+        init_genesis(&factory).unwrap();
+        let provider = BlockchainProvider::new(factory).unwrap();
+        let api = EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build();
+
+        for trace_transfers in [false, true] {
+            let blocks = EthCall::simulate_v1(
+                &api,
+                SimulatePayload {
+                    validation: true,
+                    trace_transfers,
+                    block_state_calls: vec![
+                        SimBlock {
+                            state_overrides: Some(StateOverride::from_iter([
+                                (
+                                    precompile,
+                                    AccountOverride {
+                                        code: Some(override_code.clone()),
+                                        ..Default::default()
+                                    },
+                                ),
+                                (
+                                    delegator,
+                                    AccountOverride {
+                                        code: Some(delegation.clone()),
+                                        ..Default::default()
+                                    },
+                                ),
+                            ])),
+                            ..Default::default()
+                        }
+                        .call(call(delegator, 0, Bytes::new()))
+                        .call(call(precompile, 1, sha256_input.clone())),
+                        SimBlock::default().call(call(delegator, 2, Bytes::new())).call(call(
+                            precompile,
+                            3,
+                            sha256_input.clone(),
+                        )),
+                        SimBlock {
+                            state_overrides: Some(StateOverride::from_iter([(
+                                precompile,
+                                AccountOverride {
+                                    move_precompile_to: Some(moved),
+                                    ..Default::default()
+                                },
+                            )])),
+                            ..Default::default()
+                        }
+                        .call(call(delegator, 4, Bytes::new()))
+                        .call(call(moved, 5, sha256_input.clone())),
+                    ],
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(blocks[0].calls[0].return_data, override_return, "{:?}", blocks[0].calls[0]);
+            assert!(blocks[0].calls[0].status, "{:?}", blocks[0].calls[0]);
+            assert_eq!(blocks[0].calls[1].return_data, override_return, "{:?}", blocks[0].calls[1]);
+            assert!(blocks[0].calls[1].status, "{:?}", blocks[0].calls[1]);
+            assert!(blocks[1].calls[0].return_data.is_empty(), "{:?}", blocks[1].calls[0]);
+            assert!(blocks[1].calls[0].status, "{:?}", blocks[1].calls[0]);
+            assert_eq!(blocks[1].calls[1].return_data, sha256_output, "{:?}", blocks[1].calls[1]);
+            assert!(blocks[1].calls[1].status, "{:?}", blocks[1].calls[1]);
+            assert_eq!(blocks[2].calls[0].return_data, override_return, "{:?}", blocks[2].calls[0]);
+            assert!(blocks[2].calls[0].status, "{:?}", blocks[2].calls[0]);
+            assert_eq!(blocks[2].calls[1].return_data, sha256_output, "{:?}", blocks[2].calls[1]);
+            assert!(blocks[2].calls[1].status, "{:?}", blocks[2].calls[1]);
         }
     }
 

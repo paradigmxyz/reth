@@ -16,7 +16,7 @@ use alloy_rpc_types_eth::{
     BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use evm2::evm::{CacheDB, DynDatabase};
-use evm2_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use evm2_inspectors::access_list::AccessListInspector;
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{ProviderError, RethError};
@@ -224,22 +224,35 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
                     // EIP-7708 already emits transfer logs: https://eips.ethereum.org/EIPS/eip-7708
                     let trace_transfers =
                         trace_transfers && !evm_env.version().feature(evm2::EvmFeatures::EIP7708);
-                    let mut evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
-                    if trace_transfers {
-                        // prepare inspector to capture transfer inside the evm so they are recorded
-                        // and included in logs
-                        evm.set_inspector(TransferInspector::new(false).with_logs(true));
-                    }
+                    let evm = this.evm_config().evm_with_env(&mut db, evm_env.clone());
                     let mut builder =
                         this.evm_config().create_block_builder(evm, evm_env, &parent, ctx);
                     if build_bal {
                         builder.executor_mut().enable_block_access_list_builder();
                     }
 
-                    if let Some(ref state_overrides) = state_overrides {
+                    // Native fork addresses, captured before this block's moves. A later block
+                    // restores this set on a fresh EVM.
+                    let native_precompiles: Vec<_> = builder
+                        .evm()
+                        .precompile_ids()
+                        .into_iter()
+                        .map(|(address, _)| address)
+                        .collect();
+                    if let Some(state_overrides) = state_overrides.as_ref() {
                         simulate::apply_precompile_overrides(state_overrides, builder.evm_mut())
-                            .map_err(|e| Self::Error::from_eth_err(EthApiError::other(e)))?;
+                            .map_err(|err| Self::Error::from_eth_err(EthApiError::other(err)))?;
                     }
+                    // A code override turns that precompile off for this block. Delegation to a
+                    // precompile that is active again runs empty code, while the bytecode stays
+                    // in state.
+                    simulate::install_precompile_delegation_inspector(
+                        builder.evm_mut(),
+                        &native_precompiles,
+                        state_overrides.as_ref(),
+                        trace_transfers,
+                    )
+                    .map_err(map_err)?;
 
                     let (result, results) = simulate::execute_transactions(
                         builder,

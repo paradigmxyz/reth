@@ -138,6 +138,16 @@ pub trait Evm {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError>;
 
+    /// Removes the precompile at `address` from this EVM.
+    ///
+    /// Returns `false` when no precompile is installed there, including when the provider is not
+    /// the standard precompile map. The stored account is left unchanged. Panics if called while
+    /// the EVM is executing.
+    fn remove_precompile(&mut self, address: &Address) -> bool {
+        let _ = address;
+        false
+    }
+
     /// Executes a transaction, lets `observe` inspect the executed transaction and its state
     /// changes, then discards its writes.
     fn transact_and_discard<R>(
@@ -240,6 +250,20 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         moves: impl IntoIterator<Item = (Address, Address)>,
     ) -> Result<(), evm2::precompiles::MovePrecompileError> {
         self.precompiles_mut().move_precompiles(&moves.into_iter().collect::<Vec<_>>())
+    }
+
+    fn remove_precompile(&mut self, address: &Address) -> bool {
+        let precompiles: &mut (dyn evm2::evm::NonStaticAny + 'a) = &mut **self.precompiles_mut();
+        if evm2::evm::NonStaticAny::type_id(precompiles) !=
+            core::any::TypeId::of::<evm2::Precompiles<T>>()
+        {
+            return false
+        }
+        // SAFETY: the type ID check shows that the provider is `Precompiles<T>`. `T: EvmTypes` is
+        // `'static` and `Precompiles<T>` stores no borrowed data, so erasing the provider object's
+        // lifetime does not extend a borrow.
+        let precompiles = unsafe { precompiles.downcast_mut_unchecked::<evm2::Precompiles<T>>() };
+        precompiles.as_map_mut().remove(*address).is_some()
     }
 
     fn transact_and_discard<R>(
