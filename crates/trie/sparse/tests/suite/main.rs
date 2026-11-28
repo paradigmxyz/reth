@@ -215,7 +215,7 @@ sparse_trie_tests! {
 
     // reveal_nodes
     test_reveal_nodes_empty_slice,
-    test_reveal_nodes_rejects_missing_extension_branch,
+    test_reveal_nodes_rejects_nonbranch_extension_child,
     test_reveal_nodes_single_leaf,
     test_reveal_nodes_idempotent,
     test_reveal_nodes_with_branch_masks,
@@ -227,6 +227,14 @@ sparse_trie_tests! {
     test_insert_then_reveal_does_not_overwrite_branch,
 
     // standard_proofs
+    test_standalone_extensions,
+    test_standalone_extension_embedded_branch,
+    test_standalone_extension_boundary_hydration,
+    test_standalone_extension_pending_update_collapse,
+    test_standalone_extension_parallel_collapse_requires_proof,
+    test_standalone_extension_collapse_across_arenas,
+    test_standalone_extension_prune_and_reveal,
+    test_standalone_extension_split_and_collapse,
     root_extension_branch_pair_preserves_updates,
     nonroot_extension_branch_pair_preserves_updates,
     duplicate_calculator_extension_pairs_preserve_updates,

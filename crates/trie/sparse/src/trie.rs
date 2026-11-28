@@ -51,7 +51,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
 
     /// Reveals the root from a V2 calculator batch, converting a blind trie into a revealed one.
     ///
-    /// `nodes` must contain the root and, for an extension root, its separate branch child.
+    /// `nodes` must contain the root. An extension's branch child may be revealed later.
     /// The root and its branch may be consumed; other proof nodes are left for revelation.
     /// The retention flag controls whether trie updates should be tracked.
     ///
