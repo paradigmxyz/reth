@@ -576,7 +576,6 @@ fn frame_request_to_evm2(
             .map(TryInto::try_into)
             .collect::<Result<_, _>>()
             .map_err(EthTxEnvError::Eip8141InvalidFields)?,
-        signatures: request.signatures.unwrap_or_default(),
         fees: TransactionFees {
             max_fee: request
                 .max_fee

@@ -23,6 +23,7 @@ pub struct FrameValidationInspector {
     sender: Address,
     policy: FrameValidationPolicy,
     current_frame: Option<usize>,
+    current_proof: bool,
     error: Option<&'static str>,
     database_error: Option<DatabaseError>,
     accounts: BTreeSet<Address>,
@@ -39,6 +40,7 @@ impl FrameValidationInspector {
             sender,
             policy,
             current_frame: None,
+            current_proof: false,
             error: None,
             database_error: None,
             accounts: BTreeSet::new(),
@@ -137,10 +139,10 @@ impl FrameValidationInspector {
         allow_empty: bool,
         sender_entry: bool,
     ) -> bool {
-        self.code.insert(address);
         if host.precompiles().contains(&address) {
             return true
         }
+        self.code.insert(address);
         let info = match Self::account(host, address) {
             Ok(info) => info,
             Err(error) => {
@@ -200,9 +202,13 @@ impl FrameValidationInspector {
 }
 
 impl<T: EvmTypes> Inspector<T> for FrameValidationInspector {
-    fn frame_start(&mut self, index: usize, frame: &Frame, _: &mut Evm<'_, T>) {
+    fn frame_start(&mut self, index: usize, frame: &Frame, host: &mut Evm<'_, T>) {
         self.current_frame = Some(index);
-        self.code.insert(frame.target_address().unwrap_or(self.sender));
+        self.current_proof = frame.mode == alloy_eips::eip8141::FrameMode::Proof;
+        let target = frame.target_address().unwrap_or(self.sender);
+        if !host.precompiles().contains(&target) {
+            self.code.insert(target);
+        }
         if index >= self.policy.prefix_end {
             self.reject("execution escaped validation prefix");
         }
@@ -229,6 +235,7 @@ impl<T: EvmTypes> Inspector<T> for FrameValidationInspector {
             }
         }
         self.current_frame = None;
+        self.current_proof = false;
     }
 
     fn step(&mut self, interp: &mut Interpreter<'_, '_, T>) {
@@ -256,10 +263,11 @@ impl<T: EvmTypes> Inspector<T> for FrameValidationInspector {
             0xff => self.reject("banned opcode in validation prefix"),
             0x42 if !expiry_timestamp => self.reject("TIMESTAMP outside canonical expiry verifier"),
             0x4b if !recent_root => self.reject("SLOTNUM outside canonical recent root verifier"),
-            0x5a if !matches!(
-                interp.original_bytecode_slice().get(interp.pc() + 1),
-                Some(0xf1 | 0xf2 | 0xf4 | 0xfa)
-            ) =>
+            0x5a if !self.current_proof &&
+                !matches!(
+                    interp.original_bytecode_slice().get(interp.pc() + 1),
+                    Some(0xf1 | 0xf2 | 0xf4 | 0xfa)
+                ) =>
             {
                 self.reject("GAS must immediately precede a call")
             }
@@ -491,6 +499,19 @@ mod tests {
     }
 
     #[test]
+    fn proof_frames_may_observe_their_own_gas_without_a_following_call() {
+        let mut inspector = FrameValidationInspector::new(Address::ZERO, policy());
+        inspector.current_proof = true;
+        let message = Message::<BaseEvmTypes> {
+            code: Bytecode::new_legacy(Bytes::from_static(&[0x5a, 0x50, 0x00])),
+            ..Default::default()
+        };
+        let mut interp = Interpreter::<BaseEvmTypes>::new(&message);
+        inspector.step(&mut interp);
+        assert_eq!(inspector.error(), None);
+    }
+
+    #[test]
     fn factory_nonce_is_a_validation_dependency() {
         let factory = Address::repeat_byte(2);
         let sender = factory.create(0);
@@ -603,8 +624,7 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            let policy =
-                FrameValidationPolicy::new(&payload, payload.signature_verification_gas()).unwrap();
+            let policy = FrameValidationPolicy::new(&payload).unwrap();
             let prefix_end = policy.prefix_end;
             let transaction = Recovered::new_unchecked(TxEnvelope::Eip8141(payload), sender);
             let mut db = InMemoryDB::default();
@@ -749,7 +769,6 @@ mod tests {
             max_cost: U256::ONE,
             prefix_end: 1,
             sender_approved: true,
-            signature_gas: 0,
             execution_gas: 10_000,
             state_gas: 0,
         };

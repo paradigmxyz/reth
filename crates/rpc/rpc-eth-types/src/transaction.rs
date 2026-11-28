@@ -5,11 +5,11 @@
 use crate::EthApiError;
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::{
-    eip8141::FrameSignature,
+    eip8141::{FrameMode, LEANSPHINCS_VERIFIER, P256_VERIFIER, SECP256K1_VERIFIER},
     eip8250::{nonce_slot, NONCE_MANAGER},
 };
 use alloy_primitives::{Address, B256, U256};
-use alloy_rpc_types_eth::{TransactionInfo, TransactionRequest};
+use alloy_rpc_types_eth::{FrameRequest, TransactionInfo, TransactionRequest};
 use evm2::{version::GasId, Version};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{NodePrimitives, Recovered, SignedTransaction};
@@ -120,28 +120,38 @@ impl<T> From<TransactionSource<T>> for Recovered<T> {
     }
 }
 
-/// Returns whether a built-in frame signature has supplied bytes rather than a placeholder.
-/// Arbitrary EVM witnesses do not make an otherwise unsigned request immutable.
-pub fn has_frame_signatures(request: &TransactionRequest) -> bool {
-    request.signatures.as_deref().is_some_and(|signatures| {
-        signatures
-            .iter()
-            .any(|signature| !signature.scheme.is_arbitrary() && !signature.signature.is_empty())
+/// Returns whether proof data prevents mutating fields covered by the signing hash.
+/// Only omitted proofs for known protocol verifiers are simulation placeholders.
+pub fn has_frame_proofs(request: &TransactionRequest) -> bool {
+    request.frames.as_deref().is_some_and(|frames| {
+        frames.iter().any(|frame| {
+            frame.mode == FrameMode::Proof &&
+                (frame.data.len() > 64 ||
+                    !matches!(
+                        frame.target.address(),
+                        Some(SECP256K1_VERIFIER | P256_VERIFIER | LEANSPHINCS_VERIFIER)
+                    ))
+        })
     })
 }
 
-/// Reserves calldata gas for omitted fixed-length signatures using the active gas schedule.
-/// Returns zero for arbitrary witnesses or complete signatures, and errors on gas overflow.
-pub fn frame_signature_padding_gas(
-    signatures: &[FrameSignature],
+/// Reserves calldata gas for omitted fixed-length protocol proofs using the active schedule.
+/// Returns zero for contract proofs or complete witnesses, and errors on gas overflow.
+pub fn frame_proof_padding_gas(
+    frames: &[FrameRequest],
     version: &Version,
 ) -> Result<u64, EthApiError> {
-    let overflow = || EthApiError::InvalidParams("signature gas overflows".into());
-    let bytes = signatures
+    let overflow = || EthApiError::InvalidParams("proof data gas overflows".into());
+    let bytes = frames
         .iter()
-        .filter(|signature| signature.signature.is_empty())
-        .filter_map(|signature| signature.scheme.signature_length())
-        .try_fold(0u64, |sum, length| sum.checked_add(length as u64))
+        .filter(|frame| frame.mode == FrameMode::Proof && frame.data.len() == 64)
+        .filter_map(|frame| match frame.target.address()? {
+            SECP256K1_VERIFIER => Some(65u64),
+            P256_VERIFIER => Some(128u64),
+            LEANSPHINCS_VERIFIER => Some(7740u64),
+            _ => None,
+        })
+        .try_fold(0u64, |sum, length| sum.checked_add(length))
         .ok_or_else(overflow)?;
     if bytes == 0 {
         return Ok(0);
@@ -212,83 +222,91 @@ pub fn resolve_frame_nonce(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxEip8141;
-    use alloy_eips::eip8141::{Frame, FrameMode, SignatureMessage, SignatureScheme};
+    use alloy_eips::eip8141::{Frame, FrameMode};
     use alloy_primitives::Bytes;
     use evm2::{ethereum::eip8141::FrameGas, SpecId};
 
     #[test]
-    fn frame_signature_guards_distinguish_witnesses_and_placeholders() {
-        for (scheme, signature, expected) in [
-            (SignatureScheme::Arbitrary, Bytes::from_static(&[1]), false),
-            (SignatureScheme::Secp256k1, Bytes::new(), false),
-            (SignatureScheme::P256, Bytes::new(), false),
-            (SignatureScheme::Secp256k1, Bytes::from_static(&[1]), true),
-            (SignatureScheme::P256, Bytes::from_static(&[1]), true),
+    fn frame_proof_guards_distinguish_complete_witnesses_and_native_placeholders() {
+        for (target, length, expected) in [
+            (SECP256K1_VERIFIER, 64, false),
+            (P256_VERIFIER, 64, false),
+            (LEANSPHINCS_VERIFIER, 64, false),
+            (SECP256K1_VERIFIER, 129, true),
+            (Address::repeat_byte(7), 64, true),
         ] {
             let request = TransactionRequest {
-                signatures: Some(vec![FrameSignature { scheme, signature, ..Default::default() }]),
+                frames: Some(vec![FrameRequest {
+                    mode: FrameMode::Proof,
+                    target: target.into(),
+                    data: Bytes::from(vec![1; length]),
+                    ..Default::default()
+                }]),
                 ..Default::default()
             };
-            assert_eq!(has_frame_signatures(&request), expected);
+            assert_eq!(has_frame_proofs(&request), expected);
         }
     }
 
     #[test]
-    fn frame_signature_padding_covers_native_gas_for_completed_witnesses() {
+    fn frame_proof_padding_covers_native_gas_for_completed_witnesses() {
         for custom in [false, true] {
             let mut version = Version::new(SpecId::BOGOTA);
             if custom {
                 version.gas_params.set(GasId::TxTokenNonZeroByteMultiplier, 1);
                 version.gas_params.set(GasId::TxFloorZeroByteMultiplier, 4);
-                version.gas_params.set(GasId::TxTokenCost, 3);
-                version.gas_params.set(GasId::TxFloorCostPerToken, 17);
             }
-            let mut tx = TxEip8141 {
-                nonce_keys: Some(vec![]),
-                frames: vec![Frame { mode: FrameMode::Verify, flags: 3, ..Default::default() }],
-                signatures: vec![
-                    FrameSignature {
-                        scheme: SignatureScheme::Secp256k1,
-                        msg: SignatureMessage::explicit(B256::repeat_byte(1)).unwrap(),
+            let mut frames: Vec<FrameRequest> =
+                [SECP256K1_VERIFIER, P256_VERIFIER, LEANSPHINCS_VERIFIER]
+                    .into_iter()
+                    .map(|target| FrameRequest {
+                        mode: FrameMode::Proof,
+                        target: target.into(),
+                        execution_gas: Some(20000),
+                        state_gas: Some(0),
+                        data: Bytes::from(vec![1; 64]),
                         ..Default::default()
-                    },
-                    FrameSignature {
-                        scheme: SignatureScheme::P256,
-                        msg: SignatureMessage::explicit(B256::repeat_byte(2)).unwrap(),
-                        ..Default::default()
-                    },
-                    FrameSignature { signature: Bytes::from_static(&[0xab]), ..Default::default() },
-                ],
+                    })
+                    .collect();
+            let mut tx = alloy_consensus::TxEip8141 {
+                frames: frames
+                    .iter()
+                    .cloned()
+                    .map(Frame::try_from)
+                    .collect::<Result<_, _>>()
+                    .unwrap(),
                 ..Default::default()
             };
             let unsigned = FrameGas::calculate(&tx, &version).unwrap();
-            let padding = frame_signature_padding_gas(&tx.signatures, &version).unwrap();
-            assert!(padding > 0);
-            for signature in &mut tx.signatures {
-                if let Some(length) = signature.scheme.signature_length() {
-                    signature.signature = Bytes::from(vec![0; length]);
-                }
+            let padding = frame_proof_padding_gas(&frames, &version).unwrap();
+            for (frame, length) in frames.iter_mut().zip([65, 128, 7740]) {
+                frame.data = Bytes::from(vec![1; 64 + length]);
             }
+            tx.frames =
+                frames.iter().cloned().map(Frame::try_from).collect::<Result<_, _>>().unwrap();
             let completed = FrameGas::calculate(&tx, &version).unwrap();
             assert!(completed.maximum > unsigned.maximum);
             assert!(unsigned.maximum + padding >= completed.maximum);
-            assert_eq!(frame_signature_padding_gas(&tx.signatures, &version).unwrap(), 0);
+            assert_eq!(frame_proof_padding_gas(&frames, &version).unwrap(), 0);
         }
     }
 
     #[test]
-    fn frame_signature_padding_rejects_overflow_only_when_bytes_are_missing() {
+    fn frame_proof_padding_rejects_overflow_only_when_witnesses_are_missing() {
         let mut version = Version::new(SpecId::BOGOTA);
         version.gas_params.set(GasId::TxTokenNonZeroByteMultiplier, u32::MAX);
         version.gas_params.set(GasId::TxTokenCost, u32::MAX);
-        let signatures =
-            [FrameSignature { scheme: SignatureScheme::Secp256k1, ..Default::default() }];
+        let frames = [FrameRequest {
+            mode: FrameMode::Proof,
+            target: SECP256K1_VERIFIER.into(),
+            data: Bytes::from(vec![1; 64]),
+            ..Default::default()
+        }];
         assert_eq!(
-            frame_signature_padding_gas(&signatures, &version).unwrap_err().to_string(),
-            "signature gas overflows"
+            frame_proof_padding_gas(&frames, &version).unwrap_err().to_string(),
+            "proof data gas overflows"
         );
-        assert_eq!(frame_signature_padding_gas(&[], &version).unwrap(), 0);
+        assert_eq!(frame_proof_padding_gas(&[], &version).unwrap(), 0);
     }
 
     #[test]

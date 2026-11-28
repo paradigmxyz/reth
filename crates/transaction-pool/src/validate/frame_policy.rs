@@ -100,25 +100,26 @@ impl FrameValidationPolicy {
     ///
     /// This is deliberately structural: approval success and receipt semantics are checked by
     /// execution later, and are not inferred from frame flags here.
-    pub fn new(tx: &TxEip8141, signature_validation_gas: u64) -> Result<Self, &'static str> {
-        Self::with_max_verify_gas(tx, signature_validation_gas, MAX_VERIFY_GAS)
+    pub fn new(tx: &TxEip8141) -> Result<Self, &'static str> {
+        Self::with_max_verify_gas(tx, MAX_VERIFY_GAS)
     }
 
-    /// Recognizes a public prefix using a node cap no lower than [`MAX_VERIFY_GAS`].
-    pub fn with_max_verify_gas(
-        tx: &TxEip8141,
-        signature_validation_gas: u64,
-        max_verify_gas: u64,
-    ) -> Result<Self, &'static str> {
-        let max_verify_gas = max_verify_gas.max(MAX_VERIFY_GAS);
-        let mut start = 0;
-        let expiry_index = if tx.frames.first().is_some_and(Frame::is_expiry_verifier) {
-            let frame = &tx.frames[0];
+    /// Recognizes a public prefix using a node cap bounded by [`MAX_VERIFY_GAS`].
+    pub fn with_max_verify_gas(tx: &TxEip8141, max_verify_gas: u64) -> Result<Self, &'static str> {
+        if tx.frames.len() > alloy_eips::eip8141::MAX_FRAMES {
+            return Err("too many frames");
+        }
+        let max_verify_gas = max_verify_gas.min(MAX_VERIFY_GAS);
+        let mut start = alloy_eips::eip8141::validate_proof_prefix(&tx.frames)
+            .map_err(|_| "invalid proof frame prefix")?;
+        let expiry_index = if tx.frames.get(start).is_some_and(Frame::is_expiry_verifier) {
+            let frame = &tx.frames[start];
             if !frame.has_valid_expiry_verifier_fields() {
                 return Err("invalid expiry verifier frame");
             }
-            start = 1;
-            Some(0)
+            let index = start;
+            start += 1;
+            Some(index)
         } else {
             None
         };
@@ -166,11 +167,7 @@ impl FrameValidationPolicy {
             state_gas =
                 state_gas.checked_add(frame.limits.state).ok_or("state gas overflows u64")?;
         }
-        if declared_execution_gas
-            .checked_add(signature_validation_gas)
-            .ok_or("verification gas overflows u64")? >
-            max_verify_gas
-        {
+        if declared_execution_gas > max_verify_gas {
             return Err("verification gas budget exceeded");
         }
         if state_gas > MAX_VERIFY_STATE_GAS {
@@ -307,8 +304,37 @@ mod tests {
             ),
         ];
         for (frames, expected) in cases {
-            assert_eq!(FrameValidationPolicy::new(&tx(frames), 1).unwrap().prefix_end, expected);
+            assert_eq!(FrameValidationPolicy::new(&tx(frames)).unwrap().prefix_end, expected);
         }
+    }
+
+    #[test]
+    fn proof_prefix_precedes_expiry_roots_and_deployment_and_counts_towards_the_cap() {
+        let mut proof = frame(FrameMode::Proof, 0, alloy_eips::eip8141::SECP256K1_VERIFIER.into());
+        proof.data = [vec![1; 32], vec![0; 32]].concat().into();
+        proof.limits.state = 0;
+        let mut transaction = tx(vec![
+            proof,
+            expiry_frame(),
+            recent_root_frame(&[(B256::repeat_byte(1), 7, B256::repeat_byte(2))]),
+            frame(FrameMode::Default, 0, FrameAddress::default()),
+            frame(FrameMode::Verify, 3, sender()),
+        ]);
+        let policy = FrameValidationPolicy::new(&transaction).unwrap();
+        assert_eq!(policy.prefix_end, 5);
+        assert_eq!(policy.expiry_index, Some(1));
+        assert_eq!(policy.recent_root.unwrap().index, 2);
+        assert_eq!(policy.deploy_index, Some(3));
+        assert_eq!(policy.declared_execution_gas, 50);
+        transaction.frames[0].limits.execution = MAX_VERIFY_GAS - 40;
+        assert!(FrameValidationPolicy::new(&transaction).is_ok());
+        transaction.frames[0].limits.execution += 1;
+        assert_eq!(
+            FrameValidationPolicy::new(&transaction),
+            Err("verification gas budget exceeded")
+        );
+        transaction.frames.swap(0, 1);
+        assert_eq!(FrameValidationPolicy::new(&transaction), Err("invalid proof frame prefix"));
     }
 
     #[test]
@@ -316,12 +342,12 @@ mod tests {
         let expiry = expiry_frame();
         let s = sender();
         let mut t = tx(vec![expiry, frame(FrameMode::Verify, 3, s)]);
-        let p = FrameValidationPolicy::new(&t, 1).unwrap();
+        let p = FrameValidationPolicy::new(&t).unwrap();
         assert_eq!(p.expiry_index, Some(0));
         t.frames[0].limits.execution = MAX_VERIFY_GAS;
-        assert_eq!(FrameValidationPolicy::new(&t, 0), Err("verification gas budget exceeded"));
+        assert_eq!(FrameValidationPolicy::new(&t), Err("verification gas budget exceeded"));
         t.frames.push(frame(FrameMode::Verify, 0, FrameAddress::default()));
-        assert_eq!(FrameValidationPolicy::new(&t, 1), Err("verify frame after validation prefix"));
+        assert_eq!(FrameValidationPolicy::new(&t), Err("verify frame after validation prefix"));
     }
 
     #[test]
@@ -332,46 +358,39 @@ mod tests {
             vec![frame(FrameMode::Verify, 3, Address::repeat_byte(0x22).into())],
             vec![frame(FrameMode::Verify, 2, s)],
         ] {
-            assert!(FrameValidationPolicy::new(&tx(bad), 1).is_err());
+            assert!(FrameValidationPolicy::new(&tx(bad)).is_err());
         }
-        assert!(FrameValidationPolicy::new(
-            &tx(vec![
-                frame(FrameMode::Verify, 3, s),
-                frame(FrameMode::Default, 0, FrameAddress::default()),
-            ]),
-            1
-        )
+        assert!(FrameValidationPolicy::new(&tx(vec![
+            frame(FrameMode::Verify, 3, s),
+            frame(FrameMode::Default, 0, FrameAddress::default()),
+        ]))
         .is_ok());
         let mut t = tx(vec![frame(FrameMode::Verify, 3, s)]);
-        t.frames[0].limits.execution = MAX_VERIFY_GAS - 1;
-        assert!(FrameValidationPolicy::new(&t, 2).is_err());
+        t.frames[0].limits.execution = MAX_VERIFY_GAS + 1;
+        assert!(FrameValidationPolicy::new(&t).is_err());
         t.frames[0].limits.execution = u64::MAX;
-        assert!(FrameValidationPolicy::new(&t, 0).is_err());
+        assert!(FrameValidationPolicy::new(&t).is_err());
         t.frames[0].limits.execution = 10;
         t.frames[0].limits.state = MAX_VERIFY_STATE_GAS + 1;
-        assert!(FrameValidationPolicy::new(&t, 0).is_err());
+        assert!(FrameValidationPolicy::new(&t).is_err());
     }
 
     #[test]
-    fn configured_max_verify_gas_is_never_below_the_spec_cap() {
-        let mut t = tx(vec![frame(FrameMode::Verify, 3, sender())]);
-        t.frames[0].limits.execution = MAX_VERIFY_GAS;
-        for configured in [0, MAX_VERIFY_GAS - 1, MAX_VERIFY_GAS] {
-            assert!(FrameValidationPolicy::with_max_verify_gas(&t, 0, configured).is_ok());
-            assert_eq!(
-                FrameValidationPolicy::with_max_verify_gas(&t, 1, configured),
-                Err("verification gas budget exceeded")
-            );
-        }
-        let raised = FrameValidationPolicy::with_max_verify_gas(&t, 1, MAX_VERIFY_GAS + 1).unwrap();
-        assert_eq!(raised.declared_execution_gas, MAX_VERIFY_GAS);
-        assert_eq!(
-            FrameValidationPolicy::with_max_verify_gas(&t, 2, MAX_VERIFY_GAS + 1),
-            Err("verification gas budget exceeded")
+    fn configured_public_validation_gas_cannot_exceed_the_spec_cap() {
+        let mut transaction = tx(vec![frame(FrameMode::Verify, 3, sender())]);
+        transaction.frames[0].limits.execution = MAX_VERIFY_GAS;
+        assert!(FrameValidationPolicy::with_max_verify_gas(&transaction, MAX_VERIFY_GAS).is_ok());
+        assert!(
+            FrameValidationPolicy::with_max_verify_gas(&transaction, MAX_VERIFY_GAS + 1).is_ok()
         );
         assert_eq!(
-            FrameValidationPolicy::with_max_verify_gas(&t, u64::MAX, u64::MAX),
-            Err("verification gas overflows u64")
+            FrameValidationPolicy::with_max_verify_gas(&transaction, MAX_VERIFY_GAS - 1),
+            Err("verification gas budget exceeded")
+        );
+        transaction.frames[0].limits.execution += 1;
+        assert_eq!(
+            FrameValidationPolicy::with_max_verify_gas(&transaction, u64::MAX),
+            Err("verification gas budget exceeded")
         );
     }
 
@@ -409,7 +428,7 @@ mod tests {
                     let expected_prefix_end = frames.len() + shape.len();
                     frames.extend(shape.clone());
 
-                    let policy = FrameValidationPolicy::new(&tx(frames), 0).unwrap();
+                    let policy = FrameValidationPolicy::new(&tx(frames)).unwrap();
                     assert_eq!(policy.prefix_end, expected_prefix_end);
                     assert_eq!(policy.expiry_index, with_expiry.then_some(0));
                     assert_eq!(
@@ -428,42 +447,34 @@ mod tests {
         let mut malformed = recent_root_frame(&[(source_id, 7, root)]);
         malformed.data = Bytes::new();
         assert_eq!(
-            FrameValidationPolicy::new(
-                &tx(vec![malformed, frame(FrameMode::Verify, 3, sender())]),
-                0
-            ),
+            FrameValidationPolicy::new(&tx(vec![malformed, frame(FrameMode::Verify, 3, sender())])),
             Err("invalid recent root verifier data")
         );
 
         let mut malformed = recent_root_frame(&[(source_id, 7, root)]);
         malformed.flags = 1;
         assert_eq!(
-            FrameValidationPolicy::new(
-                &tx(vec![malformed, frame(FrameMode::Verify, 3, sender())]),
-                0
-            ),
+            FrameValidationPolicy::new(&tx(vec![malformed, frame(FrameMode::Verify, 3, sender())])),
             Err("invalid recent root verifier frame")
         );
 
         let root_frame = recent_root_frame(&[(source_id, 7, root)]);
-        assert!(FrameValidationPolicy::new(
-            &tx(vec![frame(FrameMode::Verify, 3, sender()), root_frame.clone()]),
-            0
-        )
+        assert!(FrameValidationPolicy::new(&tx(vec![
+            frame(FrameMode::Verify, 3, sender()),
+            root_frame.clone()
+        ]))
         .is_err());
-        assert!(FrameValidationPolicy::new(
-            &tx(vec![root_frame.clone(), expiry_frame(), frame(FrameMode::Verify, 3, sender())]),
-            0
-        )
+        assert!(FrameValidationPolicy::new(&tx(vec![
+            root_frame.clone(),
+            expiry_frame(),
+            frame(FrameMode::Verify, 3, sender())
+        ]))
         .is_err());
-        assert!(FrameValidationPolicy::new(
-            &tx(vec![
-                root_frame,
-                recent_root_frame(&[(source_id, 8, root)]),
-                frame(FrameMode::Verify, 3, sender()),
-            ]),
-            0
-        )
+        assert!(FrameValidationPolicy::new(&tx(vec![
+            root_frame,
+            recent_root_frame(&[(source_id, 8, root)]),
+            frame(FrameMode::Verify, 3, sender()),
+        ]))
         .is_err());
 
         let mut too_many = Vec::new();
@@ -471,10 +482,10 @@ mod tests {
             too_many.push((source_id, slot as u64, root));
         }
         assert_eq!(
-            FrameValidationPolicy::new(
-                &tx(vec![recent_root_frame(&too_many), frame(FrameMode::Verify, 3, sender())]),
-                0
-            ),
+            FrameValidationPolicy::new(&tx(vec![
+                recent_root_frame(&too_many),
+                frame(FrameMode::Verify, 3, sender())
+            ])),
             Err("invalid recent root verifier data")
         );
     }
@@ -499,13 +510,10 @@ mod tests {
         );
         assert_eq!(dependency.expires_at_slot, RECENT_ROOT_LENGTH + 1);
 
-        let policy = FrameValidationPolicy::new(
-            &tx(vec![
-                recent_root_frame(&[(reference.source_id, reference.slot, reference.root); 2]),
-                frame(FrameMode::Verify, 3, sender()),
-            ]),
-            0,
-        )
+        let policy = FrameValidationPolicy::new(&tx(vec![
+            recent_root_frame(&[(reference.source_id, reference.slot, reference.root); 2]),
+            frame(FrameMode::Verify, 3, sender()),
+        ]))
         .unwrap();
         assert_eq!(policy.recent_root.unwrap().dependencies(), vec![dependency]);
     }
@@ -515,7 +523,7 @@ mod tests {
         let mut root = recent_root_frame(&[(B256::repeat_byte(1), 7, B256::repeat_byte(2))]);
         root.limits.execution = MAX_VERIFY_GAS;
         assert_eq!(
-            FrameValidationPolicy::new(&tx(vec![root, frame(FrameMode::Verify, 3, sender())]), 0),
+            FrameValidationPolicy::new(&tx(vec![root, frame(FrameMode::Verify, 3, sender())])),
             Err("verification gas budget exceeded")
         );
     }

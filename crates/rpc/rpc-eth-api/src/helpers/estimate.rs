@@ -24,7 +24,7 @@ use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{apply_block_overrides, apply_state_overrides},
     error::api::{FromEvmHalt, FromRevert},
-    transaction::{frame_signature_padding_gas, has_frame_signatures},
+    transaction::{frame_proof_padding_gas, has_frame_proofs},
     EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
@@ -84,10 +84,10 @@ pub trait EstimateCall: Call {
         );
 
         let is_frame = request.as_ref().minimal_tx_type().is_eip8141();
-        evm_env.version_mut().features.set(EvmFeatures::FRAME_SIGNATURE_PLACEHOLDERS, is_frame);
+        evm_env.version_mut().features.set(EvmFeatures::FRAME_PROOF_PLACEHOLDERS, is_frame);
         if is_frame {
             request.as_mut().gas = None;
-            request.as_mut().signatures.get_or_insert_with(Vec::new);
+
             if request.as_ref().eip8141_fees.is_none() {
                 request.as_mut().max_fee.get_or_insert(U256::MAX);
                 request.as_mut().max_priority_fee_per_gas.get_or_insert(0);
@@ -336,14 +336,23 @@ pub trait EstimateCall: Call {
             let requested_block = at;
             let (evm_env, at) = self.evm_env_at(requested_block).await?;
             let derived_pending = requested_block.is_pending() && !at.is_pending();
-            let has_signatures = has_frame_signatures(request.as_ref());
+            let has_proofs = has_frame_proofs(request.as_ref());
             if Into::<evm2::SpecId>::into(evm_env.spec_id()).enables(evm2::SpecId::BOGOTA) &&
                 request.as_ref().nonce_keys.is_none()
             {
-                if has_signatures {
+                if has_proofs {
                     return Err(invalid("signed frame transactions must include nonceKeys"));
                 }
                 request.as_mut().nonce_keys = Some(vec![]);
+            }
+            // Proofs cannot consume state gas. Default this dimension before collecting omissions.
+            if let Some(frames) = request.as_mut().frames.as_mut() {
+                for frame in frames
+                    .iter_mut()
+                    .filter(|frame| frame.mode == alloy_eips::eip8141::FrameMode::Proof)
+                {
+                    frame.state_gas.get_or_insert(0);
+                }
             }
             let frames =
                 request.as_ref().frames.as_ref().ok_or_else(|| invalid("missing frames"))?;
@@ -362,7 +371,7 @@ pub trait EstimateCall: Call {
             if missing.is_empty() {
                 return Ok(request);
             }
-            if has_signatures {
+            if has_proofs {
                 return Err(invalid("signed frame transactions must include both frame gas limits"));
             }
 
@@ -402,8 +411,8 @@ pub trait EstimateCall: Call {
             }
             // Reserve transaction overhead and every explicit allocation before assigning defaults.
             let tx_env = self.converter().tx_env(request.clone(), &evm_env)?;
-            let signature_gas = frame_signature_padding_gas(
-                request.as_ref().signatures.as_deref().unwrap_or_default(),
+            let proof_padding_gas = frame_proof_padding_gas(
+                request.as_ref().frames.as_deref().unwrap_or_default(),
                 evm_env.version(),
             )
             .map_err(Self::Error::from_eth_err)?;
@@ -417,7 +426,7 @@ pub trait EstimateCall: Call {
                 evm_env.version(),
                 limits,
                 combined_cap,
-                signature_gas,
+                proof_padding_gas,
             )
             .map_err(Self::Error::from_eth_err)?;
             let permit = self
@@ -452,7 +461,7 @@ pub trait EstimateCall: Call {
                                     error.as_validation(),
                                     Some(BlockValidationError::Other(error)) if matches!(
                                         error.downcast_ref::<HandlerError>(),
-                                        Some(HandlerError::InvalidFrameTransaction(FrameTransactionError::VerifyFrameFailed))
+                                        Some(HandlerError::InvalidFrameTransaction(FrameTransactionError::VerifyFrameFailed | FrameTransactionError::ProofFrameFailed))
                                     )
                                 ) =>
                         {
@@ -469,12 +478,12 @@ pub trait EstimateCall: Call {
                     env.version(),
                     limits,
                     combined_cap,
-                    signature_gas,
+                    proof_padding_gas,
                 )
                 .map_err(Self::Error::from_eth_err)?;
                 let remaining = combined_cap
                     .checked_sub(gas.maximum)
-                    .and_then(|gas| gas.checked_sub(signature_gas))
+                    .and_then(|gas| gas.checked_sub(proof_padding_gas))
                     .ok_or_else(|| invalid("frame transaction exceeds the gas cap"))?;
                 let execution_count = missing.iter().filter(|(_, state)| !state).count() as u64;
                 let state_count = missing.len() as u64 - execution_count;
@@ -516,7 +525,7 @@ pub trait EstimateCall: Call {
                             env.version(),
                             limits,
                             combined_cap,
-                            signature_gas,
+                            proof_padding_gas,
                         )
                         .map_err(Self::Error::from_eth_err)?;
                         let frame = request
@@ -593,7 +602,7 @@ pub trait EstimateCall: Call {
                     env.version(),
                     limits,
                     combined_cap,
-                    signature_gas,
+                    proof_padding_gas,
                 )
                 .map_err(Self::Error::from_eth_err)?;
                 let mut evm = this.evm_config().evm_with_env(&mut db, env);
@@ -739,7 +748,7 @@ fn frame_gas_allowance(
     version: &Version,
     limits: FrameLimits,
     combined_cap: u64,
-    signature_gas: u64,
+    proof_padding_gas: u64,
 ) -> Result<(FrameGas, FrameLimits), EthApiError> {
     let invalid = || EthApiError::InvalidParams("frame transaction exceeds the gas cap".into());
     let gas = FrameGas::calculate(tx, version)
@@ -748,9 +757,9 @@ fn frame_gas_allowance(
     let execution = gas
         .intrinsic
         .checked_add(tx.total_frame_execution_gas_limit())
-        .and_then(|gas| gas.checked_add(signature_gas))
+        .and_then(|gas| gas.checked_add(proof_padding_gas))
         .ok_or_else(invalid)?;
-    let floored = gas.execution.checked_add(signature_gas).ok_or_else(invalid)?;
+    let floored = gas.execution.checked_add(proof_padding_gas).ok_or_else(invalid)?;
     if floored.checked_add(gas.state).is_none_or(|maximum| maximum > combined_cap) {
         return Err(invalid());
     }

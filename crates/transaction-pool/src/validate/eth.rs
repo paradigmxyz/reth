@@ -216,7 +216,7 @@ impl<Client, Tx, Evm> EthTransactionValidator<Client, Tx, Evm> {
         self.with_frame_validation_max_verify_gas(MAX_VERIFY_GAS)
     }
 
-    /// Enables public frame validation with a cap no lower than [`MAX_VERIFY_GAS`].
+    /// Enables public frame validation with a cap no higher than [`MAX_VERIFY_GAS`].
     pub fn with_frame_validation_max_verify_gas(mut self, max_verify_gas: u64) -> Self
     where
         Client: StateProviderFactory
@@ -2107,8 +2107,11 @@ mod tests {
         for (configured, execution, valid) in [
             (None, MAX_VERIFY_GAS, true),
             (None, MAX_VERIFY_GAS + 1, false),
-            (Some(MAX_VERIFY_GAS + 1), MAX_VERIFY_GAS + 1, true),
-            (Some(0), MAX_VERIFY_GAS, true),
+            (Some(MAX_VERIFY_GAS + 1), MAX_VERIFY_GAS + 1, false),
+            (Some(MAX_VERIFY_GAS + 1), MAX_VERIFY_GAS, true),
+            (Some(MAX_VERIFY_GAS - 1), MAX_VERIFY_GAS, false),
+            (Some(MAX_VERIFY_GAS - 1), MAX_VERIFY_GAS - 1, true),
+            (Some(0), MAX_VERIFY_GAS, false),
         ] {
             let validator =
                 EthTransactionValidatorBuilder::new(provider.clone(), evm_config.clone())

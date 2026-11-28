@@ -2452,7 +2452,6 @@ mod tests {
             frames: vec![Frame::default()],
             fees: TransactionFees::default(),
             blob_versioned_hashes: vec![B256::repeat_byte(1)],
-            ..Default::default()
         };
         tx.fees.max_fee = U256::from(fee_per_gas) * U256::from(tx.gas_limit());
         let mut transaction = EthPooledTransaction::new(
