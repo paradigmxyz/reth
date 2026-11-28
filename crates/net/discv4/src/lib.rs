@@ -1351,8 +1351,20 @@ impl Discv4Service {
             return
         }
 
-        if self.queued_pings.iter().any(|(n, _)| n.id == node.id && n.address == node.address) {
-            return
+        if let Some(idx) = self.queued_pings.iter().position(|(queued, _)| {
+            queued.id == node.id && queued.address.to_canonical() == node.address.to_canonical()
+        }) {
+            let (queued, queued_reason) = &self.queued_pings[idx];
+            // Prefer the proven port when two bond pings compete for the same peer and IP.
+            if matches!(reason, PingReason::EstablishBond) &&
+                matches!(queued_reason, PingReason::EstablishBond) &&
+                queued.udp_port != node.udp_port &&
+                self.is_proven_endpoint(&node)
+            {
+                self.queued_pings.remove(idx);
+            } else {
+                return
+            }
         }
 
         if self.pending_pings.contains_key(&node.id) ||
@@ -1378,18 +1390,21 @@ impl Discv4Service {
     // Returns how many pings may be in flight before a ping to `node` has to wait. Lookups and
     // pings to an endpoint the node already proved may also use the `RESERVED_PINGS` slots.
     fn max_pending_pings(&mut self, node: &NodeRecord, is_lookup: bool) -> usize {
-        let may_use_reserved = is_lookup ||
-            self.on_entry(node.id, |entry| {
-                entry.has_endpoint_proof &&
-                    entry.record.address.to_canonical() == node.address.to_canonical() &&
-                    entry.record.udp_port == node.udp_port
-            })
-            .unwrap_or_default();
-        if may_use_reserved {
+        if is_lookup || self.is_proven_endpoint(node) {
             MAX_NODES_PING
         } else {
             MAX_NODES_PING - RESERVED_PINGS
         }
+    }
+
+    // Whether the routing table has an endpoint proof for this node at its current UDP socket.
+    fn is_proven_endpoint(&mut self, node: &NodeRecord) -> bool {
+        self.on_entry(node.id, |entry| {
+            entry.has_endpoint_proof &&
+                entry.record.address.to_canonical() == node.address.to_canonical() &&
+                entry.record.udp_port == node.udp_port
+        })
+        .unwrap_or_default()
     }
 
     /// Sends a ping message to the node's UDP address.
@@ -3199,6 +3214,45 @@ mod tests {
                 };
                 assert_eq!(ping.from.tcp_port, expected);
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn proven_renewal_supersedes_queued_wrong_port() {
+        for reserved_slots_full in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let proven = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, proven);
+            let pending =
+                if reserved_slots_full { MAX_NODES_PING } else { MAX_NODES_PING - RESERVED_PINGS };
+            for _ in 0..pending {
+                insert_initial_ping(&mut service, NodeRecord { id: PeerId::random(), ..proven });
+            }
+
+            let other = proven.with_udp_port(30304);
+            service.try_ping(other, PingReason::EstablishBond);
+            for _ in 1..MAX_QUEUED_PINGS {
+                service.try_ping(
+                    NodeRecord { id: PeerId::random(), ..proven },
+                    PingReason::InitialInsert,
+                );
+            }
+            assert_eq!(service.queued_pings.len(), MAX_QUEUED_PINGS);
+
+            service.try_ping(proven, PingReason::EstablishBond);
+            if reserved_slots_full {
+                // Another port and a repeated renewal must leave the proven endpoint queued once.
+                service.try_ping(other, PingReason::EstablishBond);
+                service.try_ping(proven, PingReason::EstablishBond);
+                assert_eq!(service.queued_pings.len(), MAX_QUEUED_PINGS);
+                let completed = *service.pending_pings.keys().next().unwrap();
+                service.pending_pings.remove(&completed);
+                service.ping_buffered();
+            }
+
+            assert_eq!(service.pending_pings[&proven.id].node, proven);
+            assert_eq!(service.queued_pings.len(), MAX_QUEUED_PINGS - 1);
+            assert!(service.queued_pings.iter().all(|(node, _)| node.id != proven.id));
         }
     }
 
