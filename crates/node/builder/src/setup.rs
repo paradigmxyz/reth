@@ -6,6 +6,7 @@ use crate::BlockTy;
 use alloy_primitives::{BlockNumber, B256};
 use reth_config::{config::StageConfig, PruneConfig};
 use reth_consensus::FullConsensus;
+use reth_db::mdbx::MaxReadTransactionDuration;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
@@ -43,6 +44,7 @@ pub fn build_networked_pipeline<N, Client, Evm>(
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
     disabled_stages: &[StageId],
+    max_read_transaction_duration: Option<MaxReadTransactionDuration>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -72,6 +74,7 @@ where
         exex_manager_handle,
         era_import_source,
         disabled_stages,
+        max_read_transaction_duration,
     )?;
 
     Ok(pipeline)
@@ -93,6 +96,7 @@ pub fn build_pipeline<N, H, B, Evm>(
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
     era_import_source: Option<EraImportSource>,
     disabled_stages: &[StageId],
+    max_read_transaction_duration: Option<MaxReadTransactionDuration>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -124,13 +128,16 @@ where
                 prune_config.segments,
                 era_import_source,
             )
-            .set(ExecutionStage::new(
-                evm_config,
-                consensus,
-                stage_config.execution.into(),
-                stage_config.execution_external_clean_threshold(),
-                exex_manager_handle,
-            ))
+            .set(
+                ExecutionStage::new(
+                    evm_config,
+                    consensus,
+                    stage_config.execution.into(),
+                    stage_config.execution_external_clean_threshold(),
+                    exex_manager_handle,
+                )
+                .with_slot_preimages_max_read_transaction_duration(max_read_transaction_duration),
+            )
             .disable_all(disabled_stages),
         )
         .build(provider_factory, static_file_producer);

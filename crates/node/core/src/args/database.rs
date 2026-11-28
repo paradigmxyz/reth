@@ -88,16 +88,10 @@ impl DatabaseArgs {
         &self,
         client_version: ClientVersion,
     ) -> reth_db::mdbx::DatabaseArguments {
-        let max_read_transaction_duration = match self.read_transaction_timeout {
-            None => None, // if not specified, use default value
-            Some(0) => Some(MaxReadTransactionDuration::Unbounded), // if 0, disable timeout
-            Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
-        };
-
         reth_db::mdbx::DatabaseArguments::new(client_version)
             .with_log_level(self.log_level)
             .with_exclusive(self.exclusive)
-            .with_max_read_transaction_duration(max_read_transaction_duration)
+            .with_max_read_transaction_duration(self.max_read_transaction_duration())
             .with_geometry_max_size(self.max_size)
             .with_geometry_page_size(self.page_size)
             .with_growth_step(self.growth_step)
@@ -108,6 +102,16 @@ impl DatabaseArgs {
     /// Returns whether built-in database metrics are enabled.
     pub const fn metrics_enabled(&self) -> bool {
         !self.disable_metrics
+    }
+
+    /// Returns the configured maximum duration of a read transaction. `None` means the default
+    /// value is used, and a timeout of `0` disables it.
+    pub const fn max_read_transaction_duration(&self) -> Option<MaxReadTransactionDuration> {
+        match self.read_transaction_timeout {
+            None => None,
+            Some(0) => Some(MaxReadTransactionDuration::Unbounded),
+            Some(secs) => Some(MaxReadTransactionDuration::Set(Duration::from_secs(secs))),
+        }
     }
 }
 
