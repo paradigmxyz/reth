@@ -2094,7 +2094,7 @@ mod tests {
             &socket_addr,
             &peer,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
-                DisconnectReason::UselessPeer,
+                DisconnectReason::ProtocolBreach,
             )),
         );
 
