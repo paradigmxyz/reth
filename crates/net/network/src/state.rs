@@ -300,13 +300,13 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// Bans the [`IpAddr`] in the discovery service.
     pub(crate) fn ban_ip_discovery(&self, ip: IpAddr) {
         trace!(target: "net", ?ip, "Banning discovery");
-        self.discovery.ban_ip(ip)
+        self.discovery.ban_ip(ip, self.peers_manager.ban_duration())
     }
 
     /// Bans the [`PeerId`] and [`IpAddr`] in the discovery service.
     pub(crate) fn ban_discovery(&self, peer_id: PeerId, ip: IpAddr) {
         trace!(target: "net", ?peer_id, ?ip, "Banning discovery");
-        self.discovery.ban(peer_id, ip)
+        self.discovery.ban(peer_id, ip, self.peers_manager.ban_duration())
     }
 
     /// Marks the given peer as trusted.
