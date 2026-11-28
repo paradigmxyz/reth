@@ -335,8 +335,7 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_v1_e2e() -> Result<()> {
         .with_action(MakeCanonical::new())
         // the main chain blocks above the fork base reach disk before the reorg.
         .with_action(WaitForPersistedChain::new(0, "main_tip"))
-        // block production finalizes the produced blocks, so re-establish finality at the fork
-        // base: building below the finalized block is rejected as a too deep reorg
+        // Finalize the common fork base before replacing the persisted suffix.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
                 .with_head(BlockReference::Tag("main_tip".to_string())),
@@ -374,21 +373,17 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head_e2e() -> Result<
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
         .with_action(CaptureBlock::new("fork_point"))
         .with_action(MakeCanonical::new())
-        // block production finalizes the produced blocks, so re-establish finality at the old
-        // head: an FCU below the finalized block is rejected as a too deep reorg.
+        // Finalize the common prefix before rewinding to the older head.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("old_head".to_string()))
                 .with_head(BlockReference::Tag("fork_point".to_string())),
         )
-        // send an FCU back to the old head to simulate a CL with an older view of the canonical
-        // head. The old head is a canonical ancestor, so the engine accepts the FCU without
-        // unwinding the canonical chain.
+        // Rewind to the retained canonical ancestor before extending a competing chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
         // create first competing chain (chain A) from fork point with 10 blocks
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
         .with_action(CaptureBlock::new("chain_a_tip"))
-        // producing chain A finalized its blocks, so re-establish finality at the fork point
-        // before building below it again
+        // Advance finality to the fork point before building the competing chain.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_point".to_string()))
                 .with_head(BlockReference::Tag("chain_a_tip".to_string())),
@@ -419,30 +414,24 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
         .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
         .with_action(CaptureBlock::new("fork_point"))
         .with_action(MakeCanonical::new())
-        // block production finalizes the produced blocks, so re-establish finality at the old
-        // head: an FCU below the finalized block is rejected as a too deep reorg.
+        // Finalize the common prefix before rewinding to the older head.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("old_head".to_string()))
                 .with_head(BlockReference::Tag("fork_point".to_string())),
         )
-        // send an FCU back to the old head to simulate a CL with an older view of the canonical
-        // head. The old head is a canonical ancestor, so the engine accepts the FCU without
-        // unwinding the canonical chain.
+        // Rewind to the retained canonical ancestor before extending a competing chain.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
         // create chain B (the valid chain) from fork point with 10 blocks
         .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
         .with_action(CaptureBlock::new("chain_b_tip"))
         // make chain B canonical via FCU - this becomes the valid chain
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("chain_b_tip"))
-        // producing chain B finalized its blocks, so re-establish finality at the fork point
-        // before the FCU back to it and building below chain B again.
+        // Finalize the common fork point before replacing the chain above it.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_point".to_string()))
                 .with_head(BlockReference::Tag("chain_b_tip".to_string())),
         )
-        // create chain A (competing chain) from the fork point. The fork point is a canonical
-        // ancestor of chain B, so the FCU to it is accepted without unwinding chain B. First
-        // produce valid blocks, then test invalid scenario.
+        // Rewind chain B to the common fork point, then build chain A and an invalid suffix.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
         .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
         .with_action(CaptureBlock::new("chain_a_tip"))
@@ -601,8 +590,7 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Res
         // Verify Node 0's canonical tip is the long chain tip
         .with_action(ValidateCanonicalTag::new("long_chain_tip"))
         // Verify Node 1's canonical tip is still behind Node 0. `ValidateCanonicalTag` cannot
-        // be used here: it sends an FCU to node 0, for which the base chain tip is a canonical
-        // ancestor below its finalized block, which is rejected as a too deep reorg.
+        // be used here: it sends an FCU to node 0 and would rewind it to the base chain tip.
         .with_action(SelectActiveNode::new(1))
         .with_action(CompareNodeChainTips::expect_different(0, 1))
         // Node 1: Send FCU pointing to Node 0's long chain tip
@@ -726,8 +714,7 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_v2_e2e() -> Result<()> {
         .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new())
         .with_action(WaitForPersistedChain::new(0, "main_tip"))
-        // block production finalizes the produced blocks, so re-establish finality at the fork
-        // base: building below the finalized block is rejected as a too deep reorg
+        // Finalize the common fork base before replacing the persisted suffix.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
                 .with_head(BlockReference::Tag("main_tip".to_string())),

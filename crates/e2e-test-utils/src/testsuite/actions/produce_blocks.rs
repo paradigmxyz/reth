@@ -87,7 +87,12 @@ where
             debug!("Latest block hash: {parent_hash}");
 
             // create a simple forkchoice state with the latest block as head
-            let fork_choice_state = ForkchoiceState::same_hash(parent_hash);
+            // Payload building preserves finality; tests advance it with FinalizeBlock.
+            let fork_choice_state = ForkchoiceState {
+                head_block_hash: parent_hash,
+                safe_block_hash: parent_hash,
+                finalized_block_hash: B256::ZERO,
+            };
 
             // Try v2 first for backwards compatibility, fall back to v3 on error.
             match engine_client
@@ -245,7 +250,12 @@ where
             let parent_hash = latest_block.hash;
             debug!("Latest block hash: {parent_hash}");
 
-            let fork_choice_state = ForkchoiceState::same_hash(parent_hash);
+            // Payload building preserves finality; tests advance it with FinalizeBlock.
+            let fork_choice_state = ForkchoiceState {
+                head_block_hash: parent_hash,
+                safe_block_hash: parent_hash,
+                finalized_block_hash: B256::ZERO,
+            };
 
             let payload_attributes = env
                 .active_node_state()?
@@ -731,7 +741,9 @@ where
     }
 }
 
-/// Action that produces a sequence of blocks using the available clients
+/// Action that produces a sequence of blocks using the available clients.
+///
+/// Payload building preserves the finalized checkpoint. Use [`super::FinalizeBlock`] to advance it.
 #[derive(Debug)]
 pub struct ProduceBlocks<Engine> {
     /// Number of blocks to produce

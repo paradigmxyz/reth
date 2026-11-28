@@ -3721,7 +3721,7 @@ mod tests {
         rewind_state_writer
             .update_chain(NewCanonicalChain::Commit { new: vec![alternate.clone()] });
         rewind_state_writer.update_chain(NewCanonicalChain::Revert {
-            tip: Arc::new(persisted_block.clone()),
+            tip: Arc::new(persisted_block),
             old: vec![alternate],
         });
         assert!(provider.block(BlockHashOrNumber::Number(2))?.is_none());

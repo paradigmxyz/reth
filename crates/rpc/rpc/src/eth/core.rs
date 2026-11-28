@@ -2409,7 +2409,7 @@ mod tests {
                         futures::stream::iter([CanonStateNotification::Commit {
                             new: Arc::new(reth_execution_types::Chain::new(
                                 blocks.clone(),
-                                outcome.clone(),
+                                outcome,
                                 Default::default(),
                             )),
                         }]),

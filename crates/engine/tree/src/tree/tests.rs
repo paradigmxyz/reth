@@ -4012,7 +4012,14 @@ async fn test_fcu_cannot_lower_finality_before_ancestor_rewind() {
     }
 
     // Callers that update markers after synchronization must enforce the same floor.
-    let outcome = harness.tree.update_finalized_block(lower.hash()).unwrap_err();
+    let outcome = harness
+        .tree
+        .ensure_consistent_forkchoice_state(ForkchoiceState {
+            head_block_hash: current_head.hash(),
+            safe_block_hash: finalized.hash(),
+            finalized_block_hash: lower.hash(),
+        })
+        .unwrap_err();
     assert_eq!(outcome.forkchoice_status(), ForkchoiceStatus::Invalid);
     assert_eq!(
         harness.tree.canonical_in_memory_state().get_finalized_num_hash(),
