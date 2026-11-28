@@ -9,7 +9,6 @@ use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_node_core::args::DefaultPruningValues;
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneSegment, MINIMUM_DISTANCE, MINIMUM_UNWIND_SAFE_DISTANCE,
-    REORG_RETENTION_WINDOW,
 };
 use reth_stages_types::StageCheckpoint;
 use reth_storage_api::metadata::keys;
@@ -419,7 +418,7 @@ mod tests {
         empty_manifest, history_checkpoints, set_history_checkpoints, set_layout,
     };
     use reth_db::{models::StoredBlockBodyIndices, test_utils::create_test_rw_db, Database};
-    use reth_prune_types::UnwindTargetPrunedError;
+    use reth_prune_types::{UnwindTargetPrunedError, REORG_RETENTION_WINDOW};
 
     #[test]
     fn write_prune_checkpoints_sets_all_segments() -> eyre::Result<()> {
