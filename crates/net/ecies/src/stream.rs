@@ -115,13 +115,18 @@ where
         transport.set_backpressure_boundary(DEFAULT_BACKPRESSURE_BOUNDARY);
         let msg = transport.try_next().await?;
 
+        // `Framed` returns `None` if the underlying stream is no longer readable, and the codec is
+        // unable to decode another message from the (partially filled) buffer. This usually happens
+        // if the remote drops the TcpStream.
+        let msg = msg.ok_or(ECIESErrorImpl::UnreadableStream)?;
+
         trace!("receiving ecies auth");
         let remote_id = match &msg {
-            Some(IngressECIESValue::AuthReceive(remote_id)) => *remote_id,
+            IngressECIESValue::AuthReceive(remote_id) => *remote_id,
             _ => {
                 return Err(ECIESErrorImpl::InvalidHandshake {
                     expected: IngressECIESValue::AuthReceive(Default::default()),
-                    msg,
+                    msg: Some(msg),
                 }
                 .into())
             }
@@ -290,5 +295,19 @@ mod tests {
             ECIESErrorImpl::FrameTooLarge { size: MAX_FRAME_SIZE + 1, max_size: MAX_FRAME_SIZE }
                 .to_string()
         );
+    }
+
+    #[tokio::test]
+    async fn incoming_eof_before_auth_is_unreadable_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server_key = SecretKey::new(&mut rand::rng());
+
+        // Close the connection without sending any auth data.
+        drop(TcpStream::connect(addr).await.unwrap());
+        let (incoming, _) = listener.accept().await.unwrap();
+
+        let err = ECIESStream::incoming(incoming, server_key).await.unwrap_err();
+        assert!(matches!(err.inner(), ECIESErrorImpl::UnreadableStream), "{err:?}");
     }
 }
