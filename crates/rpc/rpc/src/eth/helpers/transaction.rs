@@ -133,7 +133,7 @@ mod tests {
         eip2718::Encodable2718,
         eip4844::{Blob, Bytes48},
     };
-    use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, U256};
+    use alloy_primitives::{bytes, map::AddressMap, Address, Bytes, Signature, TxKind, U256};
     use alloy_rpc_types_eth::request::TransactionRequest;
     use reth_chainspec::{ChainSpec, ChainSpecBuilder};
     use reth_ethereum_primitives::TransactionSigned;
@@ -150,6 +150,7 @@ mod tests {
         test_utils::{testing_pool, TestPool, TransactionGenerator},
         PoolPooledTx, TransactionOrigin, TransactionPool,
     };
+    use serde_json::json;
 
     /// A sidecar with one zero blob. Its commitment and proof are the point at infinity, so it is
     /// valid without loading the KZG trusted setup.
@@ -628,6 +629,7 @@ mod tests {
     #[tokio::test]
     async fn test_fill_transaction_preserves_provided_fields() {
         let address = Address::random();
+        let to = Address::random();
         let provided_nonce = 100u64;
         let provided_gas_limit = 50_000u64;
 
@@ -640,7 +642,7 @@ mod tests {
 
         let tx_req = TransactionRequest {
             from: Some(address),
-            to: Some(Address::random().into()),
+            to: Some(to.into()),
             value: Some(U256::from(1000)),
             nonce: Some(provided_nonce),
             gas: Some(provided_gas_limit),
@@ -650,7 +652,8 @@ mod tests {
         let filled =
             eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
 
-        // Should preserve the provided nonce and gas limit
+        // Should preserve the provided destination, nonce and gas limit.
+        assert_eq!(filled.tx.kind(), TxKind::Call(to));
         assert_eq!(filled.tx.nonce(), provided_nonce);
         assert_eq!(filled.tx.gas_limit(), provided_gas_limit);
     }
@@ -675,6 +678,77 @@ mod tests {
             eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
 
         assert!(filled.tx.is_eip1559());
+    }
+
+    #[tokio::test]
+    async fn test_fill_transaction_contract_creation() {
+        let address = Address::random();
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(5, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api(accounts);
+        let input = bytes!("60006000f3");
+
+        for request in [
+            json!({ "from": address, "gas": "0x186a0", "input": input }),
+            json!({ "from": address, "to": null, "gas": "0x186a0", "input": input }),
+        ] {
+            for gas_price in [None, Some(1)] {
+                let mut request: TransactionRequest =
+                    serde_json::from_value(request.clone()).unwrap();
+                request.gas_price = gas_price;
+                let filled = eth_api.fill_transaction(request).await.unwrap();
+
+                assert_eq!(filled.tx.kind(), TxKind::Create);
+                assert_eq!(filled.tx.input(), &input);
+                assert_eq!(filled.tx.nonce(), 5);
+                assert_eq!(filled.tx.gas_limit(), 100_000);
+                assert_eq!(filled.tx.is_legacy(), gas_price.is_some());
+                assert_eq!(filled.raw, Bytes::from(filled.tx.encoded_2718()));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fill_transaction_fee_cap_boundaries() {
+        for (base_fee, tip, max_fee, expected_fee) in [
+            (0, u128::MAX, None, Some(u128::MAX)),
+            (1, u128::MAX - 2, None, Some(u128::MAX)),
+            (1, u128::MAX - 1, None, None),
+            (1, u128::MAX, None, None),
+            (u64::MAX, u128::MAX - 2 * u128::from(u64::MAX), None, Some(u128::MAX)),
+            (u64::MAX, u128::MAX, None, None),
+            (1, u128::MAX, Some(u128::MAX), Some(u128::MAX)),
+        ] {
+            let eth_api = mock_eth_api(Default::default());
+            eth_api.provider().add_block(
+                B256::repeat_byte(1),
+                Block::new(
+                    Header { number: 1, base_fee_per_gas: Some(base_fee), ..Default::default() },
+                    Default::default(),
+                ),
+            );
+            let request = TransactionRequest {
+                to: Some(Address::random().into()),
+                nonce: Some(0),
+                gas: Some(21_000),
+                max_priority_fee_per_gas: Some(tip),
+                max_fee_per_gas: max_fee,
+                ..Default::default()
+            };
+            let result = eth_api.fill_transaction(request).await;
+            if let Some(expected_fee) = expected_fee {
+                let filled = result.unwrap();
+                assert_eq!(filled.tx.max_fee_per_gas(), expected_fee);
+                assert_eq!(filled.tx.max_priority_fee_per_gas(), Some(tip));
+                assert_eq!(filled.raw, Bytes::from(filled.tx.encoded_2718()));
+            } else {
+                let error = result.unwrap_err().into_rpc_err();
+                assert_eq!(error.code(), jsonrpsee::types::error::INVALID_PARAMS_CODE);
+                assert_eq!(error.message(), "maxFeePerGas overflow");
+            }
+        }
     }
 
     #[tokio::test]

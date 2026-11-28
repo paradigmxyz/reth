@@ -15,7 +15,7 @@ use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
-use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo, TransactionRequest};
 use evm2::evm::Bal as EvmBal;
 use futures::{Future, StreamExt};
@@ -673,10 +673,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     // included. This does not increase the effective price the sender pays:
                     // `max_fee_per_gas` is only an upper bound and the sender still pays
                     // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
-                    request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
+                    let max_fee = (u128::from(base_fee) * 2).checked_add(tip).ok_or_else(|| {
+                        EthApiError::InvalidParams("maxFeePerGas overflow".into())
+                    })?;
+                    request.as_mut().set_max_fee_per_gas(max_fee);
                 }
             }
 
+            // An absent RPC destination denotes contract creation, but builders require a kind.
+            request.as_mut().to.get_or_insert(TxKind::Create);
             let tx = self.converter().build_simulate_v1_transaction(request)?;
 
             let raw = tx.encoded_2718().into();
