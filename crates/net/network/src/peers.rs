@@ -668,6 +668,12 @@ impl PeersManager {
             peer.state.is_pending_out()
         {
             self.connection_info.decr_state(peer.state);
+            if peer.is_temporary() {
+                // a temporary peer is removed however its dial ends
+                self.peers.remove(peer_id);
+                self.queued_actions.push_back(PeerAction::PeerRemoved(*peer_id));
+                return
+            }
             peer.state = PeerConnectionState::Idle;
             peer.mark_disconnected();
         }
@@ -756,7 +762,14 @@ impl PeersManager {
             self.connection_info.inc_out();
             peer.state = PeerConnectionState::Out;
             peer.mark_connected();
-            if at_capacity &&
+            if peer.is_temporary() {
+                // `Self::remove_peer` ran during the dial, when there was no session to disconnect.
+                peer.state.disconnect();
+                self.queued_actions.push_back(PeerAction::Disconnect {
+                    peer_id,
+                    reason: Some(DisconnectReason::DisconnectRequested),
+                });
+            } else if at_capacity &&
                 !peer.is_trusted() &&
                 !peer.is_static() &&
                 !self.trusted_peer_ids.contains(&peer_id)
@@ -2097,7 +2110,7 @@ mod tests {
             &socket_addr,
             &peer,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
-                DisconnectReason::UselessPeer,
+                DisconnectReason::ProtocolBreach,
             )),
         );
 
@@ -4851,6 +4864,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_peer_removed_while_dialed() {
+        let mut peers = PeersManager::new(PeersConfig::test());
+        let addr = "5.6.7.8:30303".parse::<SocketAddr>().unwrap();
+
+        let closed = PeerId::random();
+        peers.add_and_connect_kind(closed, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+        peers.remove_peer(closed);
+        peers.queued_actions.clear();
+        peers.on_outgoing_pending_session_gracefully_closed(&closed);
+        assert!(matches!(
+            peers.queued_actions.pop_front(),
+            Some(PeerAction::PeerRemoved(peer_id)) if peer_id == closed
+        ));
+
+        let timed_out = PeerId::random();
+        peers.add_and_connect_kind(timed_out, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+        peers.remove_peer(timed_out);
+        peers.on_outgoing_pending_session_dropped(
+            &addr,
+            &timed_out,
+            &PendingSessionHandshakeError::Timeout,
+        );
+
+        let established = PeerId::random();
+        peers.add_and_connect_kind(established, PeerKind::Basic, PeerAddr::from_tcp(addr), None);
+        peers.remove_peer(established);
+        peers.queued_actions.clear();
+        peers.on_active_outgoing_established(established);
+        assert_eq!(peers.peers[&established].state, PeerConnectionState::DisconnectingOut);
+        assert!(matches!(
+            peers.queued_actions.pop_front(),
+            Some(PeerAction::Disconnect {
+                peer_id,
+                reason: Some(DisconnectReason::DisconnectRequested),
+            }) if peer_id == established
+        ));
+        peers.on_active_session_gracefully_closed(established);
+
+        assert!(peers.peers.is_empty());
+        assert_eq!(peers.num_pending_outbound_connections(), 0);
+        assert_eq!(peers.num_outbound_connections(), 0);
+    }
+
+    #[tokio::test]
     async fn test_trusted_peer_not_redialed_while_banned() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
@@ -4873,7 +4930,7 @@ mod tests {
             &socket_addr,
             &peer,
             &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
-                DisconnectReason::UselessPeer,
+                DisconnectReason::ProtocolBreach,
             )),
         );
         match poll_now(&mut peers) {
