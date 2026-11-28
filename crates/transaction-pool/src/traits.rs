@@ -1538,6 +1538,11 @@ pub trait PoolTransaction:
     }
 
     /// Returns the shared blob cell availability, if this is a blob transaction.
+    ///
+    /// For blob transactions, `None` tells the network to assume it can serve full blobs to
+    /// eth/66–71 peers and to advertise all cells to eth/72 and newer peers when
+    /// [`Self::encoded_length_eth72`] returns `Some`. Pools that store only a subset of a
+    /// transaction's cells must return `Some` with the actual availability.
     fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
         None
     }

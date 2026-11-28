@@ -18,9 +18,9 @@ for arm in baseline feature; do
       BENCH_BAL="$bal" BENCH_BIG_BLOCKS="$big_blocks" BENCH_TRACY=off \
         bash "$script" "$arm" "$scratch" test-ref > /dev/null 2>&1
       if [ "$big_blocks" = true ]; then
-        expected='beta build --locked --profile profiling -p reth-bb'
+        expected='beta build --locked --profile profiling -p reth-bb --features min-debug-logs'
       else
-        expected='beta build --locked --profile profiling --bin reth'
+        expected='beta build --locked --profile profiling --bin reth --features min-debug-logs'
       fi
       [[ "$(cat "$BUILD_TEST_LOG")" == "$expected" ]]
     done
