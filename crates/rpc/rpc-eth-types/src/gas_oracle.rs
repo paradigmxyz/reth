@@ -184,10 +184,8 @@ where
                 (parent_hash, block_values)
             };
 
-            if block_values.is_empty() {
-                // For empty blocks, use zero gas price to signal no demand
-                results.push(U256::ZERO);
-            } else {
+            // A block without samples says nothing about the tip that gets a transaction included.
+            if !block_values.is_empty() {
                 results.extend(block_values);
                 populated_blocks += 1;
             }
