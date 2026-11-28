@@ -766,13 +766,14 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
     /// Storage provider for latest block
     fn latest(&self) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
-        // use latest state provider if the head state exists
-        if self.canonical_in_memory_state.head_state().is_some() {
-            let provider = self.consistent_provider()?;
-            if let Some(head) = provider.head_block().map(|head| head.hash()) {
-                trace!(target: "providers::blockchain", "Using head state for latest state provider");
-                return provider.state_by_hash(head, true)
-            }
+        let provider = self.consistent_provider()?;
+        if let Some(head) = provider
+            .head_block()
+            .map(|head| head.hash())
+            .or_else(|| provider.rewind_head().map(|head| head.hash))
+        {
+            trace!(target: "providers::blockchain", "Using head state for latest state provider");
+            return provider.state_by_hash(head, true)
         }
         trace!(target: "providers::blockchain", "Using database state for latest state provider");
         self.database.latest()
@@ -1107,11 +1108,15 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
-        CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryStateWriter,
-        NewCanonicalChain,
+        CanonicalInMemoryState, CanonicalInMemoryStateWriter, ExecutedBlock, InMemoryState,
+        InMemoryStateWriter, NewCanonicalChain,
     };
     use reth_chainspec::{ChainSpec, MAINNET};
-    use reth_db_api::models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices};
+    use reth_db_api::{
+        models::{AccountBeforeTx, SnapAttempt, StoredBlockBodyIndices},
+        tables,
+        transaction::DbTxMut,
+    };
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, Receipt};
     use reth_execution_types::{
@@ -3636,6 +3641,7 @@ mod tests {
         let (factory, in_memory_state_writer) = test_provider_factory_with_genesis()?;
         let provider_rw = factory.provider_rw()?;
         provider_rw.insert_account_for_hashing([(address, Some(account_a.clone()))])?;
+        provider_rw.tx_ref().put::<tables::PlainAccountState>(address, account_a.clone())?;
         provider_rw.commit()?;
         let persisted_root = factory.latest()?.state_root(HashedPostState::default())?;
 
@@ -3655,6 +3661,15 @@ mod tests {
         provider_rw.insert_block(&persisted_block)?;
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(1))?;
         provider_rw.commit()?;
+
+        let mut rewind_state_writer = CanonicalInMemoryStateWriter::new(
+            factory.chain_info_headers()?,
+            InMemoryState::new().1,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            factory.clone(),
+            rewind_state_writer.canonical_in_memory_state().clone(),
+        );
 
         // State B: block 2 changes the account and becomes the database head, with a root
         // different from block 1's.
@@ -3683,7 +3698,7 @@ mod tests {
                     [(
                         address,
                         Some(account_a.clone().into()),
-                        Some(account_b.into()),
+                        Some(account_b.clone().into()),
                         Default::default(),
                     )],
                     [[(address, Some(Some(account_a.clone().into())), [])]],
@@ -3696,6 +3711,22 @@ mod tests {
         )?;
         provider_rw.save_stage_checkpoint(StageId::Finish, StageCheckpoint::new(2))?;
         provider_rw.commit()?;
+
+        // Forward persistence can finish before the engine publishes the new head.
+        assert_eq!(provider.best_block_number()?, 1);
+        assert_eq!(provider.latest()?.basic_account(&address)?, Some(account_b));
+        // Switch to a different in-memory block, then rewind before removing the disk branch.
+        let alternate = TestBlockBuilder::eth().get_executed_block_with_number(2, persisted_hash);
+        assert_ne!(alternate.recovered_block().hash(), head_hash);
+        rewind_state_writer
+            .update_chain(NewCanonicalChain::Commit { new: vec![alternate.clone()] });
+        rewind_state_writer.update_chain(NewCanonicalChain::Revert {
+            tip: Arc::new(persisted_block),
+            old: vec![alternate],
+        });
+        assert!(provider.block(BlockHashOrNumber::Number(2))?.is_none());
+        assert!(provider.block(head_hash.into())?.is_some());
+        assert_eq!(provider.latest()?.basic_account(&address)?, Some(account_a.clone()));
 
         let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
             factory.chain_info_headers()?,

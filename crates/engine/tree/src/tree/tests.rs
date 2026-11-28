@@ -2097,21 +2097,15 @@ async fn test_fcu_with_canonical_ancestor_below_finalized_is_rejected() {
 
 #[tokio::test]
 #[cfg_attr(all(feature = "fuzz", dst), ignore = "native Tokio harness")]
-async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build() {
+async fn test_fcu_rewinds_and_updates_markers_with_or_without_payload_attributes() {
     reth_tracing::init_test_tracing();
     let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-    let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
-    let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..5).collect();
-    test_harness = test_harness.with_blocks(blocks.clone());
-
-    let current_head = blocks[3].recovered_block();
-    let finalized = blocks[0].recovered_block();
+    let mut builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = builder.get_executed_blocks(1..5).collect();
     let ancestor = blocks[2].recovered_block();
-    test_harness
-        .tree
-        .canonical_in_memory_state_writer
-        .set_finalized(finalized.clone_sealed_header());
+    let previous_finalized = blocks[0].recovered_block();
+    let finalized = blocks[1].recovered_block();
+    let current_head = blocks[3].recovered_block();
 
     let payload_attributes = EthPayloadAttributes {
         timestamp: ancestor.timestamp() + 1,
@@ -2122,33 +2116,144 @@ async fn test_fcu_with_canonical_ancestor_above_finalized_starts_payload_build()
         slot_number: None,
         ..Default::default()
     };
-    let outcome = test_harness
-        .tree
-        .on_forkchoice_updated(
-            ForkchoiceState {
-                head_block_hash: ancestor.hash(),
-                safe_block_hash: B256::ZERO,
-                finalized_block_hash: B256::ZERO,
-            },
-            Some(payload_attributes),
-        )
-        .unwrap();
 
-    assert_eq!(outcome.outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+    let cases = [
+        (false, None),
+        (false, Some(payload_attributes.clone())),
+        (true, None),
+        (true, Some(payload_attributes)),
+    ];
+    for (persisted_tip, attrs) in cases {
+        let mut test_harness = TestHarness::new(chain_spec.clone()).with_blocks(blocks.clone());
+        if persisted_tip {
+            test_harness.tree.persistence_state.last_persisted_block = ancestor.num_hash();
+            test_harness.tree.canonical_in_memory_state_writer.on_blocks_persisted(
+                ancestor.num_hash(),
+                ancestor.num_hash(),
+                None,
+            );
+            assert!(test_harness
+                .tree
+                .canonical_in_memory_state()
+                .state_by_number(ancestor.number())
+                .is_none());
+        }
+        test_harness
+            .tree
+            .canonical_in_memory_state_writer
+            .set_finalized(previous_finalized.clone_sealed_header());
+        test_harness
+            .tree
+            .canonical_in_memory_state_writer
+            .set_safe(previous_finalized.clone_sealed_header());
+        let mut notifications =
+            test_harness.tree.canonical_in_memory_state().subscribe_canon_state();
 
-    // a payload build is started on top of the ancestor
-    let command = test_harness.payload_command_rx.try_recv().unwrap();
-    let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
-        panic!("expected build new payload command")
-    };
-    assert_eq!(input.parent_hash, ancestor.hash());
+        let build_requested = attrs.is_some();
+        let outcome = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: ancestor.hash(),
+                    safe_block_hash: ancestor.hash(),
+                    finalized_block_hash: finalized.hash(),
+                },
+                attrs,
+            )
+            .unwrap()
+            .outcome;
+        assert_eq!(outcome.forkchoice_status(), ForkchoiceStatus::Valid);
+        if build_requested {
+            let command = test_harness.payload_command_rx.try_recv().unwrap();
+            let PayloadServiceCommand::BuildNewPayload(input, _, _) = command else {
+                panic!("expected build new payload command")
+            };
+            assert_eq!(input.parent_hash, ancestor.hash());
+        } else {
+            assert!(outcome.await.unwrap().payload_status.is_valid());
+        }
 
-    // the canonical chain remains untouched, only the built block reorgs it eventually
-    assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+        let canonical = test_harness.tree.canonical_in_memory_state();
+        assert_eq!(test_harness.tree.state.tree_state.canonical_block_hash(), ancestor.hash());
+        assert_eq!(canonical.get_canonical_head().hash(), ancestor.hash());
+        assert_eq!(canonical.get_safe_num_hash(), Some(ancestor.num_hash()));
+        assert_eq!(canonical.get_finalized_num_hash(), Some(finalized.num_hash()));
+        let notification = notifications.try_recv().unwrap();
+        assert_eq!(notification.tip().hash(), ancestor.hash());
+        assert!(notification.committed().is_empty());
+        let reverted = notification.reverted().unwrap();
+        assert_eq!(reverted.len(), 1);
+        assert_eq!(reverted.tip().hash(), current_head.hash());
+    }
+}
+
+#[tokio::test]
+#[cfg_attr(all(feature = "fuzz", dst), ignore = "native Tokio harness")]
+async fn test_fcu_readopting_reverted_head_clears_pending_rewind() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = harness.block_builder.get_executed_blocks(0..4).collect();
+    harness = harness.with_blocks(blocks.clone());
+    let ancestor = blocks[1].recovered_block();
+    let first_reverted = blocks[2].recovered_block().num_hash();
+    let original_head = blocks[3].recovered_block().num_hash();
+    harness.tree.persistence_state.last_persisted_block = original_head;
+
+    let rewind = ForkchoiceState { head_block_hash: ancestor.hash(), ..Default::default() };
+    let result = harness.tree.on_forkchoice_updated(rewind, None).unwrap().outcome;
+    assert!(result.await.unwrap().payload_status.is_valid());
     assert_eq!(
-        test_harness.tree.canonical_in_memory_state().get_canonical_head().hash(),
-        current_head.hash()
+        harness.tree.canonical_in_memory_state().first_block_in_pending_rewind(),
+        Some(first_reverted)
     );
+
+    let restore = ForkchoiceState { head_block_hash: original_head.hash, ..Default::default() };
+    let result = harness.tree.on_forkchoice_updated(restore, None).unwrap().outcome;
+    assert!(result.await.unwrap().payload_status.is_valid());
+    harness.tree.advance_persistence().unwrap();
+    assert_eq!(harness.tree.canonical_in_memory_state().first_block_in_pending_rewind(), None);
+}
+
+#[tokio::test]
+#[cfg_attr(all(feature = "fuzz", dst), ignore = "native Tokio harness")]
+async fn test_fcu_rewind_without_execution_history_is_rejected() {
+    let chain_spec = MAINNET.clone();
+    let mut builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+    let blocks: Vec<_> = builder.get_executed_blocks(1..5).collect();
+    let mut test_harness = TestHarness::new(chain_spec).with_blocks(blocks[3..].to_vec());
+
+    // The mock provider serves persisted blocks but has no persisted execution history.
+    test_harness
+        .persist_blocks(blocks[..3].iter().map(|block| block.recovered_block().clone()).collect());
+    let ancestor = blocks[1].recovered_block();
+    let current_head = blocks[3].recovered_block();
+    test_harness.tree.persistence_state.last_persisted_block =
+        blocks[2].recovered_block().num_hash();
+
+    let attrs = EthPayloadAttributes { timestamp: ancestor.timestamp() + 1, ..Default::default() };
+    for attrs in [None, Some(attrs)] {
+        let err = test_harness
+            .tree
+            .on_forkchoice_updated(
+                ForkchoiceState {
+                    head_block_hash: ancestor.hash(),
+                    safe_block_hash: ancestor.hash(),
+                    finalized_block_hash: B256::ZERO,
+                },
+                attrs,
+            )
+            .unwrap()
+            .outcome
+            .await
+            .unwrap_err();
+        assert_matches!(
+            err,
+            BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::TooDeepReorg)
+        );
+        let canonical = test_harness.tree.canonical_in_memory_state();
+        assert_eq!(canonical.get_canonical_head().hash(), current_head.hash());
+        assert!(canonical.get_safe_num_hash().is_none());
+        assert!(test_harness.payload_command_rx.is_empty());
+    }
 }
 
 /// Test that verifies the happy path where a new payload extends the canonical chain
@@ -3854,4 +3959,130 @@ impl<S: Subscriber + for<'a> LookupSpan<'a>> Layer<S> for EngineSpanParents {
             self.0.lock().unwrap().push(ctx.span(id).unwrap().parent().map(|parent| parent.id()));
         }
     }
+}
+
+#[tokio::test]
+#[cfg_attr(all(feature = "fuzz", dst), ignore = "native Tokio harness")]
+async fn test_fcu_cannot_lower_finality_before_ancestor_rewind() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = harness.block_builder.get_executed_blocks(0..6).collect();
+    harness = harness.with_blocks(blocks.clone());
+    let finalized = blocks[3].recovered_block();
+    let lower = blocks[2].recovered_block();
+    let current_head = blocks[5].recovered_block();
+    harness.tree.canonical_in_memory_state_writer.set_finalized(finalized.clone_sealed_header());
+    harness.tree.canonical_in_memory_state_writer.set_safe(finalized.clone_sealed_header());
+
+    for head in [blocks[4].recovered_block(), current_head] {
+        for attributes in [
+            None,
+            Some(EthPayloadAttributes { timestamp: head.timestamp() + 1, ..Default::default() }),
+        ] {
+            let err = harness
+                .tree
+                .on_forkchoice_updated(
+                    ForkchoiceState {
+                        head_block_hash: head.hash(),
+                        safe_block_hash: lower.hash(),
+                        finalized_block_hash: lower.hash(),
+                    },
+                    attributes,
+                )
+                .unwrap()
+                .outcome
+                .await
+                .unwrap_err();
+            assert_matches!(
+                err,
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(
+                    ForkchoiceUpdateError::InvalidState
+                )
+            );
+            assert_eq!(harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+            assert_eq!(
+                harness.tree.canonical_in_memory_state().get_finalized_num_hash(),
+                Some(finalized.num_hash())
+            );
+            assert_eq!(
+                harness.tree.canonical_in_memory_state().get_safe_num_hash(),
+                Some(finalized.num_hash())
+            );
+            assert!(harness.payload_command_rx.is_empty());
+        }
+    }
+
+    // Callers that update markers after synchronization must enforce the same floor.
+    let outcome = harness
+        .tree
+        .ensure_consistent_forkchoice_state(ForkchoiceState {
+            head_block_hash: current_head.hash(),
+            safe_block_hash: finalized.hash(),
+            finalized_block_hash: lower.hash(),
+        })
+        .unwrap_err();
+    assert_eq!(outcome.forkchoice_status(), ForkchoiceStatus::Invalid);
+    assert_eq!(
+        harness.tree.canonical_in_memory_state().get_finalized_num_hash(),
+        Some(finalized.num_hash())
+    );
+
+    let err = harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState {
+                head_block_hash: lower.hash(),
+                safe_block_hash: lower.hash(),
+                finalized_block_hash: B256::ZERO,
+            },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::TooDeepReorg)
+    );
+    assert_eq!(harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+}
+
+#[tokio::test]
+#[cfg_attr(all(feature = "fuzz", dst), ignore = "native Tokio harness")]
+async fn test_fcu_zero_safe_is_rejected_before_loading_rewind_history() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    let blocks: Vec<_> = harness.block_builder.get_executed_blocks(1..4).collect();
+    harness = harness.with_blocks(blocks.clone());
+    let current_head = blocks[2].recovered_block();
+    let ancestor = blocks[0].recovered_block();
+    harness.tree.persistence_state.last_persisted_block = current_head.num_hash();
+    harness.tree.canonical_in_memory_state_writer.on_blocks_persisted(
+        current_head.num_hash(),
+        current_head.num_hash(),
+        None,
+    );
+    harness.tree.canonical_in_memory_state_writer.set_safe(current_head.clone_sealed_header());
+
+    // The mock provider has block headers but no persisted execution history. Loading the rewind
+    // first would return TooDeepReorg instead of rejecting the incompatible safe marker.
+    let err = harness
+        .tree
+        .on_forkchoice_updated(
+            ForkchoiceState { head_block_hash: ancestor.hash(), ..Default::default() },
+            None,
+        )
+        .unwrap()
+        .outcome
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        BeaconForkChoiceUpdateError::ForkchoiceUpdateError(ForkchoiceUpdateError::InvalidState)
+    );
+    assert_eq!(harness.tree.state.tree_state.canonical_block_hash(), current_head.hash());
+    assert_eq!(
+        harness.tree.canonical_in_memory_state().get_safe_num_hash(),
+        Some(current_head.num_hash())
+    );
+    assert!(harness.payload_command_rx.is_empty());
 }

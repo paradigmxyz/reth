@@ -166,8 +166,7 @@ async fn test_testsuite_reorg_with_tagging() -> Result<()> {
         .with_action(ProduceBlocks::<EthEngineTypes>::new(2)) // produce blocks 2, 3
         .with_action(CaptureBlock::new("main_tip"))
         .with_action(MakeCanonical::new()) // make main chain tip canonical
-        // block production finalizes the produced blocks, so re-establish finality at the fork
-        // base: building below the finalized block is rejected as a too deep reorg
+        // Finalize the common fork base before replacing the chain above it.
         .with_action(
             FinalizeBlock::<EthEngineTypes>::new(BlockReference::Tag("fork_base".to_string()))
                 .with_head(BlockReference::Tag("main_tip".to_string())),
@@ -201,8 +200,7 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))
         .with_action(CaptureBlock::new("blockA_height2"))
         .with_action(MakeCanonical::new())
-        // send forkchoiceUpdated back to block 1. Building block A finalized block 1, and a
-        // canonical ancestor at the finalized block is accepted without unwinding the chain.
+        // Rewind to the retained common ancestor before building a competing block.
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("block1"))
         // receive newPayload with block hash B and height 2
         .with_action(CreateFork::<EthEngineTypes>::new(1, 1))

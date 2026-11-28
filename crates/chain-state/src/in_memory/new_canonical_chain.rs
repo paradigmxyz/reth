@@ -22,6 +22,13 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
         /// All blocks of the _old_ chain
         old: Vec<ExecutedBlock<N>>,
     },
+    /// A canonical suffix was removed, leaving an existing canonical block as the tip.
+    Revert {
+        /// The canonical block at the fork point.
+        tip: Arc<RecoveredBlock<N::Block>>,
+        /// The reverted blocks in ascending block order.
+        old: Vec<ExecutedBlock<N>>,
+    },
 }
 
 impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
@@ -29,6 +36,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub const fn new_block_count(&self) -> usize {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.len(),
+            Self::Revert { .. } => 0,
         }
     }
 
@@ -36,7 +44,7 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub const fn reorged_block_count(&self) -> usize {
         match self {
             Self::Commit { .. } => 0,
-            Self::Reorg { old, .. } => old.len(),
+            Self::Reorg { old, .. } | Self::Revert { old, .. } => old.len(),
         }
     }
 
@@ -48,6 +56,10 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
             }
             Self::Reorg { new, old } => CanonStateNotification::Reorg {
                 new: Arc::new(Self::blocks_to_chain(new)),
+                old: Arc::new(Self::blocks_to_chain(old)),
+            },
+            Self::Revert { tip, old } => CanonStateNotification::Revert {
+                tip: Arc::clone(tip),
                 old: Arc::new(Self::blocks_to_chain(old)),
             },
         }
@@ -87,18 +99,21 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
         chain
     }
 
-    /// Returns the new tip of the chain.
-    ///
-    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
-    /// 1 new block.
+    /// Returns the canonical tip after applying this update.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
-        self.new_blocks().last().expect("non empty blocks").recovered_block()
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => {
+                new.last().expect("non empty blocks").recovered_block()
+            }
+            Self::Revert { tip, .. } => tip,
+        }
     }
 
     /// Returns the blocks added to the canonical chain by this update.
     pub fn new_blocks(&self) -> &[ExecutedBlock<N>] {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new,
+            Self::Revert { .. } => &[],
         }
     }
 

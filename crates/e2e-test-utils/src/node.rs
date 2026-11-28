@@ -348,10 +348,10 @@ where
     ///
     /// The payload job is started with a forkchoice update to `parent` that keeps the safe and
     /// finalized blocks of the node. Its effect depends on `parent`:
-    /// - The head, or a canonical ancestor of it that is not below the finalized block: the head
-    ///   stays, the engine builds on `parent` without changing the canonical chain. The exception
-    ///   is a tree config with both `always_process_payload_attributes_on_canonical_head` and
-    ///   `unwind_canonical_header`, under which the engine moves the head back to an ancestor.
+    /// - The current head: the engine starts a payload job on that head.
+    /// - A canonical ancestor compatible with the safe and finalized blocks: the default Ethereum
+    ///   engine rewinds the head to `parent` before building if the execution history needed for
+    ///   the unwind is available. A custom engine or tree configuration can change this behavior.
     /// - A block on a side chain: the engine first makes the side chain canonical, so `parent`
     ///   becomes the head, reorging the chain.
     /// - A canonical block below the finalized block, or a side chain block that does not descend
@@ -362,9 +362,9 @@ where
     /// - A block the node does not know: the engine starts no payload job and requests the block
     ///   from its peers, and this returns an error.
     ///
-    /// The payload includes transactions of the pool, which tracks the head: transactions mined in
-    /// the blocks above `parent` are not in the pool anymore, so the payload does not include them,
-    /// and pool transactions that are invalid on `parent` are skipped.
+    /// The builder selects pool transactions that are valid on `parent`. After a reorg the pool
+    /// re-injects transactions from the reverted blocks asynchronously, so a build started by the
+    /// same forkchoice update may begin before those transactions are available.
     pub async fn build_payload_on(&mut self, parent: B256) -> eyre::Result<Payload::BuiltPayload> {
         self.build_payload(ForkchoiceState {
             head_block_hash: parent,
@@ -1205,13 +1205,10 @@ where
     /// Makes the known block with the given hash the head of the node, keeping its safe and
     /// finalized blocks, and returns once the block is the latest block.
     ///
-    /// The engine makes a block on a side chain canonical, which reorgs the chain, e.g. back to a
-    /// chain the node left with [`Self::advance_fork`]. This requires the block to descend from
-    /// the finalized block, so blocks imported under [`Finality::Head`] can't be reorged away
-    /// from, import them under [`Finality::Keep`] or [`Finality::Lag`], see
-    /// [`Self::set_finality`]. The engine does not move the head back to a canonical ancestor, so
-    /// this returns an error for those, build a block on the ancestor with
-    /// [`Self::advance_block_on`] instead.
+    /// The engine can adopt a block on a side chain, for example a chain the node left with
+    /// [`Self::advance_fork`], or rewind to a canonical ancestor. The target must be at or
+    /// above the safe and finalized blocks on its chain. Use [`Finality::Keep`] or
+    /// [`Finality::Lag`] to keep blocks reorgable, see [`Self::set_finality`].
     ///
     /// The transaction pool processes the reorg in the background: once
     /// [`Self::wait_for_pool_head`] returns for the block, the pool has removed the transactions
@@ -1219,8 +1216,8 @@ where
     /// re-injects the transactions of the reorged blocks only afterwards, wait for them with
     /// [`Self::wait_for_pool`].
     ///
-    /// Returns an error if the node does not know the block or one of its ancestors, if the block
-    /// is invalid, or if it does not descend from the safe and finalized blocks.
+    /// Returns an error for an unknown or invalid target, a target incompatible with the safe
+    /// or finalized blocks, or a rewind with missing execution history.
     pub async fn reorg_to(&self, hash: B256) -> eyre::Result<()> {
         let state = ForkchoiceState { head_block_hash: hash, ..self.current_forkchoice_state()? };
         self.send_forkchoice_updated(state, None).await?;
@@ -1232,8 +1229,7 @@ where
             .ok_or_else(|| eyre!("latest block not found"))?;
         ensure!(
             latest.hash() == hash,
-            "block {hash} is a canonical ancestor of the head {}, which the engine does not move \
-             the head back to, build a block on it with `advance_block_on` instead",
+            "forkchoice update reported block {hash} as valid but the canonical head is {}",
             latest.hash()
         );
 

@@ -551,13 +551,17 @@ mod tests {
     use evm2::{evm::CacheDB, AccountInfo};
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
-    use reth_chain_state::CanonStateSubscriptions;
+    use reth_chain_state::{
+        CanonStateNotification, CanonStateSubscriptions, CanonicalInMemoryStateWriter,
+        InMemoryState,
+    };
     use reth_chainspec::{ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthChainSpec};
     use reth_db_api::{tables, transaction::DbTxMut};
     use reth_db_common::init::{init_genesis, init_genesis_with_settings};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::{ConfigureEvm, EvmEnvFor, TxEnvFor};
     use reth_evm_ethereum::EthEvmConfig;
+    use reth_execution_types::Chain;
     use reth_network_api::noop::NoopNetwork;
     use reth_primitives_traits::{
         crypto::secp256k1::sign_message, SealedHeader, SignerRecoverable,
@@ -568,8 +572,9 @@ mod tests {
             create_test_provider_factory_with_chain_spec, ExtendedAccount, MockEthProvider,
             NoopProvider,
         },
-        BlockWriter, ExecutionOutcome, PruneCheckpointReader, StageCheckpointReader,
-        StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+        BlockReader, BlockWriter, ExecutionOutcome, PruneCheckpointReader, ReceiptProvider,
+        StageCheckpointReader, StageCheckpointWriter, StaticFileProviderFactory, StaticFileSegment,
+        StaticFileWriter,
     };
     use reth_rpc_convert::{EthTxEnvError, TryIntoTxEnv};
     use reth_rpc_eth_api::{
@@ -577,7 +582,10 @@ mod tests {
         node::RpcNodeCoreAdapter,
         EthApiServer,
     };
-    use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, RpcInvalidTransactionError};
+    use reth_rpc_eth_types::{
+        cache::cache_new_blocks_task, receipt::EthReceiptConverter, EthConfig,
+        RpcInvalidTransactionError,
+    };
     use reth_rpc_server_types::constants::DEFAULT_MAX_CALL_MANY_CALLS;
     use reth_storage_api::{
         BalProvider, BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
@@ -2337,6 +2345,111 @@ mod tests {
             .await
             .unwrap()
             .is_some());
+        }
+    }
+
+    #[tokio::test]
+    async fn receipts_by_hash_follow_rewinds_before_disk_cleanup() {
+        let chain_spec = Arc::new(ChainSpecBuilder::mainnet().genesis(Genesis::default()).build());
+        let mut rng = generators::rng();
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            for cached in [false, true] {
+                let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
+                let mut parent = init_genesis_with_settings(&factory, settings).unwrap();
+                let blocks = (1..=2)
+                    .map(|number| {
+                        let block = random_block(
+                            &mut rng,
+                            number,
+                            BlockParams {
+                                parent: Some(parent),
+                                tx_count: Some(1),
+                                ommers_count: Some(0),
+                                ..Default::default()
+                            },
+                        );
+                        parent = block.hash();
+                        block.try_recover().unwrap()
+                    })
+                    .collect::<Vec<_>>();
+                let receipts = blocks
+                    .iter()
+                    .map(|block| {
+                        block
+                            .body()
+                            .transactions
+                            .iter()
+                            .map(|tx| random_receipt(&mut rng, tx, Some(2), None))
+                            .collect()
+                    })
+                    .collect();
+                let outcome = ExecutionOutcome { first_block: 1, receipts, ..Default::default() };
+                let provider_rw = factory.provider_rw().unwrap();
+                provider_rw
+                    .append_blocks_with_state(blocks.clone(), &outcome, Default::default())
+                    .unwrap();
+                provider_rw.update_pipeline_stages(2, false).unwrap();
+                provider_rw.commit().unwrap();
+
+                let mut state_writer = CanonicalInMemoryStateWriter::new(
+                    factory.chain_info_headers().unwrap(),
+                    InMemoryState::new().1,
+                );
+                let provider = BlockchainProvider::with_canonical_in_memory_state(
+                    factory,
+                    state_writer.canonical_in_memory_state().clone(),
+                );
+                let before = provider.consistent_provider().unwrap();
+                let api = build_test_eth_api(provider);
+                let retained = *blocks[0].body().transactions[0].tx_hash();
+                let reverted = *blocks[1].body().transactions[0].tx_hash();
+                if cached {
+                    cache_new_blocks_task(
+                        api.cache().clone(),
+                        futures::stream::iter([CanonStateNotification::Commit {
+                            new: Arc::new(Chain::new(blocks.clone(), outcome, Default::default())),
+                        }]),
+                    )
+                    .await;
+                    assert!(api.cache().get_transaction_by_hash(reverted).await.is_some());
+                } else {
+                    assert!(api.cache().get_transaction_by_hash(reverted).await.is_none());
+                }
+                assert!(EthTransactions::transaction_receipt(&api, reverted)
+                    .await
+                    .unwrap()
+                    .is_some());
+
+                // Hold the physical suffix and, for the cached case, its old cache entries open.
+                // No persistence or cache notification runs before these post-rewind assertions.
+                state_writer.set_canonical_head_after_rewind(
+                    blocks[0].clone_sealed_header(),
+                    blocks[1].num_hash(),
+                );
+                assert!(before.receipt_by_hash(reverted).unwrap().is_some());
+                assert!(api.provider().block(blocks[1].hash().into()).unwrap().is_some());
+                assert!(api.provider().transaction_id(reverted).unwrap().is_none());
+                assert!(api.provider().transaction_by_hash(reverted).unwrap().is_none());
+                assert!(api.provider().transaction_by_hash_with_meta(reverted).unwrap().is_none());
+                assert!(api
+                    .provider()
+                    .transaction_by_hash_with_meta_and_sender(reverted)
+                    .unwrap()
+                    .is_none());
+                assert!(api.provider().receipt_by_hash(reverted).unwrap().is_none());
+                assert_eq!(
+                    EthTransactions::transaction_receipt(&api, reverted).await.unwrap(),
+                    None
+                );
+                assert!(EthTransactions::transaction_by_hash(&api, reverted)
+                    .await
+                    .unwrap()
+                    .is_none());
+                assert!(EthTransactions::transaction_receipt(&api, retained)
+                    .await
+                    .unwrap()
+                    .is_some());
+            }
         }
     }
 }

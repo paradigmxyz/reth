@@ -211,6 +211,7 @@ not (
     test(=providers::blockchain_provider::tests::test_state_provider_factory) or
     test(=providers::consistent::tests::changeset_ranges_include_the_last_block_number) or
     test(=providers::consistent::tests::find_block_by_hash_reads_tree_blocks_of_the_supplied_state) or
+    test(=providers::consistent::tests::hides_reverted_disk_suffix_from_canonical_number_reads) or
     test(=providers::consistent::tests::partially_pruned_genesis_changesets_are_unavailable) or
     test(=providers::consistent::tests::static_file_changeset_ranges_include_the_last_block_number) or
     test(=providers::consistent::tests::test_block_reader_block) or
@@ -281,6 +282,7 @@ not (
     test(=eth::core::tests::estimate_gas_transfer_respects_rpc_gas_cap) or
     test(=eth::core::tests::lookups_by_tx_hash_match_block_lookups) or
     test(=eth::core::tests::pending_block_build_stops_when_cancelled) or
+    test(=eth::core::tests::receipts_by_hash_follow_rewinds_before_disk_cleanup) or
     test(=eth::core::tests::simulate_preserves_state_between_blocks) or
     test(=eth::core::tests::simulate_roots_include_overrides_across_blocks) or
     test(=eth::core::tests::test_transaction_by_sender_and_nonce_missing_block_returns_error) or

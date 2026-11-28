@@ -184,40 +184,29 @@ where
             }
 
             while let Poll::Ready(Some(notification)) = this.events.poll_next_unpin(cx) {
-                {
-                    match notification {
-                        CanonStateNotification::Commit { new } => {
-                            for block in new.blocks().values() {
-                                this.process_block(block);
-                            }
-                        }
-                        CanonStateNotification::Reorg { old, new } => {
-                            // handle reorged blocks
-                            for block in old.blocks().values() {
-                                let txs: Vec<BlobTransactionEvent> = block
-                                    .body()
-                                    .eip4844_transactions_iter()
-                                    .map(|tx| {
-                                        let transaction_hash = *tx.tx_hash();
-                                        let block_metadata = BlockMetadata {
-                                            block_hash: block.hash(),
-                                            block_number: block.number,
-                                            gas_used: block.gas_used,
-                                        };
-                                        BlobTransactionEvent::Reorged(ReorgedBlob {
-                                            transaction_hash,
-                                            block_metadata,
-                                        })
-                                    })
-                                    .collect();
-                                this.queued_actions.extend(txs);
-                            }
-
-                            for block in new.blocks().values() {
-                                this.process_block(block);
-                            }
-                        }
+                if let Some(old) = notification.reverted() {
+                    for block in old.blocks().values() {
+                        let txs: Vec<BlobTransactionEvent> = block
+                            .body()
+                            .eip4844_transactions_iter()
+                            .map(|tx| {
+                                let transaction_hash = *tx.tx_hash();
+                                let block_metadata = BlockMetadata {
+                                    block_hash: block.hash(),
+                                    block_number: block.number,
+                                    gas_used: block.gas_used,
+                                };
+                                BlobTransactionEvent::Reorged(ReorgedBlob {
+                                    transaction_hash,
+                                    block_metadata,
+                                })
+                            })
+                            .collect();
+                        this.queued_actions.extend(txs);
                     }
+                }
+                for block in notification.committed().blocks().values() {
+                    this.process_block(block);
                 }
             }
         }

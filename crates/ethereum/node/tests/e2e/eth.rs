@@ -875,3 +875,113 @@ async fn submit_cancun_block(
     assert_eq!(status.status, PayloadStatusEnum::Valid);
     Ok(hash)
 }
+
+#[tokio::test]
+async fn rewinds_to_canonical_ancestor_above_finality() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_initial_forkchoice(false)
+        .with_rpc_modifier(|rpc| {
+            rpc.with_http_api(RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Testing,
+            ]))
+        })
+        .build_single()
+        .await?;
+    let engine = node.auth_server_handle().http_client();
+    let rpc = node.rpc_provider();
+    let canonical = node.inner.provider.canonical_in_memory_state();
+
+    let mut hashes = vec![node.block_hash(0)];
+    for timestamp in 1..=8 {
+        let attributes = eth_payload_attributes(&chain_spec, timestamp);
+        let hash = submit_cancun_block(&node, hashes[timestamp as usize - 1], attributes).await?;
+        let advanced = node
+            .engine
+            .forkchoice_updated(ForkchoiceState { head_block_hash: hash, ..Default::default() })
+            .await?;
+        assert_eq!(advanced.payload_status.status, PayloadStatusEnum::Valid);
+        hashes.push(hash);
+    }
+    let (checkpoint, safe, ancestor, tip) = (hashes[3], hashes[4], hashes[5], hashes[8]);
+
+    assert!(canonical.get_finalized_num_hash().is_none());
+    let cases = [
+        (B256::ZERO, None),
+        (checkpoint, None),
+        (checkpoint, Some(eth_payload_attributes(&chain_spec, 9))),
+    ];
+    for (index, (finalized, attrs)) in cases.into_iter().enumerate() {
+        let advanced = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: tip,
+                        safe_block_hash: checkpoint,
+                        finalized_block_hash: finalized,
+                    },
+                    None::<PayloadAttributes>,
+                ),
+            )
+            .await?;
+        assert_eq!(advanced.payload_status.status, PayloadStatusEnum::Valid);
+        assert_eq!(
+            rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+            tip
+        );
+
+        let build_requested = attrs.is_some();
+        let rewound = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: ancestor,
+                        safe_block_hash: safe,
+                        finalized_block_hash: finalized,
+                    },
+                    attrs,
+                ),
+            )
+            .await?;
+        assert_eq!(rewound.payload_status.status, PayloadStatusEnum::Valid);
+        assert_eq!(rewound.payload_status.latest_valid_hash, Some(ancestor));
+        assert_eq!(rewound.payload_id.is_some(), build_requested);
+        assert_eq!(
+            rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+            ancestor
+        );
+        for number in 6..=8 {
+            assert!(rpc.get_block_by_number(BlockNumberOrTag::Number(number)).await?.is_none());
+        }
+        assert_eq!(canonical.get_safe_num_hash().unwrap().hash, safe);
+        node.wait_for_pool_head(ancestor).await?;
+        assert_eq!(
+            canonical.get_finalized_num_hash().map(|block| block.hash),
+            (!finalized.is_zero()).then_some(finalized),
+        );
+
+        // The payload service processes the revert notification before handling this build.
+        let timestamp = 10 + index as u64;
+        let build = engine
+            .request::<_, ForkchoiceUpdated>(
+                "engine_forkchoiceUpdatedV3",
+                (
+                    ForkchoiceState {
+                        head_block_hash: ancestor,
+                        safe_block_hash: ancestor,
+                        finalized_block_hash: B256::ZERO,
+                    },
+                    Some(eth_payload_attributes(&chain_spec, timestamp)),
+                ),
+            )
+            .await?;
+        assert_eq!(build.payload_status.status, PayloadStatusEnum::Valid);
+        assert!(build.payload_id.is_some());
+    }
+
+    Ok(())
+}

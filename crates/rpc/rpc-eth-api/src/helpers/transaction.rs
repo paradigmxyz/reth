@@ -13,7 +13,7 @@ use alloy_consensus::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::{eip2718::Encodable2718, BlockId};
+use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumHash};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo, TransactionRequest};
@@ -31,7 +31,7 @@ use reth_rpc_eth_types::{
     EthResult, FillTransaction, SignError, TransactionSource,
 };
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx,
+    BlockHashReader, BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx,
     TransactionsProvider,
 };
 use reth_transaction_pool::{
@@ -318,6 +318,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     {
         async move {
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
+                self.is_canonical_transaction_block(cached.block.num_hash()).await? &&
                 let Some(tx) = cached.recovered_transaction().map(|tx| tx.cloned())
             {
                 let meta = cached.transaction_meta(hash);
@@ -873,6 +874,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
         async move {
             // First, try the RPC cache
             if let Some(cached) = self.cache().get_transaction_by_hash(hash).await &&
+                self.is_canonical_transaction_block(cached.block.num_hash()).await? &&
                 let Some(source) = cached.to_transaction_source()
             {
                 return Ok(Some(source));
@@ -982,6 +984,19 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 .map_err(Self::Error::from_eth_err)?;
             Ok(block_and_bal.map(|(block, bal)| (transaction, block, bal)))
         }
+    }
+
+    /// Checks a cached transaction's block against the current canonical chain on the I/O pool.
+    ///
+    /// Returns false after a rewind or reorg removes that block, even before cache eviction.
+    fn is_canonical_transaction_block(
+        &self,
+        block: BlockNumHash,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
+        self.spawn_blocking_io(move |this| {
+            Ok(this.provider().block_hash(block.number).map_err(Self::Error::from_eth_err)? ==
+                Some(block.hash))
+        })
     }
 }
 
