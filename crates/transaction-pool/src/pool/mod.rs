@@ -778,20 +778,19 @@ where
         // Handle blob sidecar storage and notifications for EIP-4844 transactions
         if let Some(sidecar) = meta.blob_sidecar {
             let hash = *meta.added.hash();
-            if sidecar.cells().is_none() {
-                self.on_new_blob_sidecar(&hash, &sidecar);
-                self.insert_blob(hash, sidecar);
-            } else {
-                let recoverable = sidecar.availability().is_recoverable();
-                self.insert_blob(hash, sidecar);
-                // A sidecar fetched as cells has no blobs, so listeners get it once rebuilt.
-                if recoverable &&
-                    !self.blob_transaction_sidecar_listener.lock().is_empty() &&
-                    let Ok(Some(full)) = self.blob_store.get(hash)
-                {
-                    self.on_new_blob_sidecar(&hash, &full);
+            match sidecar.cells() {
+                None => self.on_new_blob_sidecar(&hash, &sidecar),
+                // A sidecar fetched as cells has no blobs, so listeners get them joined from the
+                // cells once validation extended them.
+                Some(cells) => {
+                    if !self.blob_transaction_sidecar_listener.lock().is_empty() &&
+                        let Some(full) = cells.to_full()
+                    {
+                        self.on_new_blob_sidecar(&hash, &full.into());
+                    }
                 }
             }
+            self.insert_blob(hash, sidecar);
         }
 
         // Delete replaced blob sidecar if any

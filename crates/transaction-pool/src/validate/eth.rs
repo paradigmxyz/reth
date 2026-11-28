@@ -832,7 +832,7 @@ where
                         ))
                     }
                 }
-                EthBlobTransactionSidecar::Present(sidecar) => {
+                EthBlobTransactionSidecar::Present(mut sidecar) => {
                     let now = Instant::now();
 
                     // EIP-7594 sidecar version handling
@@ -861,20 +861,32 @@ where
                         }
                     }
 
-                    // validate the blob, or only the kept cells of a sidecar fetched as cells
+                    // validate the blob, or the kept cells of a sidecar fetched as cells, extended
+                    // to all cells once they can rebuild the blobs
                     let validation = if let Some(cells) = sidecar.cells() {
-                        cells.validate(
-                            transaction.blob_versioned_hashes().unwrap_or_default(),
-                            self.kzg_settings.get(),
-                        )
+                        cells
+                            .validate(
+                                transaction.blob_versioned_hashes().unwrap_or_default(),
+                                self.kzg_settings.get(),
+                            )
+                            .and_then(|()| {
+                                cells
+                                    .is_recoverable()
+                                    .then(|| cells.extend(self.kzg_settings.get()))
+                                    .transpose()
+                            })
                     } else {
-                        transaction.validate_blob(&sidecar, self.kzg_settings.get())
+                        transaction.validate_blob(&sidecar, self.kzg_settings.get()).map(|()| None)
                     };
-                    if let Err(err) = validation {
-                        self.validation_metrics.invalid_4844.increment(1);
-                        return Err(InvalidPoolTransactionError::Eip4844(
-                            Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                        ))
+                    match validation {
+                        Ok(Some(extended)) => sidecar.set_extended_cells(extended),
+                        Ok(None) => {}
+                        Err(err) => {
+                            self.validation_metrics.invalid_4844.increment(1);
+                            return Err(InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                            ))
+                        }
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());

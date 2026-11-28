@@ -212,8 +212,9 @@ impl BlobTxCellSidecar {
         ))
     }
 
-    // Returns whether the first 64 columns are kept, whose cells are the blob itself.
-    const fn has_data_columns(&self) -> bool {
+    /// Returns whether the first 64 columns are kept, whose cells are the blobs themselves, so
+    /// [`Self::to_full`] can join them.
+    pub const fn has_data_columns(&self) -> bool {
         self.mask.bits() as u64 == u64::MAX
     }
 

@@ -3,7 +3,7 @@
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
     without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
+    BlobTxCellSidecar, PooledBlobSidecar,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -154,12 +154,11 @@ impl DiskFileBlobStore {
 
         let mut missing = missing_hashes(versioned_hashes, &result);
         let cell_txs = self.inner.cell_txs_matching(&missing, true);
-        for (tx, stored) in self.inner.read_many_decoded(cell_txs) {
-            // Sidecars sharing a blob are rebuilt only while it is missing.
+        for (_, stored) in self.inner.read_many_decoded(cell_txs) {
+            // Sidecars sharing a blob are joined only while it is missing.
             if let StoredSidecar::Cells(cells) = stored &&
                 cells.versioned_hashes().any(|hash| missing.contains(&hash)) &&
-                let Some(blob_sidecar) = self.inner.rebuilt.get_or_rebuild(tx, &cells) &&
-                let Some(blob_sidecar) = blob_sidecar.as_eip7594()
+                let Some(blob_sidecar) = cells.to_full()
             {
                 for (hash_idx, match_result) in
                     blob_sidecar.match_versioned_hashes(versioned_hashes)
@@ -301,7 +300,6 @@ impl BlobStore for DiskFileBlobStore {
             let mut cell_sidecars = self.inner.cell_sidecars.write();
             for tx in &txs_to_delete {
                 cell_sidecars.remove(tx);
-                self.inner.rebuilt.remove(tx);
             }
         }
         for tx in txs_to_delete {
@@ -509,7 +507,7 @@ impl BlobStore for DiskFileBlobStore {
             }
         }
 
-        // Only blobs that can be rebuilt from their cells count as available.
+        // Only blobs that can be joined from their cells count as available.
         for (available, requested_hash) in result.iter_mut().zip(versioned_hashes) {
             *available |= cell_sidecars
                 .values()
@@ -568,8 +566,6 @@ struct DiskFileBlobStoreInner {
     // Transactions stored as cell sidecars. They are not in `versioned_hashes_to_txhash`, which
     // only points to full sidecars.
     cell_sidecars: RwLock<B256Map<CellSidecarFile>>,
-    // Sidecars rebuilt from cell sidecars.
-    rebuilt: RebuiltSidecars,
 }
 
 impl DiskFileBlobStoreInner {
@@ -586,7 +582,6 @@ impl DiskFileBlobStoreInner {
                 Default::default(),
             )),
             cell_sidecars: Default::default(),
-            rebuilt: Default::default(),
         }
     }
 
@@ -709,7 +704,6 @@ impl DiskFileBlobStoreInner {
         fs::write(&tmp, data)?;
         fs::rename(&tmp, path)?;
         self.cell_sidecars.write().remove(&tx);
-        self.rebuilt.remove(&tx);
         self.size_tracker.sub_size(size as usize);
         self.size_tracker.sub_len(1);
         Ok(true)
@@ -727,7 +721,7 @@ impl DiskFileBlobStoreInner {
         data.encode(&mut buf);
 
         let file = CellSidecarFile {
-            recoverable: data.is_recoverable(),
+            recoverable: data.has_data_columns(),
             versioned_hashes: data.versioned_hashes().collect(),
         };
         {
@@ -747,7 +741,7 @@ impl DiskFileBlobStoreInner {
     }
 
     // Returns the transactions stored as cells with a blob in `hashes`, only those whose blobs
-    // can be rebuilt if `recoverable`.
+    // can be joined if `recoverable`.
     fn cell_txs_matching(&self, hashes: &B256Set, recoverable: bool) -> Vec<TxHash> {
         if hashes.is_empty() {
             return Vec::new()
@@ -813,7 +807,9 @@ impl DiskFileBlobStoreInner {
                 self.blob_cache.lock().insert(tx, blob_arc.clone());
                 Some(blob_arc)
             }
-            StoredSidecar::Cells(cells) => self.rebuilt.get_or_rebuild(tx, &cells),
+            StoredSidecar::Cells(cells) => cells
+                .to_full()
+                .map(|sidecar| Arc::new(BlobTransactionSidecarVariant::Eip7594(sidecar))),
         }
     }
 
@@ -946,8 +942,8 @@ impl DiskFileBlobStoreInner {
             }
         }
         for (tx, cells) in from_cells {
-            if let Some(data) = self.rebuilt.get_or_rebuild(tx, &cells) {
-                res.push((tx, data));
+            if let Some(data) = cells.to_full() {
+                res.push((tx, Arc::new(BlobTransactionSidecarVariant::Eip7594(data))));
             }
         }
 
@@ -1041,7 +1037,7 @@ pub enum OpenDiskFileBlobStore {
 // What the disk store keeps in memory about a cell sidecar file.
 #[derive(Debug)]
 struct CellSidecarFile {
-    // Whether the blobs can be rebuilt from the kept cells.
+    // Whether the blobs can be joined from the kept cells, see `BlobTxCellSidecar::to_full`.
     recoverable: bool,
     versioned_hashes: Vec<B256>,
 }
@@ -1074,7 +1070,6 @@ mod tests {
     };
 
     use super::*;
-    use crate::blobstore::cells::tests::{fixture, subset};
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
@@ -1615,18 +1610,5 @@ mod tests {
 
         assert_eq!(store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap(), vec![None]);
         assert_eq!(store.has_versioned_hashes(&[versioned_hash]).unwrap(), vec![false]);
-    }
-
-    #[test]
-    fn disk_get_blobs_v3_rebuilds_a_shared_blob_once() {
-        let (store, _dir) = tmp_store();
-        let (_, all) = fixture();
-        let hash = all.versioned_hashes().next().unwrap();
-        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
-        store.insert_cells(B256::random(), half.clone()).unwrap();
-        store.insert_cells(B256::random(), half).unwrap();
-
-        assert!(store.get_by_versioned_hashes_v3(&[hash]).unwrap()[0].is_some());
-        assert_eq!(store.inner.rebuilt.cache.lock().sidecars.len(), 1);
     }
 }
