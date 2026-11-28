@@ -334,7 +334,9 @@ pub trait LoadPendingBlock:
                 }
 
                 // ensure we still have capacity for this transaction
-                let exceeds_gas_limit = if is_amsterdam {
+                let exceeds_gas_limit = if pool_tx.transaction.frame_transaction().is_some() {
+                    None
+                } else if is_amsterdam {
                     let regular_available_gas =
                         block_gas_limit.saturating_sub(block_regular_gas_used);
                     let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);

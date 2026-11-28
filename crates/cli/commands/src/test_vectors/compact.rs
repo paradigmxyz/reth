@@ -1,5 +1,9 @@
-use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{hex, Signature, TxKind, B256};
+use alloy_eips::{
+    eip4895::Withdrawals,
+    eip8141::{FrameLimits, FrameMode, SignatureScheme, FRAME_TX_TYPE},
+};
+use alloy_primitives::{hex, Address, Bytes, Signature, TxKind, B256, U256};
+use alloy_rlp::{Encodable, PayloadView, RlpDecodable, RlpEncodable};
 use arbitrary::Arbitrary;
 use eyre::{Context, Result};
 use proptest::{
@@ -268,8 +272,16 @@ where
         }
         let len_or_identifier = identifier.unwrap_or(compact_bytes.len());
 
-        let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
-        reconstructed.to_compact(&mut buffer);
+        match decode_legacy_frame_vector(&type_name, &compact_bytes)? {
+            Some((prefix_len, legacy)) => {
+                buffer.extend_from_slice(&compact_bytes[..prefix_len]);
+                legacy.encode(&mut buffer);
+            }
+            None => {
+                let (reconstructed, _) = T::from_compact(&compact_bytes, len_or_identifier);
+                reconstructed.to_compact(&mut buffer);
+            }
+        }
         assert_eq!(buffer, compact_bytes, "mismatch {type_name}");
     }
 
@@ -283,10 +295,191 @@ pub fn type_name<T>() -> String {
     // With alloy type transition <https://github.com/paradigmxyz/reth/pull/15768> the types are renamed, we map them here to the original name so that test vector files remain consistent
     let name = std::any::type_name::<T>();
     match name {
+        "reth_ethereum_primitives::receipt::Receipt" => "EthereumReceipt".to_string(),
         "alloy_consensus::transaction::envelope::EthereumTypedTransaction<alloy_consensus::transaction::eip4844::TxEip4844>" => "Transaction".to_string(),
         "alloy_consensus::transaction::envelope::EthereumTxEnvelope<alloy_consensus::transaction::eip4844::TxEip4844>" => "TransactionSigned".to_string(),
         name => {
             name.split("::").last().unwrap_or(std::any::type_name::<T>()).to_string()
+        }
+    }
+}
+
+/// Historical vectors contain untyped target and signature metadata bytes.
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrame {
+    mode: FrameMode,
+    flags: u8,
+    target: Bytes,
+    limits: FrameLimits,
+    value: U256,
+    data: Bytes,
+}
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrameSignature {
+    scheme: SignatureScheme,
+    signer: Bytes,
+    msg: Bytes,
+    signature: Bytes,
+}
+
+/// Preserve the old fee tuple without converting it to the aggregate transaction fee.
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrameFees {
+    max_fee_per_gas: U256,
+    max_priority_fee_per_gas: U256,
+    max_fee_per_blob_gas: U256,
+}
+
+#[derive(Debug, RlpEncodable, RlpDecodable)]
+struct LegacyFrameTransaction {
+    chain_id: u64,
+    nonce: u64,
+    sender: Address,
+    frames: Vec<LegacyFrame>,
+    signatures: Vec<LegacyFrameSignature>,
+    fees: LegacyFrameFees,
+    blob_versioned_hashes: Vec<B256>,
+}
+
+fn decode_legacy_frame_vector(
+    type_name: &str,
+    bytes: &[u8],
+) -> alloy_rlp::Result<Option<(usize, LegacyFrameTransaction)>> {
+    let prefix: &[u8] = match type_name {
+        "Transaction" => &[FRAME_TX_TYPE, FRAME_TX_TYPE],
+        "TransactionSigned" => &[u8::MAX, FRAME_TX_TYPE, FRAME_TX_TYPE],
+        _ => return Ok(None),
+    };
+    let Some(payload) = bytes.strip_prefix(prefix) else { return Ok(None) };
+    let mut encoded = payload;
+    let PayloadView::List(fields) = alloy_rlp::Header::decode_raw(&mut encoded)? else {
+        return Err(alloy_rlp::Error::UnexpectedString)
+    };
+    // Keyed transactions add an eighth field; current fees contain two values.
+    if fields.len() != 7 {
+        return Ok(None)
+    }
+    let mut encoded_fees = fields[5];
+    let PayloadView::List(fees) = alloy_rlp::Header::decode_raw(&mut encoded_fees)? else {
+        return Err(alloy_rlp::Error::UnexpectedString)
+    };
+    if fees.len() != 3 {
+        return Ok(None)
+    }
+    let transaction = alloy_rlp::decode_exact(payload)?;
+    Ok(Some((prefix.len(), transaction)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::TxEip8141;
+    use alloy_primitives::Sealable;
+    use reth_codecs::Compact;
+
+    const LEGACY_PAYLOAD: &str = concat!(
+        "e8018094",
+        "0000000000000000000000000000000000000000",
+        "cac9808081aac280808080",
+        "c0c3808080c0",
+    );
+    const PREFIXES: [(&str, &[u8]); 2] = [
+        ("Transaction", &[FRAME_TX_TYPE, FRAME_TX_TYPE]),
+        ("TransactionSigned", &[u8::MAX, FRAME_TX_TYPE, FRAME_TX_TYPE]),
+    ];
+
+    #[test]
+    fn receipt_vectors_keep_the_existing_filename() {
+        assert_eq!(type_name::<Receipt>(), "EthereumReceipt");
+    }
+
+    #[test]
+    fn legacy_frame_vectors_preserve_nested_fees_and_untyped_metadata() {
+        let payload = hex::decode(LEGACY_PAYLOAD).unwrap();
+        for (type_name, prefix) in PREFIXES {
+            let mut vector = prefix.to_vec();
+            vector.extend_from_slice(&payload);
+            let (prefix_len, mut legacy) =
+                decode_legacy_frame_vector(type_name, &vector).unwrap().unwrap();
+            assert_eq!(prefix_len, prefix.len());
+            assert_eq!(alloy_rlp::encode(&legacy), payload);
+
+            for target in [Bytes::new(), Bytes::from_static(&[0xaa])] {
+                legacy.frames[0].target = target;
+                legacy.signatures = vec![LegacyFrameSignature {
+                    scheme: SignatureScheme::Secp256k1,
+                    signer: Bytes::from_static(&[0xab]),
+                    msg: Bytes::from_static(&[0xcd]),
+                    signature: Bytes::new(),
+                }];
+                legacy.fees.max_fee_per_gas = U256::MAX;
+                legacy.fees.max_priority_fee_per_gas = U256::from(1);
+                legacy.fees.max_fee_per_blob_gas = U256::from(2);
+                let mut encoded = prefix.to_vec();
+                legacy.encode(&mut encoded);
+                let (prefix_len, decoded) =
+                    decode_legacy_frame_vector(type_name, &encoded).unwrap().unwrap();
+                let mut roundtrip = encoded[..prefix_len].to_vec();
+                decoded.encode(&mut roundtrip);
+                assert_eq!(roundtrip, encoded);
+            }
+        }
+    }
+
+    #[test]
+    fn current_and_standard_vectors_use_compact_decoding() {
+        for nonce_keys in [None, Some(vec![U256::from(1)])] {
+            let frame = TxEip8141 { chain_id: 1, nonce_keys, ..Default::default() };
+            let unsigned = Transaction::Eip8141(frame.clone());
+            let signed = TransactionSigned::Eip8141(frame.seal_slow());
+            let mut compact = Vec::new();
+            let identifier = unsigned.to_compact(&mut compact);
+            assert!(decode_legacy_frame_vector("Transaction", &compact).unwrap().is_none());
+            let (decoded, _) = Transaction::from_compact(&compact, identifier);
+            assert_eq!(decoded, unsigned);
+
+            compact.clear();
+            let len = signed.to_compact(&mut compact);
+            assert!(decode_legacy_frame_vector("TransactionSigned", &compact).unwrap().is_none());
+            let (decoded, _) = TransactionSigned::from_compact(&compact, len);
+            assert_eq!(decoded, signed);
+        }
+
+        for (type_name, bytes) in [
+            ("Receipt", &[FRAME_TX_TYPE, FRAME_TX_TYPE][..]),
+            ("Transaction", &[0, 0]),
+            ("TransactionSigned", &[0, 0]),
+        ] {
+            assert!(decode_legacy_frame_vector(type_name, bytes).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn malformed_legacy_frame_vectors_return_rlp_errors() {
+        for (type_name, prefix) in PREFIXES {
+            let mut vector = prefix.to_vec();
+            vector.extend_from_slice(&hex::decode(LEGACY_PAYLOAD).unwrap());
+            vector.push(0);
+            assert_eq!(
+                decode_legacy_frame_vector(type_name, &vector).unwrap_err(),
+                alloy_rlp::Error::UnexpectedLength,
+            );
+
+            let mut vector = prefix.to_vec();
+            vector.push(0x80);
+            assert_eq!(
+                decode_legacy_frame_vector(type_name, &vector).unwrap_err(),
+                alloy_rlp::Error::UnexpectedString,
+            );
+
+            let mut vector = prefix.to_vec();
+            vector.push(0xc7);
+            vector.extend_from_slice(&[0x80; 7]);
+            assert_eq!(
+                decode_legacy_frame_vector(type_name, &vector).unwrap_err(),
+                alloy_rlp::Error::UnexpectedString,
+            );
         }
     }
 }

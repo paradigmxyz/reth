@@ -30,7 +30,6 @@ use rand::{distr::Uniform, prelude::Distribution};
 use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
 use reth_primitives_traits::{
     transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
-    SignedTransaction,
 };
 
 use alloy_consensus::error::ValueError;
@@ -421,6 +420,7 @@ impl MockTransaction {
             TxType::Eip1559 => Self::eip1559(),
             TxType::Eip4844 => Self::eip4844(),
             TxType::Eip7702 => Self::eip7702(),
+            TxType::Eip8141 => panic!("MockTransaction does not support EIP-8141 transactions"),
         }
     }
 
@@ -730,6 +730,10 @@ impl PoolTransaction for MockTransaction {
         pooled.into()
     }
 
+    fn pooled_into_consensus(tx: Self::Pooled) -> Self::Consensus {
+        crate::EthPooledTransaction::pooled_into_consensus(tx)
+    }
+
     fn recover_raw_transaction(data: &[u8]) -> Result<Self, RawPoolTransactionError> {
         let mut transaction = Self::try_recover(Self::decode_raw_transaction(data)?)
             .map_err(|_| RawPoolTransactionError::InvalidTransactionSignature)?;
@@ -939,9 +943,9 @@ impl EthPoolTransaction for MockTransaction {
         sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().into_parts();
-        tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
-            .map(|tx| tx.with_signer(signer))
-            .ok()
+        let tx = tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar)).ok()?;
+        let tx = PooledTransactionVariant::try_from(tx).ok()?;
+        Some(Recovered::new_unchecked(tx, signer))
     }
 
     fn try_from_eip4844(
@@ -949,10 +953,9 @@ impl EthPoolTransaction for MockTransaction {
         sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
-        tx.try_into_pooled_eip4844(sidecar)
-            .map(|tx| tx.with_signer(signer))
-            .ok()
-            .map(Self::from_pooled)
+        let tx = tx.try_into_pooled_eip4844(sidecar).ok()?;
+        let tx = PooledTransactionVariant::try_from(tx).ok()?;
+        Some(Self::from_pooled(Recovered::new_unchecked(tx, signer)))
     }
 
     fn validate_blob(
@@ -1102,6 +1105,11 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
             }),
+            Transaction::Eip8141(_) => {
+                Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
+                    TxType::Eip8141.into(),
+                ))
+            }
         }
     }
 }
@@ -1208,13 +1216,18 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
                 })
             }
+            EthereumTxEnvelope::Eip8141(_) => {
+                Err(TryFromRecoveredTransactionError::UnsupportedTransactionType(
+                    TxType::Eip8141.into(),
+                ))
+            }
         }
     }
 }
 
 impl From<Recovered<PooledTransactionVariant>> for MockTransaction {
     fn from(tx: Recovered<PooledTransactionVariant>) -> Self {
-        tx.convert::<TransactionSigned>().try_into().expect(
+        tx.map(Self::pooled_into_consensus).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
         )
     }

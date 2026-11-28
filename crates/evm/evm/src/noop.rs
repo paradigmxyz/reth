@@ -75,6 +75,17 @@ where
     ) -> Result<crate::ExecutionCtxFor<'_, Self>, Self::Error> {
         self.inner().context_for_next_block(parent, attributes)
     }
+
+    fn context_for_block_with_parent_timestamp<'a>(
+        &self,
+        block: &'a SealedBlock<BlockTy<Self::Primitives>>,
+        parent_timestamp: u64,
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error>
+    where
+        Self: 'a,
+    {
+        self.inner().context_for_block_with_parent_timestamp(block, parent_timestamp)
+    }
 }
 
 #[cfg(feature = "std")]
@@ -98,5 +109,13 @@ where
         payload: &T,
     ) -> Result<impl crate::ExecutableTxIterator<Self>, Self::Error> {
         self.inner().tx_iterator_for_payload(payload)
+    }
+
+    fn context_for_payload_with_parent_timestamp<'a>(
+        &self,
+        payload: &'a T,
+        parent_timestamp: u64,
+    ) -> Result<crate::ExecutionCtxFor<'a, Self>, Self::Error> {
+        self.inner().context_for_payload_with_parent_timestamp(payload, parent_timestamp)
     }
 }

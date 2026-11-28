@@ -12,11 +12,12 @@ use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
 use reth_errors::RethError;
-use reth_evm::{ConfigureEvm, EvmEnvFor};
+use reth_evm::{ConfigureEvm, EvmEnv, EvmEnvFor};
 use reth_primitives_traits::{BlockTy, RecoveredBlock, SealedHeaderFor};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{FromEvmError, IntoEthApiError},
+    transaction::read_frame_nonce,
     EthApiError, PendingBlockEnv, RpcInvalidTransactionError, SignError,
 };
 use reth_rpc_server_types::constants::{DEFAULT_MAX_PROOF_SLOTS, DEFAULT_MAX_STORAGE_VALUES_SLOTS};
@@ -54,16 +55,52 @@ pub trait EthState: LoadState + SpawnBlocking {
         Ok(())
     }
 
-    /// Returns the number of transactions sent from an address at the given block identifier.
-    ///
-    /// If this is [`BlockNumberOrTag::Pending`](alloy_eips::BlockNumberOrTag) then this will
-    /// look up the highest transaction in pool and return the next nonce (highest + 1).
+    /// Returns the account nonce or a shared keyed nonce sequence at the selected block.
+    /// Omitted keys and `[]` retain the legacy pending-pool nonce behavior.
     fn transaction_count(
         &self,
         address: Address,
         block_id: Option<BlockId>,
+        nonce_keys: Option<Vec<U256>>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        LoadState::transaction_count(self, address, block_id)
+        async move {
+            let Some(keys) = nonce_keys else {
+                return LoadState::transaction_count(self, address, block_id).await;
+            };
+            alloy_eips::eip8250::validate_nonce_keys(&keys)
+                .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
+            if keys.is_empty() {
+                return LoadState::transaction_count(self, address, block_id).await;
+            }
+            self.spawn_blocking_io_fut(async move |this| {
+                let at = block_id.unwrap_or_default();
+                let pending = if at.is_pending() { this.pool_pending_block().await? } else { None };
+                let (env, state): (_, StateProviderBox) = if let Some(pending) = pending {
+                    let env =
+                        this.evm_env_for_header(pending.block().sealed_block().sealed_header())?;
+                    let state = this
+                        .provider()
+                        .state_with_block_appended(pending.parent_hash(), pending.executed_block)
+                        .map_err(Self::Error::from_eth_err)?;
+                    (env, state)
+                } else {
+                    let (env, at) = this.evm_env_at(at).await?;
+                    (env, this.state_at_block_id(at).await?)
+                };
+                if !Into::<evm2::SpecId>::into(env.spec_id()).enables(evm2::SpecId::BOGOTA) {
+                    return Err(EthApiError::KeyedNoncesNotActive.into());
+                }
+                read_frame_nonce(address, &keys, |address, slot| {
+                    state
+                        .storage(address, slot.into())
+                        .map(|value| value.unwrap_or_default())
+                        .map_err(EthApiError::from)
+                })
+                .map_err(Self::Error::from_eth_err)?
+                .ok_or_else(|| EthApiError::InternalEthError.into())
+            })
+            .await
+        }
     }
 
     /// Returns code of given account, at given blocknumber.
@@ -541,12 +578,54 @@ pub trait LoadState:
         Self: SpawnBlocking,
     {
         let address = request.as_ref().from;
+        let nonce_keys = request.as_ref().nonce_keys.clone();
         self.spawn_blocking_io(move |this| {
             let address = match address {
                 Some(address) => address,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
 
+            if let Some(keys) = nonce_keys {
+                alloy_eips::eip8250::validate_nonce_keys(&keys)
+                    .map_err(|reason| EthApiError::InvalidParams(reason.into()))?;
+                if !keys.is_empty() {
+                    let state = this.latest_state()?;
+                    let sequence = read_frame_nonce(address, &keys, |address, slot| {
+                        let current = state
+                            .storage(address, slot.into())
+                            .map_err(EthApiError::from)?
+                            .unwrap_or_default();
+                        if current >= U256::from(u64::MAX) {
+                            return Err(EthApiError::InvalidParams(
+                                "keyed nonce sequence exhausted".into(),
+                            ));
+                        }
+                        Ok(current)
+                    })
+                    .map_err(|error| {
+                        Self::Error::from_eth_err(match error {
+                            EthApiError::NonceKeysNotSynchronized => EthApiError::InvalidParams(
+                                "nonce keys do not share one sequence".into(),
+                            ),
+                            error => error,
+                        })
+                    })?;
+                    return sequence
+                        .map(|sequence| sequence.to::<u64>())
+                        .ok_or_else(|| EthApiError::InternalEthError.into());
+                }
+                let sequence = this
+                    .latest_state()?
+                    .account_nonce(&address)
+                    .map_err(Self::Error::from_eth_err)?
+                    .unwrap_or_default();
+                if sequence == u64::MAX {
+                    return Err(
+                        EthApiError::InvalidParams("keyed nonce sequence exhausted".into()).into()
+                    );
+                }
+                return Ok(sequence);
+            }
             // first fetch the on chain nonce of the account
             let mut next_nonce = this
                 .latest_state()?

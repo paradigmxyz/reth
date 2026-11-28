@@ -9,6 +9,7 @@ mod executor_replay;
 mod exex;
 mod finality;
 mod forkchoice;
+mod frame_transactions;
 mod invalid_payload;
 mod p2p;
 mod pool;

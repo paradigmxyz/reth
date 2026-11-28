@@ -12,6 +12,8 @@ description = "Transaction pool implementation"
 workspace = true
 
 [dependencies]
+evm2 = { workspace = true, features = ["std"] }
+
 # reth
 reth-chain-state.workspace = true
 reth-ethereum-primitives.workspace = true
@@ -62,7 +64,6 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
-evm2.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 alloy-primitives = { workspace = true, features = ["rand"] }

@@ -416,7 +416,7 @@ fn calculate_issuance(
 fn total_fees(receipts: &[impl ReceiptResponse]) -> U256 {
     receipts
         .iter()
-        .map(|receipt| U256::from(receipt.gas_used()) * U256::from(receipt.effective_gas_price()))
+        .map(|receipt| U256::from(receipt.gas_used()) * receipt.effective_gas_price())
         .sum()
 }
 
@@ -485,7 +485,9 @@ mod tests {
     };
     use reth_chain_state::ExecutedBlock;
     use reth_chainspec::{ChainInfo, MAINNET, MIN_TRANSACTION_GAS};
-    use reth_ethereum_primitives::{Block, Receipt, TransactionSigned};
+    use reth_ethereum_primitives::{
+        calculate_receipt_root_no_memo, Block, Receipt, TransactionSigned, TxType,
+    };
     use reth_evm::{ConfigureEvm, Evm};
     use reth_evm_ethereum::{EthEvmConfig, EthEvmEnv};
     use reth_network_api::noop::NoopNetwork;
@@ -725,13 +727,12 @@ mod tests {
             Signature::test_signature(),
         );
         let transactions = vec![tx];
-        let receipt =
-            Receipt { success: true, cumulative_gas_used: gas_used, ..Default::default() };
+        let receipt = Receipt::standard(TxType::Legacy, true, gas_used, vec![]);
         let header = Header {
             number,
             parent_hash,
             transactions_root: calculate_transaction_root(&transactions),
-            receipts_root: Receipt::calculate_receipt_root_no_memo(std::slice::from_ref(&receipt)),
+            receipts_root: calculate_receipt_root_no_memo(std::slice::from_ref(&receipt)),
             gas_used,
             gas_limit: 30_000_000,
             timestamp: number * 12,
@@ -781,7 +782,7 @@ mod tests {
         let [receipt] = page.receipts.as_slice() else { panic!("expected one receipt") };
         assert_eq!(receipt.receipt.block_hash, Some(first_hash));
         assert_eq!(receipt.receipt.transaction_hash, tx_hash);
-        assert_eq!(receipt.receipt.effective_gas_price, 2);
+        assert_eq!(receipt.receipt.effective_gas_price, U256::from(2));
         assert_eq!(receipt.receipt.gas_used, MIN_TRANSACTION_GAS);
     }
 
@@ -915,14 +916,14 @@ mod tests {
             block_hash: Some(B256::ZERO),
             block_number: Some(0),
             gas_used: 2,
-            effective_gas_price: u128::MAX,
+            effective_gas_price: U256::from(1) << 160,
             blob_gas_used: None,
             blob_gas_price: None,
             from: Address::ZERO,
             to: None,
             contract_address: None,
         };
-        assert_eq!(total_fees(&[receipt.clone(), receipt]), U256::from(u128::MAX) * U256::from(4));
+        assert_eq!(total_fees(&[receipt.clone(), receipt]), U256::from(4) << 160);
     }
 
     #[test]

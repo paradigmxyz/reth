@@ -115,7 +115,7 @@ use alloy_eip7928::{
     bal::{Bal, DecodedBal},
     BlockAccessList,
 };
-use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, eip2718::Typed2718, eip4895::Withdrawal, NumHash};
 use alloy_primitives::{map::B256Set, B256};
 use reth_concurrency::sync::{
     channel,
@@ -441,14 +441,19 @@ where
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
+        parent_timestamp: u64,
     ) -> Result<ExecutionCtxFor<'a, Evm>, Evm::Error>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(self.evm_config.context_for_payload(payload)?),
-            BlockOrPayload::Block(block) => Ok(self.evm_config.context_for_block(block)?),
+            BlockOrPayload::Payload(payload) => {
+                self.evm_config.context_for_payload_with_parent_timestamp(payload, parent_timestamp)
+            }
+            BlockOrPayload::Block(block) => {
+                self.evm_config.context_for_block_with_parent_timestamp(block, parent_timestamp)
+            }
         }
     }
 
@@ -601,7 +606,19 @@ where
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
-        let sequential_reason = ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()));
+        let has_frame_transactions = match &input {
+            BlockOrPayload::Payload(payload) => payload.has_eip8141_transactions(),
+            BlockOrPayload::Block(block) => {
+                block.body().transactions().iter().any(Typed2718::is_eip8141)
+            }
+        };
+        // The BAL commit loop receives only aggregate gas limits, so it cannot replay a
+        // frame transaction's separate execution and state reservations.
+        let sequential_reason = if has_frame_transactions {
+            Some("frame-transactions")
+        } else {
+            ensure_ok!(self.bal_path_eligible(env.decoded_bal.as_deref()))
+        };
         let parallel_bal_execution = sequential_reason.is_none();
 
         // Prepare the state-root job before execution so it can provide streaming hooks.
@@ -722,7 +739,13 @@ where
         debug!(target: "engine::tree::bal_execution_path", block = number, %hash, path, reason, "Executing block");
         let execute_block_start = Instant::now();
         let execution_result = if parallel_bal_execution {
-            self.execute_block_bal(env, &input, &handle, &make_state_provider)
+            self.execute_block_bal(
+                env,
+                &input,
+                parent_block.timestamp(),
+                &handle,
+                &make_state_provider,
+            )
         } else {
             let state_provider = make_state_provider(false);
             match state_provider {
@@ -730,6 +753,7 @@ where
                     state_provider,
                     env,
                     &input,
+                    parent_block.timestamp(),
                     &mut handle,
                     execution_state_hook,
                 ),
@@ -1019,6 +1043,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
+        parent_timestamp: u64,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt, EvmTypesFor<Evm>>,
         state_hook: Option<StateRootUpdateHook>,
     ) -> Result<
@@ -1041,7 +1066,8 @@ where
         let prewarm_results = handle.prewarm_results().filter(|_| !input.has_block_access_list());
         let execution_start = Instant::now();
         let evm_config = self.evm_config.clone().with_jit_support();
-        let execution_ctx = self.execution_ctx_for(input).map_err(BlockExecutionError::other)?;
+        let execution_ctx =
+            self.execution_ctx_for(input, parent_timestamp).map_err(BlockExecutionError::other)?;
 
         let (output, senders, built_bal) = debug_span!(target: "engine::tree", "execute_block")
             .in_scope(|| {
@@ -1139,6 +1165,7 @@ where
         &self,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
+        parent_timestamp: u64,
         handle: &PayloadHandle<Tx, Err, N::Receipt, EvmTypesFor<Evm>>,
         make_state_provider: &MakeStateProvider,
     ) -> Result<
@@ -1166,8 +1193,9 @@ where
             Ok(StateProviderDatabase::new(provider))
         };
         let execution_start = Instant::now();
-        let ctx =
-            self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
+        let ctx = self
+            .execution_ctx_for(input, parent_timestamp)
+            .map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let (output, senders, built_bal, received_bal_evm) =
             crate::tree::payload_processor::bal::execute_block(
                 &self.runtime,

@@ -135,7 +135,8 @@ impl<R: Receipt> ReceiptRootTaskHandle<R> {
 mod tests {
 
     use super::*;
-    use alloy_consensus::{proofs::calculate_receipt_root, TxReceipt};
+    use alloy_consensus::{proofs::calculate_receipt_root, ReceiptEnvelope, TxReceipt};
+    use alloy_eips::eip8141::{FrameGasUsed, FrameReceipt, FrameReceiptPayload, FrameStatus};
     use alloy_primitives::{b256, Address, Bytes, Log};
     use reth_concurrency::sync::{channel::bounded, thread};
     use reth_ethereum_primitives::{Receipt, TxType};
@@ -213,27 +214,33 @@ mod tests {
     fn test_receipt_root_matches_standard_calculation() {
         // Create some receipts with actual data
         let receipts = vec![
-            Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 21000,
-                success: true,
-                logs: vec![],
-            },
-            Receipt {
-                tx_type: TxType::Eip1559,
-                cumulative_gas_used: 42000,
-                success: true,
-                logs: vec![Log {
+            Receipt::standard(TxType::Legacy, true, 21000, vec![]),
+            Receipt::standard(
+                TxType::Eip1559,
+                true,
+                42000,
+                vec![Log {
                     address: Address::ZERO,
                     data: alloy_primitives::LogData::new_unchecked(vec![B256::ZERO], Bytes::new()),
                 }],
-            },
-            Receipt {
-                tx_type: TxType::Eip2930,
-                cumulative_gas_used: 63000,
-                success: false,
-                logs: vec![],
-            },
+            ),
+            Receipt::standard(TxType::Eip2930, false, 63000, vec![]),
+            Receipt::from_envelope(ReceiptEnvelope::Eip8141(
+                FrameReceiptPayload {
+                    cumulative_gas_used: 84_000,
+                    payer: Address::repeat_byte(1),
+                    frame_receipts: vec![FrameReceipt {
+                        status: FrameStatus::Success,
+                        gas_used: FrameGasUsed { execution: 21_000, state: 0 },
+                        logs: vec![Log::new_unchecked(
+                            Address::repeat_byte(2),
+                            vec![],
+                            Bytes::new(),
+                        )],
+                    }],
+                }
+                .into(),
+            )),
         ];
 
         // Calculate expected values first (before we move receipts)

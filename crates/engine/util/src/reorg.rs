@@ -282,7 +282,9 @@ where
         StateProviderDatabase::new(state_provider.as_ref().into_evm_state_provider()),
         evm_env.clone(),
     );
-    let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
+    let ctx = evm_config
+        .context_for_block_with_parent_timestamp(&reorg_target, reorg_target_parent.timestamp())
+        .map_err(RethError::other)?;
     let mut builder = evm_config.create_block_builder(evm, evm_env, &reorg_target_parent, ctx);
     if has_bal {
         builder.executor_mut().enable_block_access_list_builder();

@@ -1011,7 +1011,10 @@ fn backfill_request_is_preserved_while_persistence_is_in_flight() {
     assert!(test_harness.tree.try_poll_persistence().unwrap());
 
     test_harness.tree.advance_persistence().unwrap();
-    let persistence_action = test_harness.action_rx.recv().unwrap();
+    let persistence_action = test_harness
+        .action_rx
+        .try_recv()
+        .expect("advancing persistence must queue the catch-up save");
     let PersistenceAction::SaveBlocks(_, sender) = persistence_action else {
         panic!("expected state/trie catch-up save, got {persistence_action:?}")
     };

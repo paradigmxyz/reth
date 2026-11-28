@@ -19,7 +19,8 @@ use reth_node_core::args::JitArgs;
 use reth_primitives_traits::{format_gas_throughput, Account, BlockBody, GotExpected};
 use reth_provider::{
     providers::BlockchainProvider, BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider,
-    DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory, TransactionVariant,
+    DatabaseProviderFactory, HeaderProvider, ReceiptProvider, StaticFileProviderFactory,
+    TransactionVariant,
 };
 use reth_stages::stages::calculate_gas_used_from_headers;
 use reth_storage_api::{ChangeSetReader, DBProvider, StateProvider, StorageChangeSetReader};
@@ -161,6 +162,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                 };
 
+                let executor_at = |parent_number: u64| {
+                    let mut executor = evm_config.batch_executor(db_at(parent_number)?);
+                    let parent = provider_factory.header_by_number(parent_number)?
+                        .ok_or_else(|| eyre::eyre!("header for block {parent_number} not found in the database"))?;
+                    executor.set_parent_timestamp(parent.timestamp());
+                    eyre::Ok(executor)
+                };
+
                 loop {
                     if cancellation.is_cancelled() {
                         break;
@@ -174,7 +183,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     }
                     let chunk_end = (chunk_start + blocks_per_chunk).min(max_block + 1);
 
-                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1)?);
+                    let mut executor = executor_at(chunk_start - 1)?;
                     let mut executor_created = Instant::now();
 
                     'blocks: for block in chunk_start..chunk_end {
@@ -191,7 +200,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             Err(err) => {
                                 if skip_invalid_blocks {
                                     executor =
-                                        evm_config.batch_executor(db_at(block.number())?);
+                                        executor_at(block.number())?;
                                     let _ =
                                         info_tx.send((block, eyre::Report::new(err)));
                                     continue
@@ -258,8 +267,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                                         error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
                                         if skip_invalid_blocks {
-                                            executor = evm_config
-                                                .batch_executor(db_at(block.number())?);
+                                            executor = executor_at(block.number())?;
                                             let _ = info_tx.send((block, err));
                                             continue 'blocks;
                                         }
@@ -272,7 +280,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                             if skip_invalid_blocks {
                                 executor =
-                                    evm_config.batch_executor(db_at(block.number())?);
+                                    executor_at(block.number())?;
                                 let _ = info_tx.send((block, err));
                                 continue 'blocks;
                             }
@@ -287,7 +295,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             let last_block = block.number();
                             let old_executor = std::mem::replace(
                                 &mut executor,
-                                evm_config.batch_executor(db_at(last_block)?),
+                                executor_at(last_block)?,
                             );
                             let bundle = old_executor.into_state();
                             verify_bundle_against_changesets(

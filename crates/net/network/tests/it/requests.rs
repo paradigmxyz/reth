@@ -1,7 +1,7 @@
 #![allow(unreachable_pub)]
 //! Tests for eth related requests
 
-use alloy_consensus::{Header, Sealed};
+use alloy_consensus::{Header, Sealed, TxType};
 use alloy_eips::NumHash;
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256};
 use rand::Rng;
@@ -184,8 +184,8 @@ async fn test_eth68_get_receipts() {
         assert_eq!(receipts.0.len(), 1);
         assert_eq!(receipts.0[0].len(), 2);
         // Eth68 receipts should have bloom filters - verify the structure
-        assert_eq!(receipts.0[0][0].receipt.cumulative_gas_used, 21000);
-        assert_eq!(receipts.0[0][1].receipt.cumulative_gas_used, 42000);
+        assert_eq!(receipts.0[0][0].receipt.cumulative_gas_used(), 21000);
+        assert_eq!(receipts.0[0][1].receipt.cumulative_gas_used(), 42000);
     }
 }
 
@@ -204,8 +204,8 @@ async fn test_eth69_get_receipts() {
         assert_eq!(receipts.0.len(), 1);
         assert_eq!(receipts.0[0].len(), 2);
         // ETH69 receipts do not include bloom filters - verify the structure
-        assert_eq!(receipts.0[0][0].cumulative_gas_used, 21000);
-        assert_eq!(receipts.0[0][1].cumulative_gas_used, 42000);
+        assert_eq!(receipts.0[0][0].cumulative_gas_used(), 21000);
+        assert_eq!(receipts.0[0][1].cumulative_gas_used(), 42000);
     }
 }
 
@@ -222,8 +222,8 @@ async fn test_eth71_fetch_client_get_receipts() {
     assert!(!response.last_block_incomplete);
     assert_eq!(response.receipts.len(), 1);
     assert_eq!(response.receipts[0].len(), 2);
-    assert_eq!(response.receipts[0][0].cumulative_gas_used, 21000);
-    assert_eq!(response.receipts[0][1].cumulative_gas_used, 42000);
+    assert_eq!(response.receipts[0][0].cumulative_gas_used(), 21000);
+    assert_eq!(response.receipts[0][1].cumulative_gas_used(), 42000);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -426,8 +426,8 @@ fn add_receipts(provider: &MockEthProvider, number: BlockNumber) -> B256 {
     provider.add_receipts(
         number,
         vec![
-            Receipt { cumulative_gas_used: 21000, success: true, ..Default::default() },
-            Receipt { cumulative_gas_used: 42000, success: false, ..Default::default() },
+            Receipt::standard(TxType::Legacy, true, 21000, vec![]),
+            Receipt::standard(TxType::Legacy, false, 42000, vec![]),
         ],
     );
     hash

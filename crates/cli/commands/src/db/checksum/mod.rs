@@ -522,7 +522,7 @@ fn checksum_change_based_segment<H: Hasher>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::{EthereumReceipt, Header};
+    use alloy_consensus::{Header, TxType};
     use alloy_primitives::Address;
     use reth_db::test_utils::create_test_rw_db;
     use reth_db_api::{
@@ -530,6 +530,7 @@ mod tests {
         table::Compress,
         transaction::DbTxMut,
     };
+    use reth_ethereum_primitives::Receipt;
     use reth_node_api::NodeTypes;
     use reth_provider::{test_utils::MockNodeTypes, StaticFileProviderBuilder, StaticFileWriter};
 
@@ -644,7 +645,7 @@ mod tests {
         let files = test_files(&dir, 3);
         let db = create_test_rw_db();
         let segment = StaticFileSegment::Receipts;
-        let receipt = |block| EthereumReceipt { cumulative_gas_used: block, ..Default::default() };
+        let receipt = |block| Receipt::standard(TxType::Legacy, false, block, Vec::new());
         let mut writer = files.get_writer(3, segment).unwrap();
         let tx = db.tx_mut().unwrap();
         for block in 3..6 {
@@ -687,7 +688,7 @@ mod tests {
         writer.initialize_pruned_anchor(3).unwrap();
         writer.increment_block(4).unwrap();
         writer.increment_block(5).unwrap();
-        let receipt = EthereumReceipt { cumulative_gas_used: 42, ..Default::default() };
+        let receipt = Receipt::standard(TxType::Legacy, false, 42, Vec::new());
         writer.append_receipt(0, &receipt).unwrap();
         writer.increment_block(6).unwrap();
         writer.append_receipt(1, &Default::default()).unwrap();

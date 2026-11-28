@@ -8,6 +8,11 @@ use derive_more::{Deref, IntoIterator};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_primitives::Receipt;
 
+#[cfg(any(test, feature = "arbitrary"))]
+use alloy_consensus::TxType;
+#[cfg(any(test, feature = "arbitrary"))]
+use alloy_eips::Typed2718;
+
 /// A request for transaction receipts from the given block hashes.
 #[derive(
     Clone,
@@ -68,12 +73,30 @@ impl alloy_rlp::Decodable for GetReceipts70 {
 /// requested.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Deref, IntoIterator)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
 pub struct Receipts<T = Receipt>(
     /// Each receipt hash should correspond to a block hash in the request.
     pub Vec<Vec<ReceiptWithBloom<T>>>,
 );
+
+#[cfg(any(test, feature = "arbitrary"))]
+impl<'a, T> arbitrary::Arbitrary<'a> for Receipts<T>
+where
+    T: arbitrary::Arbitrary<'a> + TxReceipt + Typed2718,
+{
+    fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+        let mut receipts = <Vec<Vec<ReceiptWithBloom<T>>> as arbitrary::Arbitrary>::arbitrary(u)?;
+
+        for receipt in receipts.iter_mut().flatten() {
+            if receipt.receipt.ty() == u8::from(TxType::Eip8141) {
+                // EIP-8141 omits the top-level bloom and reconstructs it from the frame logs.
+                receipt.logs_bloom = receipt.receipt.bloom();
+            }
+        }
+
+        Ok(Self(receipts))
+    }
+}
 
 impl<T: RlpEncodableReceipt> alloy_rlp::Encodable for Receipts<T> {
     #[inline]
@@ -195,14 +218,15 @@ impl<T: TxReceipt> From<Receipts70<T>> for Receipts<T> {
 mod tests {
     use super::*;
     use crate::{message::RequestPair, GetReceipts, Receipts};
-    use alloy_consensus::TxType;
+    use alloy_consensus::{ReceiptEnvelope, TxType};
+    use alloy_eips::eip8141::{FrameGasUsed, FrameReceipt, FrameReceiptPayload, FrameStatus};
     use alloy_primitives::{b256, hex, Address, Bloom, Log};
     use alloy_rlp::{Decodable, Encodable};
 
     #[test]
     fn roundtrip_eip1559() {
         let receipts = Receipts(vec![vec![ReceiptWithBloom {
-            receipt: Receipt { tx_type: TxType::Eip1559, ..Default::default() },
+            receipt: Receipt::standard(TxType::Eip1559, false, 0, vec![]),
             logs_bloom: Default::default(),
         }]]);
 
@@ -213,6 +237,58 @@ mod tests {
         let decoded = Receipts::decode(&mut out).unwrap();
 
         assert_eq!(receipts, decoded);
+    }
+
+    #[test]
+    fn frame_receipts_roundtrip_with_reconstructed_bloom() {
+        for status in [FrameStatus::Success, FrameStatus::Failure, FrameStatus::SkippedAtomicBatch]
+        {
+            let receipt = Receipt::from(ReceiptEnvelope::Eip8141(
+                FrameReceiptPayload {
+                    cumulative_gas_used: 42_000,
+                    payer: Address::with_last_byte(0xaa),
+                    frame_receipts: vec![
+                        FrameReceipt {
+                            status: FrameStatus::Success,
+                            gas_used: FrameGasUsed { execution: 20_000, state: 1_000 },
+                            logs: vec![Log::new_unchecked(
+                                Address::with_last_byte(0xbb),
+                                vec![B256::repeat_byte(1)],
+                                vec![2].into(),
+                            )],
+                        },
+                        FrameReceipt {
+                            status,
+                            gas_used: FrameGasUsed { execution: 0, state: 0 },
+                            logs: vec![],
+                        },
+                    ],
+                }
+                .into(),
+            ));
+            let expected =
+                Receipts(vec![vec![ReceiptWithBloom { logs_bloom: receipt.bloom(), receipt }]]);
+            let encoded = alloy_rlp::encode(&expected);
+            let decoded = Receipts::<Receipt>::decode(&mut encoded.as_slice()).unwrap();
+            assert_eq!(decoded, expected);
+            assert_eq!(decoded[0][0].logs_bloom, decoded[0][0].receipt.bloom());
+            assert_eq!(
+                decoded[0][0].receipt.as_eip8141().unwrap().frame_receipts[1].status,
+                status
+            );
+            let without_bloom = Receipts69(vec![vec![expected[0][0].receipt.clone()]]);
+            let encoded = alloy_rlp::encode(&without_bloom);
+            let decoded = Receipts69::<Receipt>::decode(&mut encoded.as_slice()).unwrap();
+            assert_eq!(decoded.into_with_bloom(), expected);
+            for last_block_incomplete in [false, true] {
+                let receipts =
+                    Receipts70 { last_block_incomplete, receipts: without_bloom.0.clone() };
+                let encoded = alloy_rlp::encode(&receipts);
+                let decoded = Receipts70::<Receipt>::decode(&mut encoded.as_slice()).unwrap();
+                assert_eq!(decoded.last_block_incomplete, last_block_incomplete);
+                assert_eq!(decoded.into_with_bloom(), expected);
+            }
+        }
     }
 
     #[test]
@@ -262,10 +338,11 @@ mod tests {
         let request = RequestPair {
             request_id: 1111,
             message: Receipts(vec![vec![ReceiptWithBloom {
-                receipt: Receipt {
-                    tx_type: TxType::Legacy,
-                    cumulative_gas_used: 0x1u64,
-                    logs: vec![Log::new_unchecked(
+                receipt: Receipt::standard(
+                    TxType::Legacy,
+                    false,
+                    1,
+                    vec![Log::new_unchecked(
                         Address::with_last_byte(0x11),
                         vec![
                             b256!(
@@ -277,8 +354,7 @@ mod tests {
                         ],
                         hex!("0100ff")[..].into(),
                     )],
-                    success: false,
-                },
+                ),
                 logs_bloom: Bloom::ZERO,
             }]]),
         };
@@ -300,10 +376,7 @@ mod tests {
                 message: Receipts(vec![
                     vec![
                         ReceiptWithBloom {
-                            receipt: Receipt {
-                                tx_type: TxType::Legacy,
-                                cumulative_gas_used: 0x1u64,
-                                logs: vec![
+                            receipt: Receipt::standard(TxType::Legacy, false, 1, vec![
                                     Log::new_unchecked(
                                         Address::with_last_byte(0x11),
                                         vec![
@@ -312,9 +385,7 @@ mod tests {
                                         ],
                                         hex!("0100ff")[..].into(),
                                     ),
-                                ],
-                                success: false,
-                            },
+                                ]),
                             logs_bloom: Bloom::ZERO,
                         },
                     ],
@@ -330,12 +401,7 @@ mod tests {
         let request = RequestPair::<Receipts69>::decode(&mut &data[..]).unwrap();
         assert_eq!(
             request.message.0[0][0],
-            Receipt {
-                tx_type: TxType::Eip1559,
-                success: true,
-                cumulative_gas_used: 26000,
-                logs: vec![],
-            }
+            Receipt::standard(TxType::Eip1559, true, 26000, vec![])
         );
 
         let encoded = alloy_rlp::encode(&request);
@@ -406,5 +472,108 @@ mod tests {
         let decoded = RequestPair::<Receipts70>::decode(&mut buf).unwrap();
         assert!(buf.is_empty(), "buffer not fully consumed on decode");
         assert_eq!(decoded, resp);
+    }
+
+    #[test]
+    fn frame_receipts_eth69_match_flat_network_vector() {
+        // [request_id, [[frame_receipt, ordinary_eip1559_receipt]]].
+        let expected = hex!(
+            "f507f3f2ec0682a410940404040404040404040404040404040404040404d2c580c20102c0c501c20304c0c502c20506c0c4020180c0"
+        );
+        let request = RequestPair {
+            request_id: 7,
+            message: Receipts69(vec![vec![
+                flat_frame_receipt(),
+                Receipt::standard(TxType::Eip1559, true, 0, vec![]),
+            ]]),
+        };
+        assert_eq!(alloy_rlp::encode(&request), expected);
+        assert_eq!(request.length(), expected.len());
+        assert_eq!(alloy_rlp::decode_exact::<RequestPair<Receipts69>>(&expected).unwrap(), request);
+        for end in 0..expected.len() {
+            assert_eq!(
+                RequestPair::<Receipts69>::decode(&mut &expected[..end]).unwrap_err(),
+                alloy_rlp::Error::InputTooShort
+            );
+        }
+        for (prefix, error) in
+            [(0xeb, alloy_rlp::Error::InputTooShort), (0xed, alloy_rlp::Error::UnexpectedLength)]
+        {
+            let mut malformed = expected;
+            malformed[4] = prefix;
+            assert_eq!(
+                RequestPair::<Receipts69>::decode(&mut malformed.as_slice()).unwrap_err(),
+                error
+            );
+        }
+    }
+
+    #[test]
+    fn frame_receipts_eth70_match_flat_network_vector() {
+        // [request_id, lastBlockIncomplete, [[frame_receipt, ordinary_eip1559_receipt]]].
+        let expected = hex!(
+            "f60780f3f2ec0682a410940404040404040404040404040404040404040404d2c580c20102c0c501c20304c0c502c20506c0c4020180c0"
+        );
+        for last_block_incomplete in [false, true] {
+            let mut expected = expected;
+            if last_block_incomplete {
+                expected[2] = 0x01;
+            }
+            let request = RequestPair {
+                request_id: 7,
+                message: Receipts70 {
+                    last_block_incomplete,
+                    receipts: vec![vec![
+                        flat_frame_receipt(),
+                        Receipt::standard(TxType::Eip1559, true, 0, vec![]),
+                    ]],
+                },
+            };
+            assert_eq!(alloy_rlp::encode(&request), expected);
+            assert_eq!(request.length(), expected.len());
+            assert_eq!(
+                alloy_rlp::decode_exact::<RequestPair<Receipts70>>(&expected).unwrap(),
+                request
+            );
+            for end in 0..expected.len() {
+                assert_eq!(
+                    RequestPair::<Receipts70>::decode(&mut &expected[..end]).unwrap_err(),
+                    alloy_rlp::Error::InputTooShort
+                );
+            }
+            for (prefix, error) in [
+                (0xeb, alloy_rlp::Error::InputTooShort),
+                (0xed, alloy_rlp::Error::UnexpectedLength),
+            ] {
+                let mut malformed = expected;
+                malformed[5] = prefix;
+                assert_eq!(
+                    RequestPair::<Receipts70>::decode(&mut malformed.as_slice()).unwrap_err(),
+                    error
+                );
+            }
+        }
+    }
+
+    fn flat_frame_receipt() -> Receipt {
+        Receipt::from(ReceiptEnvelope::Eip8141(
+            FrameReceiptPayload {
+                cumulative_gas_used: 42_000,
+                payer: Address::repeat_byte(4),
+                frame_receipts: [
+                    (FrameStatus::Failure, 1, 2),
+                    (FrameStatus::Success, 3, 4),
+                    (FrameStatus::SkippedAtomicBatch, 5, 6),
+                ]
+                .into_iter()
+                .map(|(status, execution, state)| FrameReceipt {
+                    status,
+                    gas_used: FrameGasUsed { execution, state },
+                    logs: vec![],
+                })
+                .collect(),
+            }
+            .into(),
+        ))
     }
 }

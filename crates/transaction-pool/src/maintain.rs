@@ -7,7 +7,7 @@ use crate::{
     traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind, TransactionOrigin,
 };
-use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction};
 use alloy_eips::{BlockNumberOrTag, Decodable2718};
 use alloy_primitives::{
     map::{AddressSet, B256Set, HashSet},
@@ -298,7 +298,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                         (tx.origin.is_external() || config.no_local_exemptions) && now - tx.timestamp > config.max_tx_lifetime
                     })
                     .map(|tx| {
-                        if tx.is_eip4844() {
+                        if tx.is_blob_transaction() {
                             stale_blobs.push(*tx.hash());
                         }
                         *tx.hash()
@@ -317,6 +317,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                 dirty_addresses.extend(failed_to_load);
                 // update the pool with the loaded accounts
                 pool.update_accounts(accounts);
+                pool.revalidate_frame_transactions().await;
             }
             Some(Ok(Err(res))) => {
                 // Failed to load accounts from state
@@ -410,7 +411,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     .filter(|(_, tx)| !new_mined_transactions.contains(tx.tx_hash()))
                     .filter_map(|(signer, tx)| {
                         let tx = tx.clone().with_signer(*signer);
-                        if tx.is_eip4844() {
+                        if tx.blob_versioned_hashes().is_some_and(|hashes| !hashes.is_empty()) {
                             // reorged blobs no longer include the blob, which is necessary for
                             // validating the transaction. Even though the transaction could have
                             // been validated previously, we still need the blob in order to
@@ -421,9 +422,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                                 .flatten()
                                 .map(Arc::unwrap_or_clone)
                                 .and_then(|sidecar| {
-                                    <P as TransactionPool>::Transaction::try_from_eip4844(
-                                        tx, sidecar,
-                                    )
+                                    <P as TransactionPool>::Transaction::try_from_blob(tx, sidecar)
                                 })
                         } else {
                             <P as TransactionPool>::Transaction::try_from_consensus(tx).ok()
@@ -442,6 +441,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     update_kind: PoolUpdateKind::Reorg,
                 };
                 pool.on_canonical_state_change(update);
+                pool.revalidate_frame_transactions().await;
 
                 // all transactions that were mined in the old chain but not in the new chain need
                 // to be re-injected
@@ -494,6 +494,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                         update_kind: PoolUpdateKind::Commit,
                     };
                     pool.on_canonical_state_change(update);
+                    pool.revalidate_frame_transactions().await;
 
                     // keep track of mined blob transactions
                     blob_store_tracker.add_new_chain_blocks(&blocks);
@@ -528,6 +529,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St>(
                     update_kind: PoolUpdateKind::Commit,
                 };
                 pool.on_canonical_state_change(update);
+                pool.revalidate_frame_transactions().await;
 
                 // keep track of mined blob transactions
                 blob_store_tracker.add_new_chain_blocks(&blocks);

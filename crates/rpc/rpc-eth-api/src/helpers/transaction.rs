@@ -4,8 +4,8 @@
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadFee, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
     helpers::{estimate::EstimateCall, spec::SignersForRpc},
-    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
-    RpcTransaction,
+    FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt,
+    RpcReceipt, RpcTransaction,
 };
 use alloy_consensus::{
     transaction::{TransactionMeta, TxHashRef},
@@ -13,19 +13,21 @@ use alloy_consensus::{
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eip7928::bal::DecodedBal;
-use alloy_eips::{eip2718::Encodable2718, BlockId};
+use alloy_eips::{eip2718::Encodable2718, eip4844::DATA_GAS_PER_BLOB, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo, TransactionRequest};
 use evm2::evm::Bal as EvmBal;
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
+use reth_evm::EvmEnv;
 use reth_primitives_traits::{
     BlockBody, Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded,
 };
 use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     block::convert_transaction_receipt,
+    transaction::{frame_signature_padding_gas, has_frame_signatures},
     utils::{binary_search, decode_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
     EthResult, FillTransaction, SignError, TransactionSource,
@@ -607,6 +609,131 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: EthApiSpec + EstimateCall + LoadFee,
     {
         async move {
+            let is_frame = request.as_ref().minimal_tx_type().is_eip8141();
+            if is_frame {
+                reth_rpc_convert::ensure_frame_request_fields(request.as_ref())
+                    .map_err(Self::Error::from_eth_err)?;
+                if request.as_ref().from.is_none() {
+                    return Err(EthApiError::InvalidParams(
+                        "frame transactions require a sender before filling".into(),
+                    )
+                    .into())
+                }
+                if request.as_ref().frames.is_none() {
+                    return Err(EthApiError::InvalidParams(
+                        "frame transactions require frames with execution and state gas limits"
+                            .into(),
+                    )
+                    .into())
+                }
+
+                let has_signatures = has_frame_signatures(request.as_ref());
+                // Legacy completeness permits missing keys, but defaulting them
+                // here would change a signed frame transaction's payload.
+                if has_signatures && request.as_ref().nonce_keys.is_none() {
+                    return Err(EthApiError::InvalidParams(
+                        "signed frame transactions must include nonceKeys before filling".into(),
+                    )
+                    .into())
+                }
+                if has_signatures &&
+                    (request.as_ref().chain_id().is_none() ||
+                        request.as_ref().nonce().is_none() ||
+                        request.as_ref().complete_8141().is_err())
+                {
+                    return Err(EthApiError::InvalidParams(
+                        "signed frame transactions must include their sender, nonce, nonceKeys, chainId, frames, and fees before filling"
+                            .into(),
+                    )
+                    .into())
+                }
+
+                let chain_id = self.chain_id();
+                if let Some(request_chain_id) = request.as_ref().chain_id() &&
+                    request_chain_id != chain_id.to::<u64>()
+                {
+                    return Err(EthApiError::InvalidParams(format!(
+                        "chainId does not match node's (have={request_chain_id}, want={})",
+                        chain_id.to::<u64>()
+                    ))
+                    .into())
+                }
+                if request.as_ref().chain_id().is_none() {
+                    request.as_mut().set_chain_id(chain_id.to());
+                }
+
+                if request.as_ref().nonce_keys.is_none() {
+                    request.as_mut().nonce_keys = Some(vec![]);
+                }
+                if request.as_ref().nonce().is_none() {
+                    let nonce = self.next_available_nonce_for(&request).await?;
+                    request.as_mut().set_nonce(nonce);
+                }
+                if request.as_ref().signatures.is_none() {
+                    request.as_mut().signatures = Some(Vec::new());
+                }
+
+                let needs_budget =
+                    request.as_ref().max_fee.is_none() && request.as_ref().eip8141_fees.is_none();
+                if request.as_ref().max_priority_fee_per_gas().is_none() &&
+                    request.as_ref().eip8141_fees.is_none()
+                {
+                    request.as_mut().set_max_priority_fee_per_gas(
+                        self.suggested_priority_fee().await?.to::<u128>(),
+                    );
+                }
+                if needs_budget {
+                    request.as_mut().max_fee = Some(U256::MAX);
+                }
+
+                request = self
+                    .fill_frame_gas_at(request, BlockId::pending(), EvmOverrides::default())
+                    .await?;
+                if needs_budget {
+                    let (evm_env, _) = self.evm_env_at(BlockId::pending()).await?;
+                    let preview = self.converter().tx_env(request.clone(), &evm_env)?;
+                    let signature_gas = frame_signature_padding_gas(
+                        request.as_ref().signatures.as_deref().unwrap_or_default(),
+                        evm_env.version(),
+                    )
+                    .map_err(Self::Error::from_eth_err)?;
+                    // Built-in witnesses are filled after this unsigned request is returned.
+                    let max_gas = evm2::ethereum::eip8141::FrameGas::calculate(
+                        preview.frame_transaction().ok_or_else(|| {
+                            EthApiError::EvmCustom("missing frame transaction".into())
+                        })?,
+                        evm_env.version(),
+                    )
+                    .map_err(reth_evm::execute::map_handler_error)
+                    .map_err(Self::Error::from_evm_err)?
+                    .maximum
+                    .checked_add(signature_gas)
+                    .ok_or_else(|| EthApiError::InvalidParams("signature gas overflows".into()))?;
+                    let header =
+                        self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                    let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
+                    let tip = request.as_ref().max_priority_fee_per_gas().unwrap_or_default();
+                    let blob_gas = request
+                        .as_ref()
+                        .blob_versioned_hashes
+                        .as_ref()
+                        .map_or(0, |hashes| hashes.len() as u64 * DATA_GAS_PER_BLOB);
+                    let blob_fee =
+                        if blob_gas == 0 { U256::ZERO } else { self.blob_base_fee().await? };
+                    request.as_mut().max_fee = Some(
+                        U256::from(max_gas)
+                            .saturating_mul(U256::from(base_fee) * U256::from(2) + U256::from(tip))
+                            .saturating_add(
+                                U256::from(blob_gas)
+                                    .saturating_mul(blob_fee)
+                                    .saturating_mul(U256::from(2)),
+                            ),
+                    );
+                }
+                let tx = self.converter().build_simulate_v1_transaction(request)?;
+                let raw = tx.encoded_2718().into();
+                return Ok(FillTransaction { raw, tx })
+            }
             ensure_no_conflicting_fee_fields(request.as_ref())?;
 
             if request.as_ref().value().is_none() {

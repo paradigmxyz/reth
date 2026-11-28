@@ -714,8 +714,13 @@ where
                 .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
                 .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
                 .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
-                .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-                .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+                .build(blob_store.clone())
+                .with_frame_validation_max_verify_gas(ctx.config().txpool.max_verify_gas);
+        let validator = TransactionValidationTaskExecutor::spawn(
+            validator,
+            ctx.task_executor(),
+            ctx.config().txpool.additional_validation_tasks,
+        );
 
         if (validator.validator().eip4844() || self.init_kzg_settings) &&
             !ctx.config().debug.lazy_kzg_settings

@@ -57,7 +57,7 @@ jobs:
       - uses: tempoxyz/gh-actions/vendor/dtolnay/rust-toolchain@d5402286a7abdfb7232173b3228d56473feb8a66 # 2026-09-29T02-04-45Z-d5402286
         if: steps.fork.outputs.is_fork == 'false'
         with:
-          toolchain: "1.95.0"
+          toolchain: "1.96.0"
 
       - name: Check Reth dependencies through Aegis
         if: steps.fork.outputs.is_fork == 'false'

@@ -200,6 +200,10 @@ pub struct EthBlockExecutionCtx<'a> {
     pub tx_count_hint: Option<usize>,
     /// Parent block hash.
     pub parent_hash: B256,
+    /// Parent timestamp, required to identify a configured Bogota fork transition.
+    ///
+    /// `None` is used when the caller has not supplied the parent header.
+    pub parent_timestamp: Option<u64>,
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
     /// Ommer headers.
@@ -462,6 +466,7 @@ where
         Ok(EthBlockExecutionCtx {
             tx_count_hint: Some(block.transaction_count()),
             parent_hash: block.header().parent_hash,
+            parent_timestamp: None,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(|w| Cow::Borrowed(w.as_slice())),
@@ -478,12 +483,26 @@ where
         Ok(EthBlockExecutionCtx {
             tx_count_hint: None,
             parent_hash: parent.hash(),
+            parent_timestamp: Some(parent.timestamp),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
             withdrawals: attributes.withdrawals.map(|w| Cow::Owned(w.into_inner())),
             extra_data: attributes.extra_data,
             slot_number: attributes.slot_number,
         })
+    }
+
+    fn context_for_block_with_parent_timestamp<'a>(
+        &self,
+        block: &'a SealedBlock<Block>,
+        parent_timestamp: u64,
+    ) -> Result<EthBlockExecutionCtx<'a>, Self::Error>
+    where
+        Self: 'a,
+    {
+        let mut context = self.context_for_block(block)?;
+        context.parent_timestamp = Some(parent_timestamp);
+        Ok(context)
     }
 
     fn reuses_prewarm_results(&self) -> bool {
@@ -559,12 +578,23 @@ where
         Ok(EthBlockExecutionCtx {
             tx_count_hint: Some(payload.payload.transactions().len()),
             parent_hash: payload.parent_hash(),
+            parent_timestamp: None,
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
             withdrawals: payload.payload.withdrawals().map(|w| Cow::Borrowed(w.as_slice())),
             extra_data: payload.payload.as_v1().extra_data.clone(),
             slot_number: payload.payload.as_v4().map(|v4| v4.slot_number),
         })
+    }
+
+    fn context_for_payload_with_parent_timestamp<'a>(
+        &self,
+        payload: &'a ExecutionData,
+        parent_timestamp: u64,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        let mut context = self.context_for_payload(payload)?;
+        context.parent_timestamp = Some(parent_timestamp);
+        Ok(context)
     }
 
     fn tx_iterator_for_payload(

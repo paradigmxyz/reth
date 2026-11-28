@@ -42,6 +42,7 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-overlay.workspace = true

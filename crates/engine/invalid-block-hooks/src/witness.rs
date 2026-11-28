@@ -185,7 +185,9 @@ where
         let mut database = evm2::evm::CacheDB::new(evm2::evm::Db::new(StateProviderDatabase::new(
             state_provider.as_ref().into_evm_state_provider(),
         )));
-        let output = self.evm_config.executor(&mut database).execute(block)?;
+        let mut executor = self.evm_config.executor(&mut database);
+        executor.set_parent_timestamp(parent_header.timestamp());
+        let output = executor.execute(block)?;
         let hashed_state = state_provider.hashed_post_state(&output.state)?;
         database.commit_source(&BundleSource(&output.state));
         let witness = reth_evm::witness::ExecutionWitnessRecord::new(&database)

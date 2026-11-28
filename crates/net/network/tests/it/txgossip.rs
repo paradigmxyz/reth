@@ -1,6 +1,6 @@
 //! Testing gossiping of transactions.
 use crate::utils::{funded_transaction, poll_until};
-use alloy_consensus::TxLegacy;
+use alloy_consensus::{transaction::TxHashRef, TxLegacy};
 use alloy_primitives::{map::B256Set, Signature, TxHash, U256};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_network::{
@@ -203,7 +203,7 @@ async fn test_tx_propagation_policy_trusted_only_get_pooled_transactions() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(txs.iter().map(|tx| *tx.hash()).collect::<Vec<_>>(), vec![pending]);
+    assert_eq!(txs.iter().map(|tx| *tx.tx_hash()).collect::<Vec<_>>(), vec![pending]);
 }
 
 #[tokio::test(flavor = "multi_thread")]

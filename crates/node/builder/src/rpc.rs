@@ -1804,12 +1804,14 @@ mod tests {
             (10, false, true),
         ] {
             let provider = MockEthProvider::default();
+            let mut parent_hash = B256::ZERO;
             let blocks: Vec<_> = (0..=3)
                 .map(|number| {
                     let block = RecoveredBlock::new_unhashed(
                         Block {
                             header: Header {
                                 number,
+                                parent_hash,
                                 block_access_list_hash: (native && number == 3)
                                     .then_some(B256::ZERO),
                                 ..Default::default()
@@ -1818,6 +1820,7 @@ mod tests {
                         },
                         Vec::new(),
                     );
+                    parent_hash = block.hash();
                     provider.add_block(block.hash(), block.clone_block());
                     block
                 })
@@ -1849,6 +1852,7 @@ mod tests {
             let events = futures::stream::iter(native_event.then(|| {
                 let mut block = blocks.last().unwrap().clone_block();
                 block.header.number += 1;
+                block.header.parent_hash = blocks.last().unwrap().hash();
                 block.header.block_access_list_hash = Some(B256::ZERO);
                 CanonStateNotification::Commit {
                     new: Arc::new(Chain::<reth_chain_state::EthPrimitives>::new(

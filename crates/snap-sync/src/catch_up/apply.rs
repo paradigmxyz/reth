@@ -151,16 +151,21 @@ mod tests {
     #[test]
     fn accounts_not_downloaded_yet_are_left_unresolved() {
         // Even a fully determined account is left to the download against the later root.
-        let changes = AccountChanges::new(ACCOUNT)
-            .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
-            .with_nonce_change(NonceChange::new(index(1), 1))
-            .with_code_change(CodeChange::new(index(1), bytes!("6001")));
+        for code in [
+            CodeChange::new(index(1), bytes!("6001")),
+            CodeChange::new_hash(index(1), keccak256(bytes!("6001"))),
+        ] {
+            let changes = AccountChanges::new(ACCOUNT)
+                .with_balance_change(BalanceChange::new(index(1), U256::from(10)))
+                .with_nonce_change(NonceChange::new(index(1), 1))
+                .with_code_change(code);
 
-        let update = apply(&changes, DownloadedAccount::Unknown);
+            let update = apply(&changes, DownloadedAccount::Unknown);
 
-        assert_eq!(update.unresolved, vec![keccak256(ACCOUNT)]);
-        assert!(update.state.is_empty());
-        assert!(update.bytecodes.is_empty());
+            assert_eq!(update.unresolved, vec![keccak256(ACCOUNT)]);
+            assert!(update.state.is_empty());
+            assert!(update.bytecodes.is_empty());
+        }
     }
 
     #[test]
@@ -184,6 +189,88 @@ mod tests {
         assert_eq!(
             update.state.storages[&hashed_address],
             HashedStorage::from_iter([(keccak256(B256::with_last_byte(1)), U256::ZERO)])
+        );
+        assert!(update.bytecodes.is_empty());
+    }
+
+    #[test]
+    fn code_adoption_keeps_earlier_code_when_its_source_is_overwritten() {
+        let adopted = bytes!("6001");
+        let replacement = bytes!("6002");
+        let adopted_hash = keccak256(&adopted);
+        let replacement_hash = keccak256(&replacement);
+        for source in [Address::repeat_byte(0x22), Address::repeat_byte(0xbb)] {
+            let mut bal = vec![
+                AccountChanges::new(Address::repeat_byte(0x11))
+                    .with_code_change(CodeChange::new(index(3), adopted.clone()))
+                    .with_code_change(CodeChange::new(index(4), replacement.clone())),
+                AccountChanges::new(source)
+                    .with_code_change(CodeChange::new(index(1), adopted.clone()))
+                    .with_code_change(CodeChange::new(index(3), replacement.clone())),
+                AccountChanges::new(ACCOUNT)
+                    .with_code_change(CodeChange::new_hash(index(2), adopted_hash)),
+            ];
+            bal.sort_unstable_by_key(AccountChanges::address);
+
+            let update = state_update(&bal, AccountCoverage::COMPLETE, []);
+
+            assert_eq!(
+                update.state.accounts[&keccak256(ACCOUNT)].as_ref().unwrap().bytecode_hash,
+                Some(adopted_hash)
+            );
+            assert_eq!(
+                update.bytecodes,
+                B256Map::from_iter([
+                    (adopted_hash, adopted.clone()),
+                    (replacement_hash, replacement.clone()),
+                ])
+            );
+        }
+    }
+
+    #[test]
+    fn code_adoption_requires_strictly_earlier_supplied_code() {
+        let code = bytes!("6001");
+        let hash = keccak256(&code);
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        for supplied_index in [2, 3] {
+            let bal = [
+                AccountChanges::new(Address::repeat_byte(0x22))
+                    .with_code_change(CodeChange::new(index(supplied_index), code.clone())),
+                AccountChanges::new(ACCOUNT).with_code_change(CodeChange::new_hash(index(2), hash)),
+            ];
+
+            let error = provider
+                .block_access_list_update(AccountCoverage::COMPLETE, StorageProgress::START, &bal)
+                .unwrap_err();
+
+            assert!(
+                matches!(error, crate::SnapSyncError::MissingCode { hash: missing } if missing == hash)
+            );
+        }
+    }
+
+    #[test]
+    fn code_adoption_reuses_stored_code_without_copying_it() {
+        let code = Bytecode::new_raw(bytes!("6001"));
+        let hash = code.hash_slow();
+        let factory = hashed_factory();
+        let provider = factory.database_provider_rw().unwrap();
+        provider
+            .tx_ref()
+            .put::<tables::Bytecodes>(hash, reth_primitives_traits::Bytecode(code))
+            .unwrap();
+        let bal =
+            [AccountChanges::new(ACCOUNT).with_code_change(CodeChange::new_hash(index(1), hash))];
+
+        let update = provider
+            .block_access_list_update(AccountCoverage::COMPLETE, StorageProgress::START, &bal)
+            .unwrap();
+
+        assert_eq!(
+            update.state.accounts[&keccak256(ACCOUNT)].as_ref().unwrap().bytecode_hash,
+            Some(hash)
         );
         assert!(update.bytecodes.is_empty());
     }

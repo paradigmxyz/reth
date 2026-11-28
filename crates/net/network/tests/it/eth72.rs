@@ -6,8 +6,9 @@
 
 use crate::utils::funded_transaction;
 use alloy_consensus::{
-    constants::EIP4844_TX_TYPE_ID, transaction::TxEip4844WithSidecar, Header, SignableTransaction,
-    TxEip4844,
+    constants::EIP4844_TX_TYPE_ID,
+    transaction::{TxEip4844WithSidecar, TxHashRef},
+    Header, SignableTransaction, TxEip4844,
 };
 use alloy_eips::{
     eip2718::Encodable2718,

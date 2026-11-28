@@ -45,8 +45,10 @@ impl SenderIdentifiers {
         addrs.into_iter().map(|addr| self.sender_id_or_create(addr)).collect()
     }
 
-    /// Returns the current identifier and increments the counter.
-    fn next_id(&mut self) -> SenderId {
+    /// Allocates an identifier without retaining an address mapping.
+    ///
+    /// Keyed nonce lanes belong to live pool transactions, which supply their address mapping.
+    pub(crate) fn next_id(&mut self) -> SenderId {
         let id = self.id;
         self.id = self.id.wrapping_add(1);
         id.into()
@@ -122,10 +124,10 @@ impl TransactionId {
         Self::new(self.sender, self.next_nonce())
     }
 
-    /// Returns the nonce that follows immediately after this one.
+    /// Returns the next nonce, saturating at the exhausted single-use nonce sentinel.
     #[inline]
     pub const fn next_nonce(&self) -> u64 {
-        self.nonce + 1
+        self.nonce.saturating_add(1)
     }
 }
 
@@ -229,6 +231,21 @@ mod tests {
         assert_eq!(identifiers.sender_id(&address), Some(id));
     }
 
+    #[test]
+    fn untracked_lanes_do_not_retain_address_mappings() {
+        let mut identifiers = SenderIdentifiers::default();
+        let address = Address::repeat_byte(1);
+        let ordinary = identifiers.sender_id_or_create(address);
+        for _ in 0..256 {
+            let lane = identifiers.next_id();
+            assert_ne!(lane, ordinary);
+            assert_eq!(identifiers.address(&lane), None);
+        }
+        assert_eq!(identifiers.sender_id(&address), Some(ordinary));
+        assert_eq!(identifiers.address(&ordinary), Some(&address));
+        assert_eq!(identifiers.address_to_id.len(), 1);
+        assert_eq!(identifiers.sender_to_address.len(), 1);
+    }
     #[test]
     fn test_sender_id_or_create_existing() {
         let mut identifiers = SenderIdentifiers::default();

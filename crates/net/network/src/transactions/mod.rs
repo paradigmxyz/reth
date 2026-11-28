@@ -1344,7 +1344,7 @@ where
                 // ensure we didn't receive any blob transactions as these are disallowed to be
                 // broadcasted in full
 
-                let has_blob_txs = msg.has_eip4844();
+                let has_blob_txs = msg.iter().any(|tx| !tx.is_broadcastable_in_full());
 
                 let non_blob_txs = msg
                     .into_iter()
@@ -2487,14 +2487,14 @@ mod tests {
     };
     use alloy_consensus::{
         transaction::{Recovered, TxEip4844WithSidecar},
-        SignableTransaction, Transaction as _, TxEip1559, TxEip4844, TxLegacy,
+        SignableTransaction, Transaction as _, TxEip1559, TxEip4844, TxEip8141, TxLegacy,
     };
     use alloy_eips::{
         eip2718::Encodable2718,
         eip4844::{Blob, BlobTransactionSidecar, BlobTransactionValidationError, Bytes48},
         eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
     };
-    use alloy_primitives::{address, hex, Address, Signature, TxKind, B256, U256};
+    use alloy_primitives::{address, hex, Address, Sealable, Signature, TxKind, B256, U256};
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -2504,6 +2504,7 @@ mod tests {
         error::{RequestError, RequestResult},
         sync::{NetworkSyncUpdater, SyncState},
     };
+    use reth_network_types::ReputationChangeWeights;
     use reth_storage_api::noop::NoopProvider;
     use reth_tasks::Runtime;
     use reth_transaction_pool::{
@@ -2663,6 +2664,20 @@ mod tests {
             tx_gen.transaction().nonce(nonce).into_eip1559().try_into_recovered().unwrap(),
         )
         .unwrap()
+    }
+
+    fn frame_transaction(with_blob: bool) -> TransactionSigned {
+        TransactionSigned::Eip8141(
+            TxEip8141 {
+                blob_versioned_hashes: if with_blob {
+                    vec![B256::repeat_byte(1)]
+                } else {
+                    Vec::new()
+                },
+                ..Default::default()
+            }
+            .seal_slow(),
+        )
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -3554,6 +3569,76 @@ mod tests {
         assert_eq!(pooled.len(), 1);
         let txs = txs.full.unwrap();
         assert_eq!(txs.len(), 1);
+    }
+
+    #[test]
+    fn frame_blob_transactions_use_hash_only_propagation() {
+        for with_blob in [false, true] {
+            let transaction = frame_transaction(with_blob);
+            let hash = *transaction.tx_hash();
+            let pooled = EthPooledTransaction::new(
+                transaction.clone().with_signer(Default::default()),
+                transaction.encode_2718_len(),
+            );
+            for transaction in [
+                PropagateTransaction::new(transaction),
+                PropagateTransaction::pool_tx(valid_eth_pool_transaction(pooled)),
+            ] {
+                let mut builder = PropagateTransactionsBuilder::full(EthVersion::Eth68, 1);
+                builder.push(&transaction);
+                let messages = builder.build();
+                if with_blob {
+                    assert!(messages.full.is_none());
+                    let [announcement] = &messages.pooled[..] else {
+                        panic!("expected one pooled announcement")
+                    };
+                    assert_eq!(announcement.hashes().as_slice(), &[hash]);
+                } else {
+                    assert!(messages.pooled.is_empty());
+                    let full = messages.full.unwrap();
+                    assert_eq!(full.0.len(), 1);
+                    assert_eq!(full.0[0].tx_hash(), &hash);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn full_blob_frame_broadcast_penalizes_peer_and_preserves_blobless_frame() {
+        let (mut manager, network) = new_eth_tx_manager().await;
+        let handle = network.handle().clone();
+        let peer_id = PeerId::repeat_byte(1);
+        let (peer, _session_rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        manager.peers.insert(peer_id, peer);
+        handle.update_sync_state(SyncState::Idle);
+        handle.set_network_hibernate();
+        handle.add_peer_kind(
+            peer_id,
+            Some(PeerKind::Basic),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+            None,
+        );
+        let task = tokio::spawn(network);
+        let blobless = frame_transaction(false);
+        let blob = frame_transaction(true);
+        let blobless_hash = *blobless.tx_hash();
+        let blob_hash = *blob.tx_hash();
+        let reputation = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            assert_eq!(handle.reputation_by_id(peer_id).await.unwrap(), Some(0));
+            manager.on_network_tx_event(NetworkTransactionEvent::IncomingTransactions {
+                peer_id,
+                msg: Transactions(vec![blobless, blob]),
+            });
+            handle.reputation_by_id(peer_id).await.unwrap()
+        })
+        .await
+        .unwrap();
+        task.abort();
+
+        assert_eq!(reputation, Some(ReputationChangeWeights::default().bad_transactions));
+        assert!(manager.transactions_by_peers.contains_key(&blobless_hash));
+        assert!(!manager.transactions_by_peers.contains_key(&blob_hash));
+        assert!(!manager.bad_imports.contains(&blob_hash));
     }
 
     #[test]

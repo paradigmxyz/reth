@@ -20,7 +20,7 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::{EthCapabilities, FillTransaction};
+use reth_rpc_eth_types::{EthCapabilities, FillTransaction, FrameSimulationResult};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use std::collections::HashMap;
 use tracing::trace;
@@ -220,12 +220,13 @@ pub trait EthApi<
         block_number: Option<BlockId>,
     ) -> RpcResult<HashMap<Address, Vec<B256>>>;
 
-    /// Returns the number of transactions sent from an address at given block number.
+    /// Returns the account nonce or the shared sequence of the selected EIP-8250 nonce keys.
     #[method(name = "getTransactionCount")]
     async fn transaction_count(
         &self,
         address: Address,
         block_number: Option<BlockId>,
+        nonce_keys: Option<Vec<U256>>,
     ) -> RpcResult<U256>;
 
     /// Returns code at a given address at given block number.
@@ -248,6 +249,18 @@ pub trait EthApi<
         opts: SimulateV1Request<TxReq>,
         block_number: Option<BlockId>,
     ) -> RpcResult<Vec<SimulatedBlock<B>>>;
+
+    /// Validates and simulates a canonical EIP-8141 frame transaction without committing state.
+    ///
+    /// The raw envelope must have type `0x06`. The response reports public-prefix validity and,
+    /// when valid, the payer, maximum cost, aggregate gas, and each frame's outcome and dual gas
+    /// use.
+    #[method(name = "simulateFrameTransaction")]
+    async fn simulate_frame_transaction(
+        &self,
+        raw_frame_transaction: Bytes,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<FrameSimulationResult>;
 
     /// Executes a new message call immediately without creating a transaction on the block chain.
     #[method(name = "call")]
@@ -299,7 +312,8 @@ pub trait EthApi<
     ) -> RpcResult<AccessListResult>;
 
     /// Generates and returns an estimate of how much gas is necessary to allow the transaction to
-    /// complete.
+    /// complete. Frame transactions use the independent limits carried by their frames, so this
+    /// returns their derived outer reservation and does not replace the declared frame limits.
     #[method(name = "estimateGas")]
     async fn estimate_gas(
         &self,
@@ -727,9 +741,10 @@ where
         &self,
         address: Address,
         block_number: Option<BlockId>,
+        nonce_keys: Option<Vec<U256>>,
     ) -> RpcResult<U256> {
         trace!(target: "rpc::eth", ?address, ?block_number, "Serving eth_getTransactionCount");
-        Ok(EthState::transaction_count(self, address, block_number).await?)
+        Ok(EthState::transaction_count(self, address, block_number, nonce_keys).await?)
     }
 
     /// Handler for: `eth_getCode`
@@ -766,6 +781,17 @@ where
         let max_blocks = usize::try_from(Call::max_simulate_blocks(self)).unwrap_or(usize::MAX);
         let payload = payload.into_inner(max_blocks)?;
         Ok(EthCall::simulate_v1(self, payload, block_number).await?)
+    }
+
+    /// Handler for: `eth_simulateFrameTransaction`
+    async fn simulate_frame_transaction(
+        &self,
+        raw_frame_transaction: Bytes,
+        block_number: Option<BlockId>,
+    ) -> RpcResult<FrameSimulationResult> {
+        trace!(target: "rpc::eth", ?block_number, "Serving eth_simulateFrameTransaction");
+        let _permit = self.tracing_task_guard().clone().acquire_owned().await;
+        Ok(EthCall::simulate_frame_transaction(self, raw_frame_transaction, block_number).await?)
     }
 
     /// Handler for: `eth_call`

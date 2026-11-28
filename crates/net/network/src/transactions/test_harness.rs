@@ -188,6 +188,7 @@ impl Wake for WakeFlag {
 mod tests {
     use super::*;
     use crate::transactions::SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE;
+    use alloy_consensus::transaction::TxHashRef;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::map::B256Set;
     use futures::StreamExt;

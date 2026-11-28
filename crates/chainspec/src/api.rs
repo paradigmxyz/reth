@@ -1,9 +1,10 @@
 use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
+use alloy_consensus::constants::MAINNET_GENESIS_HASH;
 use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use core::fmt::{Debug, Display};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_network_peers::NodeRecord;
@@ -66,6 +67,20 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// See [`AlloyBlockHeader::next_block_base_fee`].
     fn next_block_base_fee(&self, parent: &Self::Header, target_timestamp: u64) -> Option<u64> {
         parent.next_block_base_fee(self.base_fee_params_at_timestamp(target_timestamp))
+    }
+
+    /// Returns accounts whose nonce is set to one at the Bogota fork transition.
+    ///
+    /// An explicit genesis list overrides the mainnet default, including an empty list. Other
+    /// chains default to no accounts and must configure their own pre-fork state exceptions.
+    fn eip8253_accounts(&self) -> &[Address] {
+        self.genesis().config.eip8253_accounts.as_deref().unwrap_or_else(|| {
+            if self.genesis_hash() == MAINNET_GENESIS_HASH {
+                &alloy_genesis::EIP8253_MAINNET_ACCOUNTS
+            } else {
+                &[]
+            }
+        })
     }
 }
 

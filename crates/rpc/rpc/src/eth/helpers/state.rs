@@ -392,7 +392,7 @@ mod tests {
         eth_api.provider().add_block(B256::ZERO, block);
 
         let pending = Some(BlockId::pending());
-        let count = EthState::transaction_count(&eth_api, address, pending).await.unwrap();
+        let count = EthState::transaction_count(&eth_api, address, pending, None).await.unwrap();
         assert_eq!(count, U256::from(7));
 
         // Nonces 7 and 8 follow the account nonce, nonce 10 is gapped.
@@ -400,10 +400,10 @@ mod tests {
             let tx = MockTransaction::eip1559().with_sender(address).with_nonce(nonce);
             eth_api.pool().add_transaction(TransactionOrigin::External, tx).await.unwrap();
         }
-        let count = EthState::transaction_count(&eth_api, address, pending).await.unwrap();
+        let count = EthState::transaction_count(&eth_api, address, pending, None).await.unwrap();
         assert_eq!(count, U256::from(9));
         assert_eq!(
-            EthState::transaction_count(&eth_api, address, None).await.unwrap(),
+            EthState::transaction_count(&eth_api, address, None, None).await.unwrap(),
             U256::from(7)
         );
 

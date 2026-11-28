@@ -17,6 +17,15 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
         payload: &'a ExecutionData,
     ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error>;
 
+    /// Returns a payload context with its actual parent's timestamp for fork transitions.
+    fn context_for_payload_with_parent_timestamp<'a>(
+        &self,
+        payload: &'a ExecutionData,
+        _parent_timestamp: u64,
+    ) -> Result<ExecutionCtxFor<'a, Self>, Self::Error> {
+        self.context_for_payload(payload)
+    }
+
     /// Returns an [`ExecutableTxIterator`] for the given payload.
     fn tx_iterator_for_payload(
         &self,

@@ -2,10 +2,11 @@
 
 // TODO(rand): update ::random calls after rand_09 migration
 
-use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
+use alloy_consensus::{Header, ReceiptEnvelope, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
     eip4895::{Withdrawal, Withdrawals},
+    eip8141::{FrameGasUsed, FrameReceipt, FrameReceiptPayload, FrameStatus},
     NumHash,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, TxKind, B256, B64, U256};
@@ -443,7 +444,9 @@ pub fn random_contract_account_range<R: Rng>(
     accounts
 }
 
-/// Generate random receipt for transaction
+/// Generate a random receipt for a transaction.
+///
+/// Frame transactions use the sender as payer and one successful receipt per frame.
 pub fn random_receipt<R: Rng>(
     rng: &mut R,
     transaction: &TransactionSigned,
@@ -452,18 +455,50 @@ pub fn random_receipt<R: Rng>(
 ) -> Receipt {
     let success = rng.random::<bool>();
     let logs_count = logs_count.unwrap_or_else(|| rng.random::<u8>());
-    #[expect(clippy::needless_update)] // side-effect of optimism fields
-    Receipt {
-        tx_type: transaction.tx_type(),
+    if let Some(transaction) = transaction.as_eip8141() {
+        let mut logs = if success {
+            (0..logs_count).map(|_| random_log(rng, None, topics_count)).collect()
+        } else {
+            vec![]
+        };
+        let frame_receipts = transaction
+            .frames
+            .iter()
+            .map(|frame| FrameReceipt {
+                status: FrameStatus::Success,
+                gas_used: FrameGasUsed {
+                    execution: rng.random_range(0..=frame.limits.execution),
+                    state: rng.random_range(0..=frame.limits.state),
+                },
+                logs: if frame.mode.is_default() || frame.mode.is_sender() {
+                    std::mem::take(&mut logs)
+                } else {
+                    vec![]
+                },
+            })
+            .collect::<Vec<_>>();
+        let frame_gas_used = frame_receipts.iter().fold(0u64, |total, receipt| {
+            total.saturating_add(receipt.gas_used.execution).saturating_add(receipt.gas_used.state)
+        });
+        return Receipt::from_envelope(ReceiptEnvelope::Eip8141(
+            FrameReceiptPayload {
+                cumulative_gas_used: rng.random_range(frame_gas_used..=transaction.gas_limit()),
+                payer: transaction.sender,
+                frame_receipts,
+            }
+            .into(),
+        ));
+    }
+    Receipt::standard(
+        transaction.tx_type(),
         success,
-        cumulative_gas_used: rng.random_range(0..=transaction.gas_limit()),
-        logs: if success {
+        rng.random_range(0..=transaction.gas_limit()),
+        if success {
             (0..logs_count).map(|_| random_log(rng, None, topics_count)).collect()
         } else {
             vec![]
         },
-        ..Default::default()
-    }
+    )
 }
 
 /// Generate random log
@@ -480,9 +515,12 @@ pub fn random_log<R: Rng>(rng: &mut R, address: Option<Address>, topics_count: O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxEip1559;
-    use alloy_eips::eip2930::AccessList;
-    use alloy_primitives::{address, b256, bytes, hex, Signature};
+    use alloy_consensus::{TxEip1559, TxEip8141, TxType};
+    use alloy_eips::{
+        eip2930::AccessList,
+        eip8141::{Frame, FrameLimits, FrameMode},
+    };
+    use alloy_primitives::{address, b256, bytes, hex, Sealable, Signature};
     use reth_primitives_traits::{crypto::secp256k1::sign_message, SignerRecoverable};
     use std::str::FromStr;
 
@@ -553,5 +591,57 @@ mod tests {
             false,
         );
         assert_eq!(expected, signature);
+    }
+
+    #[test]
+    fn random_frame_receipt_preserves_payload_and_gas_bounds() {
+        let sender = Address::repeat_byte(1);
+        let frame = TxEip8141 {
+            sender,
+            frames: vec![
+                Frame {
+                    mode: FrameMode::Verify,
+                    flags: 3,
+                    limits: FrameLimits { execution: 100, state: 10 },
+                    ..Default::default()
+                },
+                Frame {
+                    mode: FrameMode::Sender,
+                    limits: FrameLimits { execution: 200, state: 20 },
+                    ..Default::default()
+                },
+                Frame {
+                    mode: FrameMode::Assert,
+                    limits: FrameLimits { execution: 300, state: 30 },
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let transaction = TransactionSigned::Eip8141(frame.clone().seal_slow());
+        let mut log_outcomes = [false; 2];
+        for seed in 0..32 {
+            let receipt =
+                random_receipt(&mut StdRng::seed_from_u64(seed), &transaction, Some(2), Some(1));
+            assert_eq!(receipt.tx_type(), TxType::Eip8141);
+            let payload = receipt.as_eip8141().unwrap();
+            assert_eq!(payload.payer, sender);
+            assert_eq!(payload.frame_receipts.len(), frame.frames.len());
+            let mut used = 0;
+            for (receipt, frame) in payload.frame_receipts.iter().zip(&frame.frames) {
+                assert_eq!(receipt.status, FrameStatus::Success);
+                assert!(receipt.gas_used.execution <= frame.limits.execution);
+                assert!(receipt.gas_used.state <= frame.limits.state);
+                used += receipt.gas_used.execution + receipt.gas_used.state;
+            }
+            assert!(payload.cumulative_gas_used >= used);
+            assert!(payload.cumulative_gas_used <= transaction.gas_limit());
+            assert!(payload.frame_receipts[0].logs.is_empty());
+            assert!(payload.frame_receipts[2].logs.is_empty());
+            assert_eq!(receipt.logs(), payload.frame_receipts[1].logs);
+            assert!(matches!(receipt.logs().len(), 0 | 2));
+            log_outcomes[receipt.logs().len() / 2] = true;
+        }
+        assert_eq!(log_outcomes, [true, true]);
     }
 }

@@ -78,8 +78,13 @@ where
                     let mut db = CacheDB::new(Db::new(StateProviderDatabase::new(
                         state_provider.as_ref().into_evm_state_provider(),
                     )));
-                    let output =
-                        evm_config.executor(&mut db).execute(&block).map_err(eyre::Report::new)?;
+                    let parent =
+                        provider.header(parent_hash).map_err(eyre::Report::new)?.ok_or_else(
+                            || eyre::eyre!("parent header {parent_hash} not found for witness"),
+                        )?;
+                    let mut executor = evm_config.executor(&mut db);
+                    executor.set_parent_timestamp(parent.timestamp());
+                    let output = executor.execute(&block).map_err(eyre::Report::new)?;
                     let codes = ExecutionWitnessRecord::commit_execution(&mut db, &output.state);
                     let first_header = db
                         .cache

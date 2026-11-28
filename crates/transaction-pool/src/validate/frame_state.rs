@@ -1,0 +1,665 @@
+use super::frame_policy::RecentRootDependency;
+use crate::TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER;
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
+
+use alloy_primitives::{
+    map::{AddressMap, B256Map, B256Set},
+    Address, TxHash, B256, U256,
+};
+
+/// State metadata captured while validating a frame transaction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameValidation {
+    /// Frame sender.
+    pub sender: Address,
+    /// Transaction nonce.
+    pub sender_nonce: u64,
+    /// Selected nonce domains, absent for a pre-fork frame transaction.
+    pub nonce_keys: Option<Vec<U256>>,
+    /// Selected sequence in the canonical state used for validation.
+    pub state_nonce: u64,
+    /// Sender balance at validation time.
+    pub sender_balance: U256,
+    /// Sender bytecode hash, if present.
+    pub sender_code_hash: Option<B256>,
+    /// Account paying for the frame.
+    pub payer: Address,
+    /// Maximum balance reservation for the frame.
+    pub max_cost: U256,
+    /// Payer balance at validation time.
+    pub payer_balance: U256,
+    /// Head against which this metadata was validated.
+    pub head_hash: B256,
+    /// State dependencies read by the frame.
+    pub dependencies: FrameDependencies,
+    /// Optional expiration timestamp.
+    pub expires_at: Option<u64>,
+    /// EIP-8272 predicates whose storage entries and ages must remain valid.
+    pub recent_root_dependencies: Vec<RecentRootDependency>,
+    /// Whether this frame consumes the payer's exclusive pending slot.
+    pub exclusive_payer: bool,
+}
+
+/// State addresses and slots observed by the validation prefix.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FrameDependencies {
+    /// Accounts whose state can affect validation.
+    pub accounts: Vec<Address>,
+    /// Accounts whose code can affect validation.
+    pub code: Vec<Address>,
+    /// Code dependencies that can replace their own code through delegated execution.
+    pub mutable_code: Vec<Address>,
+    /// Storage slots whose values can affect validation.
+    pub storage: Vec<(Address, U256)>,
+}
+
+/// Indexed reservations for frame transactions.
+#[derive(Debug, Default)]
+pub struct FrameReservations {
+    frames: B256Map<Arc<FrameValidation>>,
+    sender_nonce: BTreeMap<(Address, u64), TxHash>,
+    payer: AddressMap<PayerUsage>,
+    accounts: AddressMap<B256Set>,
+    code: AddressMap<B256Set>,
+    storage: HashMap<(Address, U256), B256Set>,
+    storage_address: AddressMap<B256Set>,
+    expiry: BTreeMap<u64, B256Set>,
+    recent_root_expiry: BTreeMap<u64, B256Set>,
+}
+
+/// Aggregate exposure held against one payer.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PayerUsage {
+    /// Canonical balance used by the currently admitted reservations.
+    pub balance: U256,
+    /// Sum of reserved frame costs.
+    pub frame_cost: U256,
+    /// Number of frames using the payer.
+    pub frame_count: usize,
+    /// Number of exclusive payer frames using this payer.
+    pub exclusive_count: usize,
+}
+
+impl FrameReservations {
+    /// Iterates validated transaction hashes without scanning ordinary transactions.
+    pub fn hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        self.frames.keys().copied()
+    }
+
+    /// Iterates reservations in increasing expiry order for resource-pressure eviction.
+    pub fn expiring_hashes(&self) -> impl Iterator<Item = B256> + '_ {
+        self.expiry
+            .values()
+            .chain(self.recent_root_expiry.values())
+            .flat_map(|hashes| hashes.iter().copied())
+    }
+
+    /// Atomically inserts a frame, optionally replacing its same-sender nonce.
+    pub fn replace(
+        &mut self,
+        hash: TxHash,
+        metadata: Arc<FrameValidation>,
+        replaces: Option<B256>,
+        ordinary_payer_cost: U256,
+        current_head: B256,
+    ) -> Result<(), &'static str> {
+        if metadata.head_hash != current_head {
+            return Err("stale head");
+        }
+        if self.frames.contains_key(&hash) {
+            return Err("duplicate hash");
+        }
+        let old = replaces.and_then(|h| self.frames.get(&h).cloned());
+        if replaces.is_some() && old.is_none() {
+            return Err("replacement not found");
+        }
+        if let Some(old) = &old {
+            if old.sender != metadata.sender ||
+                old.sender_nonce != metadata.sender_nonce ||
+                old.nonce_keys != metadata.nonce_keys
+            {
+                return Err("replacement sender nonce mismatch");
+            }
+        } else if self.sender_nonce.contains_key(&(metadata.sender, metadata.sender_nonce)) {
+            return Err("sender nonce already reserved");
+        }
+        if metadata.nonce_keys.is_some() &&
+            old.is_none() &&
+            self.sender_nonce
+                .range((metadata.sender, 0)..=(metadata.sender, u64::MAX))
+                .next()
+                .is_some()
+        {
+            return Err("sender already has a pending frame transaction");
+        }
+        let usage = self.payer.get(&metadata.payer).copied().unwrap_or_default();
+        let old_cost =
+            old.as_ref().filter(|f| f.payer == metadata.payer).map_or(U256::ZERO, |f| f.max_cost);
+        let frame_cost = usage
+            .frame_cost
+            .checked_sub(old_cost)
+            .ok_or("reservation accounting error")?
+            .checked_add(metadata.max_cost)
+            .ok_or("payer cost overflow")?;
+        let balance = metadata
+            .payer_balance
+            .checked_sub(ordinary_payer_cost)
+            .ok_or("ordinary payer exposure exceeds balance")?;
+        if frame_cost > balance {
+            return Err("payer balance exceeded");
+        }
+        let other_count = usage
+            .frame_count
+            .checked_sub(usize::from(old.as_ref().is_some_and(|f| f.payer == metadata.payer)))
+            .ok_or("reservation accounting error")?;
+        let old_exclusive_count = usize::from(
+            old.as_ref().is_some_and(|f| f.payer == metadata.payer && f.exclusive_payer),
+        );
+        let other_exclusive_count = usage
+            .exclusive_count
+            .checked_sub(old_exclusive_count)
+            .ok_or("reservation accounting error")?;
+        // Non-exclusive self-paid reservations may coexist; only exclusive reservations consume
+        // the payer's one-pending slot.
+        if metadata.exclusive_payer && other_exclusive_count != 0 {
+            return Err("exclusive payer capacity exceeded");
+        }
+        for address in &metadata.dependencies.mutable_code {
+            if !metadata.dependencies.code.contains(address) {
+                return Err("mutable code dependency is not indexed");
+            }
+            let count = self.code.get(address).map_or(0, B256Set::len);
+            let old_count = usize::from(
+                old.as_ref().is_some_and(|old| old.dependencies.code.contains(address)),
+            );
+            let other_count = count.checked_sub(old_count).ok_or("reservation accounting error")?;
+            // Bound one proxy upgrade's revalidation work by the ordinary per-sender capacity.
+            if other_count >= TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER {
+                return Err("mutable code dependency capacity exceeded");
+            }
+        }
+        self.remove_inner(replaces);
+        self.frames.insert(hash, metadata.clone());
+        self.sender_nonce.insert((metadata.sender, metadata.sender_nonce), hash);
+        let entry = self.payer.entry(metadata.payer).or_default();
+        entry.balance = metadata.payer_balance;
+        entry.frame_cost = frame_cost;
+        entry.frame_count = other_count + 1;
+        entry.exclusive_count = other_exclusive_count + usize::from(metadata.exclusive_payer);
+        for a in
+            metadata.dependencies.accounts.iter().copied().chain([metadata.sender, metadata.payer])
+        {
+            self.accounts.entry(a).or_default().insert(hash);
+        }
+        for a in metadata.dependencies.code.iter().copied() {
+            self.code.entry(a).or_default().insert(hash);
+        }
+        for s in metadata.dependencies.storage.iter().copied() {
+            self.storage.entry(s).or_default().insert(hash);
+        }
+        for a in metadata.dependencies.storage.iter().map(|(address, _)| *address) {
+            self.storage_address.entry(a).or_default().insert(hash);
+        }
+        if let Some(t) = metadata.expires_at {
+            self.expiry.entry(t).or_default().insert(hash);
+        }
+        for dependency in &metadata.recent_root_dependencies {
+            self.recent_root_expiry.entry(dependency.expires_at_slot).or_default().insert(hash);
+        }
+        Ok(())
+    }
+
+    /// Removes a reservation if present.
+    pub fn remove(&mut self, hash: &TxHash) {
+        self.remove_inner(Some(*hash));
+    }
+
+    fn remove_inner(&mut self, hash: Option<B256>) {
+        let Some(hash) = hash else { return };
+        let Some(m) = self.frames.remove(&hash) else { return };
+        self.sender_nonce.remove(&(m.sender, m.sender_nonce));
+        if let Some(p) = self.payer.get_mut(&m.payer) {
+            p.frame_cost = p.frame_cost.checked_sub(m.max_cost).unwrap_or(U256::ZERO);
+            p.frame_count = p.frame_count.saturating_sub(1);
+            if m.exclusive_payer {
+                p.exclusive_count = p.exclusive_count.saturating_sub(1);
+            }
+            if p.frame_count == 0 {
+                self.payer.remove(&m.payer);
+            }
+        }
+        for a in m.dependencies.accounts.iter().copied().chain([m.sender, m.payer]) {
+            if let Some(s) = self.accounts.get_mut(&a) {
+                s.remove(&hash);
+                if s.is_empty() {
+                    self.accounts.remove(&a);
+                }
+            }
+        }
+        for a in &m.dependencies.code {
+            if let Some(s) = self.code.get_mut(a) {
+                s.remove(&hash);
+                if s.is_empty() {
+                    self.code.remove(a);
+                }
+            }
+        }
+        for s in &m.dependencies.storage {
+            if let Some(v) = self.storage.get_mut(s) {
+                v.remove(&hash);
+                if v.is_empty() {
+                    self.storage.remove(s);
+                }
+            }
+        }
+        for a in m.dependencies.storage.iter().map(|(address, _)| *address) {
+            if let Some(v) = self.storage_address.get_mut(&a) {
+                v.remove(&hash);
+                if v.is_empty() {
+                    self.storage_address.remove(&a);
+                }
+            }
+        }
+        if let Some(t) = m.expires_at &&
+            let Some(v) = self.expiry.get_mut(&t)
+        {
+            v.remove(&hash);
+            if v.is_empty() {
+                self.expiry.remove(&t);
+            }
+        }
+        for dependency in &m.recent_root_dependencies {
+            if let Some(v) = self.recent_root_expiry.get_mut(&dependency.expires_at_slot) {
+                v.remove(&hash);
+                if v.is_empty() {
+                    self.recent_root_expiry.remove(&dependency.expires_at_slot);
+                }
+            }
+        }
+    }
+
+    /// Returns indexed frame usage for a payer.
+    pub fn payer_usage(&self, payer: &Address) -> PayerUsage {
+        self.payer.get(payer).copied().unwrap_or_default()
+    }
+    /// Returns the total indexed frame-cost exposure for a payer.
+    pub fn payer_exposure(&self, payer: &Address) -> U256 {
+        self.payer_usage(payer).frame_cost
+    }
+    /// Returns reservations affected by changed state or expiration.
+    pub fn affected(
+        &self,
+        changed: &FrameDependencies,
+        timestamp: u64,
+        current_slot: Option<u64>,
+    ) -> B256Set {
+        let mut out = B256Set::default();
+        for a in &changed.accounts {
+            if let Some(v) = self.accounts.get(a) {
+                out.extend(v.iter().copied())
+            }
+            if let Some(v) = self.code.get(a) {
+                out.extend(v.iter().copied())
+            }
+            if let Some(v) = self.storage_address.get(a) {
+                out.extend(v.iter().copied())
+            }
+        }
+        for a in &changed.code {
+            if let Some(v) = self.code.get(a) {
+                out.extend(v.iter().copied())
+            }
+        }
+        for slot in &changed.storage {
+            if let Some(v) = self.storage.get(slot) {
+                out.extend(v.iter().copied())
+            }
+        }
+        for (_, v) in self.expiry.range(..timestamp) {
+            out.extend(v.iter().copied())
+        }
+        if let Some(current_slot) = current_slot {
+            for (_, v) in self.recent_root_expiry.range(..=current_slot) {
+                out.extend(v.iter().copied())
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn m(sender: u8, nonce: u64, payer: u8, cost: u64) -> FrameValidation {
+        FrameValidation {
+            sender: Address::repeat_byte(sender),
+            sender_nonce: nonce,
+            nonce_keys: None,
+            state_nonce: nonce,
+            sender_balance: U256::MAX,
+            sender_code_hash: None,
+            payer: Address::repeat_byte(payer),
+            max_cost: U256::from(cost),
+            payer_balance: U256::from(10),
+            head_hash: B256::ZERO,
+            dependencies: FrameDependencies {
+                accounts: vec![Address::repeat_byte(9), Address::repeat_byte(9)],
+                code: vec![],
+                mutable_code: vec![],
+                storage: vec![],
+            },
+            expires_at: None,
+            recent_root_dependencies: vec![],
+            exclusive_payer: false,
+        }
+    }
+    fn put(r: &mut FrameReservations, n: u8, m: FrameValidation) -> Result<(), &'static str> {
+        r.replace(B256::repeat_byte(n), Arc::new(m), None, U256::ZERO, B256::ZERO)
+    }
+
+    #[test]
+    fn keyed_replacement_requires_exact_keys_and_sequence() {
+        let mut r = FrameReservations::default();
+        let mut original = m(1, 0, 1, 3);
+        original.nonce_keys = Some(vec![U256::from(1)]);
+        put(&mut r, 1, original.clone()).unwrap();
+        let mut disjoint = original.clone();
+        disjoint.nonce_keys = Some(vec![U256::from(2)]);
+        assert!(put(&mut r, 2, disjoint.clone()).is_err());
+        assert!(r
+            .replace(
+                B256::repeat_byte(2),
+                Arc::new(disjoint),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO
+            )
+            .is_err());
+        let mut future = original.clone();
+        future.sender_nonce = 1;
+        assert!(put(&mut r, 3, future.clone()).is_err());
+        assert!(r
+            .replace(
+                B256::repeat_byte(3),
+                Arc::new(future),
+                Some(B256::repeat_byte(1)),
+                U256::ZERO,
+                B256::ZERO
+            )
+            .is_err());
+        r.replace(
+            B256::repeat_byte(4),
+            Arc::new(original),
+            Some(B256::repeat_byte(1)),
+            U256::ZERO,
+            B256::ZERO,
+        )
+        .unwrap();
+        assert_eq!(r.hashes().collect::<Vec<_>>(), vec![B256::repeat_byte(4)]);
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
+    }
+
+    #[test]
+    fn reserve_overflow_and_balance() {
+        let mut r = FrameReservations::default();
+        let mut x = m(1, 0, 1, 10);
+        assert!(put(&mut r, 1, x.clone()).is_ok());
+        x.sender = Address::repeat_byte(2);
+        assert_eq!(put(&mut r, 2, x), Err("payer balance exceeded"));
+
+        let mut r = FrameReservations::default();
+        let mut x = m(1, 0, 1, 0);
+        x.max_cost = U256::MAX;
+        x.payer_balance = U256::MAX;
+        put(&mut r, 1, x).unwrap();
+        let mut y = m(2, 0, 1, 1);
+        y.payer_balance = U256::MAX;
+        assert_eq!(put(&mut r, 2, y), Err("payer cost overflow"));
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::MAX);
+    }
+
+    #[test]
+    fn stale_head_and_different_nonce_do_not_mutate_reservations() {
+        let mut r = FrameReservations::default();
+        put(&mut r, 1, m(1, 0, 1, 3)).unwrap();
+        let mut stale = m(2, 0, 1, 2);
+        stale.head_hash = B256::repeat_byte(7);
+        assert_eq!(put(&mut r, 2, stale), Err("stale head"));
+        assert!(put(&mut r, 3, m(1, 1, 2, 1)).is_ok());
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
+        assert_eq!(r.hashes().count(), 2);
+    }
+
+    #[test]
+    fn account_deletion_invalidates_storage_dependencies() {
+        let mut r = FrameReservations::default();
+        let address = Address::repeat_byte(8);
+        let slot = U256::from(5);
+        let mut x = m(1, 0, 1, 1);
+        x.dependencies.storage.push((address, slot));
+        put(&mut r, 1, x).unwrap();
+        let other_slot = FrameDependencies {
+            storage: vec![(address, slot + U256::from(1))],
+            ..Default::default()
+        };
+        assert!(r.affected(&other_slot, 0, None).is_empty());
+        for changed in [
+            FrameDependencies { accounts: vec![address], ..Default::default() },
+            FrameDependencies { storage: vec![(address, slot)], ..Default::default() },
+            FrameDependencies { accounts: vec![Address::repeat_byte(1)], ..Default::default() },
+        ] {
+            assert_eq!(r.affected(&changed, 0, None), B256Set::from_iter([B256::repeat_byte(1)]));
+            r.remove(&B256::repeat_byte(99));
+        }
+        r.remove(&B256::repeat_byte(1));
+        let changed = FrameDependencies { accounts: vec![address], ..Default::default() };
+        assert!(r.affected(&changed, u64::MAX, None).is_empty());
+    }
+    #[test]
+    fn removal_preserves_exclusive_admission_invariants() {
+        let mut r = FrameReservations::default();
+        put(&mut r, 1, m(1, 0, 1, 1)).unwrap();
+        let mut exclusive = m(3, 0, 1, 1);
+        exclusive.exclusive_payer = true;
+        put(&mut r, 2, exclusive.clone()).unwrap();
+        assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 1);
+
+        r.remove(&B256::repeat_byte(1));
+        assert_eq!(r.payer_usage(&exclusive.payer).frame_count, 1);
+        assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 1);
+        let mut another_exclusive = m(4, 0, 1, 1);
+        another_exclusive.exclusive_payer = true;
+        assert_eq!(put(&mut r, 3, another_exclusive), Err("exclusive payer capacity exceeded"));
+
+        r.remove(&B256::repeat_byte(2));
+        assert_eq!(r.payer_usage(&exclusive.payer), PayerUsage::default());
+
+        put(&mut r, 4, m(4, 0, 1, 1)).unwrap();
+        let mut second_exclusive = m(5, 0, 1, 1);
+        second_exclusive.exclusive_payer = true;
+        put(&mut r, 5, second_exclusive).unwrap();
+        r.remove(&B256::repeat_byte(5));
+        assert_eq!(r.payer_usage(&exclusive.payer).exclusive_count, 0);
+        assert_eq!(r.payer_usage(&exclusive.payer).frame_count, 1);
+    }
+
+    #[test]
+    fn exclusive_cap_and_nonce_rules() {
+        let mut r = FrameReservations::default();
+        let mut x = m(1, 0, 1, 1);
+        x.exclusive_payer = true;
+        put(&mut r, 1, x).unwrap();
+        assert!(put(&mut r, 2, m(2, 0, 1, 1)).is_ok());
+        let mut second_exclusive = m(3, 0, 1, 1);
+        second_exclusive.exclusive_payer = true;
+        assert_eq!(put(&mut r, 3, second_exclusive), Err("exclusive payer capacity exceeded"));
+        assert_eq!(put(&mut r, 3, m(1, 0, 2, 1)), Err("sender nonce already reserved"));
+    }
+    #[test]
+    fn replacement_rollback_and_payer_shift() {
+        let mut r = FrameReservations::default();
+        put(&mut r, 1, m(1, 0, 1, 3)).unwrap();
+        let mut x = m(1, 0, 2, 4);
+        assert_eq!(
+            r.replace(
+                B256::repeat_byte(2),
+                Arc::new(x.clone()),
+                Some(B256::repeat_byte(1)),
+                U256::from(7),
+                B256::ZERO
+            ),
+            Err("payer balance exceeded")
+        );
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::from(3));
+        x.payer = Address::repeat_byte(2);
+        r.replace(
+            B256::repeat_byte(2),
+            Arc::new(x),
+            Some(B256::repeat_byte(1)),
+            U256::ZERO,
+            B256::ZERO,
+        )
+        .unwrap();
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::ZERO);
+    }
+    #[test]
+    fn removal_and_affected_expiry() {
+        let mut r = FrameReservations::default();
+        let mut x = m(1, 0, 1, 1);
+        x.expires_at = Some(5);
+        put(&mut r, 1, x).unwrap();
+        let d = FrameDependencies { accounts: vec![Address::repeat_byte(9)], ..Default::default() };
+        assert!(r.affected(&d, 4, None).contains(&B256::repeat_byte(1)));
+        assert!(r.affected(&FrameDependencies::default(), 6, None).contains(&B256::repeat_byte(1)));
+        r.remove(&B256::repeat_byte(1));
+        r.remove(&B256::repeat_byte(1));
+        assert_eq!(r.payer_exposure(&Address::repeat_byte(1)), U256::ZERO);
+    }
+
+    #[test]
+    fn recent_root_expiry_is_indexed_and_removed() {
+        let mut r = FrameReservations::default();
+        let mut x = m(1, 0, 1, 1);
+        x.recent_root_dependencies = vec![RecentRootDependency {
+            storage_key: U256::from(7),
+            entry_hash: B256::repeat_byte(3),
+            expires_at_slot: 12,
+        }];
+        put(&mut r, 1, x).unwrap();
+
+        assert!(r.affected(&FrameDependencies::default(), 0, Some(11)).is_empty());
+        assert!(r
+            .affected(&FrameDependencies::default(), 0, Some(12))
+            .contains(&B256::repeat_byte(1)));
+
+        r.remove(&B256::repeat_byte(1));
+        assert!(r.affected(&FrameDependencies::default(), 0, Some(u64::MAX)).is_empty());
+    }
+
+    #[test]
+    fn keyed_sender_index_preserves_adjacent_senders_and_releases_removals() {
+        let mut reservations = FrameReservations::default();
+        for (sender, nonce) in [(0, 0), (1, u64::MAX), (2, 5)] {
+            let mut metadata = m(sender, nonce, sender, 1);
+            metadata.nonce_keys = Some(vec![U256::from(1)]);
+            put(&mut reservations, sender, metadata).unwrap();
+        }
+
+        for (sender, nonce, hash) in [(0, u64::MAX, 3), (1, 0, 4)] {
+            let mut metadata = m(sender, nonce, sender, 1);
+            metadata.nonce_keys = Some(vec![U256::from(1)]);
+            assert_eq!(
+                put(&mut reservations, hash, metadata.clone()),
+                Err("sender already has a pending frame transaction"),
+            );
+            reservations.remove(&B256::repeat_byte(sender));
+            put(&mut reservations, hash, metadata).unwrap();
+        }
+
+        let mut metadata = m(2, 6, 2, 1);
+        metadata.nonce_keys = Some(vec![U256::from(1)]);
+        assert_eq!(
+            put(&mut reservations, 5, metadata),
+            Err("sender already has a pending frame transaction"),
+        );
+        assert_eq!(reservations.hashes().count(), 3);
+    }
+
+    #[test]
+    fn mutable_code_capacity_replacements_and_removal_are_atomic() {
+        let proxy = Address::repeat_byte(0x42);
+        let immutable = Address::repeat_byte(0x43);
+        let metadata = |sender, dependency| {
+            let mut metadata = m(sender, 0, sender, 1);
+            metadata.dependencies.code = vec![dependency, dependency];
+            metadata.dependencies.mutable_code = vec![dependency, dependency];
+            metadata
+        };
+        let mut reservations = FrameReservations::default();
+        for sender in 0..TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER {
+            put(&mut reservations, sender as u8, metadata(sender as u8, proxy)).unwrap();
+        }
+        assert_eq!(reservations.code[&proxy].len(), TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER);
+        let rejected = metadata(100, proxy);
+        assert_eq!(
+            put(&mut reservations, 100, rejected),
+            Err("mutable code dependency capacity exceeded")
+        );
+        assert!(!reservations.frames.contains_key(&B256::repeat_byte(100)));
+        assert_eq!(reservations.payer_usage(&Address::repeat_byte(100)), PayerUsage::default());
+        reservations
+            .replace(
+                B256::repeat_byte(101),
+                Arc::new(metadata(0, proxy)),
+                Some(B256::repeat_byte(0)),
+                U256::ZERO,
+                B256::ZERO,
+            )
+            .unwrap();
+        let mut unrelated = m(102, 0, 102, 1);
+        unrelated.dependencies.code = vec![immutable];
+        put(&mut reservations, 102, unrelated).unwrap();
+        assert_eq!(
+            reservations.replace(
+                B256::repeat_byte(103),
+                Arc::new(metadata(102, proxy)),
+                Some(B256::repeat_byte(102)),
+                U256::ZERO,
+                B256::ZERO,
+            ),
+            Err("mutable code dependency capacity exceeded")
+        );
+        assert!(reservations.frames.contains_key(&B256::repeat_byte(102)));
+        assert_eq!(reservations.code[&immutable].len(), 1);
+        reservations.remove(&B256::repeat_byte(101));
+        put(&mut reservations, 103, metadata(103, proxy)).unwrap();
+        for hash in reservations.hashes().collect::<Vec<_>>() {
+            reservations.remove(&hash);
+        }
+        assert!(reservations.frames.is_empty());
+        assert!(reservations.code.is_empty());
+        assert!(reservations.payer.is_empty());
+        let mut missing_index = metadata(104, proxy);
+        missing_index.dependencies.code.clear();
+        assert_eq!(
+            put(&mut reservations, 104, missing_index),
+            Err("mutable code dependency is not indexed")
+        );
+        assert!(reservations.frames.is_empty());
+    }
+
+    #[test]
+    fn immutable_code_dependencies_do_not_consume_mutable_capacity() {
+        let helper = Address::repeat_byte(0x42);
+        let mut reservations = FrameReservations::default();
+        for sender in 0..=TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER {
+            let mut metadata = m(sender as u8, 0, sender as u8, 1);
+            metadata.dependencies.code = vec![helper];
+            put(&mut reservations, sender as u8, metadata).unwrap();
+        }
+        assert_eq!(reservations.code[&helper].len(), TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER + 1);
+    }
+}

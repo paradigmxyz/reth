@@ -304,6 +304,11 @@ where
         let db =
             StateProviderDatabase(LatestStateProviderRef::new(provider).into_evm_state_provider());
         let mut executor = self.evm_config.batch_executor(db);
+        let parent_number = input.checkpoint().block_number;
+        let parent = provider
+            .header_by_number(parent_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))?;
+        executor.set_parent_timestamp(parent.timestamp());
 
         // Progress tracking
         let mut stage_progress = start_block;

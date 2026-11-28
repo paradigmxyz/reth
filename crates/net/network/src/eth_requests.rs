@@ -2291,15 +2291,15 @@ mod tests {
 
     /// Creates a receipt whose single log carries `data_len` bytes of data.
     fn receipt_with_data(data_len: usize) -> Receipt {
-        Receipt {
-            tx_type: TxType::Legacy,
-            success: true,
-            cumulative_gas_used: 21_000,
-            logs: vec![Log {
+        Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![Log {
                 address: Address::ZERO,
                 data: LogData::new_unchecked(Vec::new(), vec![0u8; data_len].into()),
             }],
-        }
+        )
     }
 
     /// Stores the receipts as block `number` and returns the block hash.

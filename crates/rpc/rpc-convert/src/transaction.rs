@@ -5,8 +5,9 @@ use crate::{
 use alloy_consensus::{
     error::ValueError,
     transaction::{Recovered, TxEip4844Variant},
-    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxLegacy, TxType,
+    TxEip1559, TxEip2930, TxEip4844, TxEip7702, TxEip8141, TxLegacy, TxType,
 };
+use alloy_eips::eip8141::TransactionFees;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
     request::TransactionInputError, Log, TransactionInfo, TransactionRequest,
@@ -372,6 +373,12 @@ pub enum EthTxEnvError {
     /// EIP-7702 transaction has no call target.
     #[error("EIP-7702 authorization list has invalid fields")]
     AuthorizationListInvalidFields,
+    /// A frame request includes fields outside its canonical envelope.
+    #[error("EIP-8141 transaction request contains non-canonical outer fields")]
+    Eip8141InvalidOuterFields,
+    /// A frame request has invalid fields or lacks an independent gas limit.
+    #[error("{0}")]
+    Eip8141InvalidFields(&'static str),
 }
 
 impl<Env> TryIntoTxEnv<RecoveredTxEnvelope, Env> for TransactionRequest
@@ -453,14 +460,14 @@ fn transaction_request_to_evm2(
     evm_env: &impl EvmEnv,
 ) -> Result<RecoveredTxEnvelope, EthTxEnvError> {
     let tx_type = request.minimal_tx_type();
+    if tx_type == TxType::Eip8141 {
+        return frame_request_to_evm2(request, evm_env);
+    }
     let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
         normalize_transaction_request(&mut request, evm_env)?;
     let TransactionRequest {
         from,
         to,
-        gas_price: _,
-        max_fee_per_gas: _,
-        max_priority_fee_per_gas: _,
         gas,
         value,
         input,
@@ -468,10 +475,8 @@ fn transaction_request_to_evm2(
         access_list,
         chain_id,
         blob_versioned_hashes,
-        max_fee_per_blob_gas: _,
         authorization_list,
-        transaction_type: _,
-        sidecar: _,
+        ..
     } = request;
     let input = input.try_into_unique_input()?.unwrap_or_default();
     let caller = from.unwrap_or_default();
@@ -545,8 +550,66 @@ fn transaction_request_to_evm2(
             }
             .into(),
         ),
+        TxType::Eip8141 => return Err(EthTxEnvError::Eip8141InvalidOuterFields),
     };
     Ok(Recovered::new_unchecked(tx, caller))
+}
+
+fn frame_request_to_evm2(
+    request: TransactionRequest,
+    evm_env: &impl EvmEnv,
+) -> Result<RecoveredTxEnvelope, EthTxEnvError> {
+    ensure_frame_request_fields(&request)?;
+    let sender = request.from.unwrap_or_default();
+    let full_fees = request.eip8141_fees;
+    let frames = request.frames.unwrap_or_default();
+    if frames.is_empty() || frames.len() > alloy_eips::eip8141::MAX_FRAMES {
+        return Err(EthTxEnvError::Eip8141InvalidFields("expected between 1 and 64 frames"));
+    }
+    let tx = TxEip8141 {
+        chain_id: request.chain_id.unwrap_or_else(|| evm_env.chain_id()),
+        nonce: request.nonce.unwrap_or_default(),
+        nonce_keys: request.nonce_keys,
+        sender,
+        frames: frames
+            .into_iter()
+            .map(TryInto::try_into)
+            .collect::<Result<_, _>>()
+            .map_err(EthTxEnvError::Eip8141InvalidFields)?,
+        signatures: request.signatures.unwrap_or_default(),
+        fees: TransactionFees {
+            max_fee: request
+                .max_fee
+                .or_else(|| full_fees.map(|fees| fees.max_fee))
+                .unwrap_or(U256::MAX),
+            max_priority_fee_per_gas: request
+                .max_priority_fee_per_gas
+                .map(U256::from)
+                .or_else(|| full_fees.map(|fees| fees.max_priority_fee_per_gas))
+                .unwrap_or_default(),
+        },
+        blob_versioned_hashes: request.blob_versioned_hashes.unwrap_or_default(),
+    };
+    Ok(Recovered::new_unchecked(TxEnvelope::Eip8141(tx), sender))
+}
+
+/// Rejects outer RPC fields that would be discarded when building a canonical frame envelope.
+pub fn ensure_frame_request_fields(request: &TransactionRequest) -> Result<(), EthTxEnvError> {
+    let input = request.input.clone().try_into_unique_input()?.unwrap_or_default();
+    if request.to.is_some() ||
+        request.transaction_type.is_some_and(|ty| ty != u8::from(TxType::Eip8141)) ||
+        request.gas_price.is_some() ||
+        request.gas.is_some() ||
+        request.max_fee_per_gas.is_some() ||
+        request.max_fee_per_blob_gas.is_some() ||
+        request.value.is_some_and(|value| !value.is_zero()) ||
+        !input.is_empty() ||
+        request.access_list.is_some() ||
+        request.authorization_list.is_some()
+    {
+        return Err(EthTxEnvError::Eip8141InvalidOuterFields);
+    }
+    Ok(())
 }
 
 /// Converts rpc transaction requests into transaction environment using a closure.

@@ -23,9 +23,10 @@ use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     database::StateProviderDatabase,
     execute::{
-        BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutor, BlockValidationError,
+        frame_transaction_tip, BlockBuilder, BlockBuilderOutcome, BlockExecutionError,
+        BlockExecutor, BlockValidationError,
     },
-    ConfigureEvm, EvmEnv, NextBlockEnvAttributes, OnStateHook,
+    CommitChanges, ConfigureEvm, EvmEnv, NextBlockEnvAttributes, OnStateHook,
 };
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_cache::{CachedStateMetrics, CachedStateMetricsSource, CachedStateProvider};
@@ -222,6 +223,7 @@ where
     }
     let base_fee = builder.evm_env().block_base_fee();
     let blob_fee = blob_params.as_ref().map(|_| builder.evm_env().block_blob_base_fee());
+    let frame_blob_fee = builder.evm_env().block_env().blob_basefee;
     let separate_block_gas = builder.evm_env().uses_separate_block_gas();
     let regular_gas_limit_cap = builder.evm_env().regular_gas_limit_cap();
 
@@ -268,7 +270,10 @@ where
         }
 
         // ensure we still have capacity for this transaction
-        let exceeds_gas_limit = if separate_block_gas {
+        let exceeds_gas_limit = if pool_tx.transaction.frame_transaction().is_some() {
+            // The executor checks frame reservations in each gas dimension.
+            None
+        } else if separate_block_gas {
             let regular_available = gas_limit.saturating_sub(block_regular_gas_used);
             let state_available = gas_limit.saturating_sub(block_state_gas_used);
             let regular_limit = pool_tx.gas_limit().min(regular_gas_limit_cap);
@@ -318,7 +323,7 @@ where
         // the EIP-4844 can still fit in the block
         let mut blob_tx_sidecar = None;
         let tx_blob_count = tx.blob_count();
-        if let Some(tx_blob_count) = tx_blob_count {
+        if let Some(tx_blob_count) = tx_blob_count.filter(|count| *count != 0 || tx.is_eip4844()) {
             if block_blob_count + tx_blob_count > max_blob_count {
                 // we can't fit this _blob_ transaction into the block, so we mark it as
                 // invalid, which removes its dependent transactions from
@@ -371,9 +376,21 @@ where
             };
         }
 
-        let miner_fee = tx.effective_tip_per_gas(base_fee);
         let tx_hash = *tx.tx_hash();
-        let gas_output = match builder.execute_transaction(tx) {
+        let mut transaction_fees = U256::ZERO;
+        let gas_output = match builder
+            .execute_transaction_with_commit_condition(tx.as_recovered_ref(), |result, _| {
+                transaction_fees = transaction_tip(
+                    tx.inner(),
+                    result.tx_gas_used(),
+                    result.frame.as_ref().map(|frame| frame.precharge),
+                    base_fee,
+                    frame_blob_fee,
+                );
+                CommitChanges::Yes
+            })
+            .map(Option::unwrap_or_default)
+        {
             Ok(gas_output) => gas_output,
             Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
                 error, ..
@@ -430,8 +447,7 @@ where
 
         // update and add to total fees
         let gas_used = gas_output.tx_gas_used();
-        let miner_fee = miner_fee.expect("fee is always valid; execution succeeded");
-        total_fees += U256::from(miner_fee) * U256::from(gas_used);
+        total_fees = total_fees.saturating_add(transaction_fees);
         cumulative_tx_gas_used += gas_used;
         block_regular_gas_used += gas_output.regular_gas_used();
         block_state_gas_used += gas_output.state_gas_used();
@@ -511,4 +527,110 @@ where
         .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
+}
+
+fn transaction_tip(
+    transaction: &TransactionSigned,
+    gas_used: u64,
+    frame_precharge: Option<U256>,
+    base_fee: u64,
+    blob_fee: U256,
+) -> U256 {
+    let used = U256::from(gas_used);
+    if let Some(frame) = transaction.as_eip8141() {
+        frame_transaction_tip(
+            frame,
+            gas_used,
+            base_fee,
+            U256::from(transaction.blob_gas_used().unwrap_or_default()) * blob_fee,
+            Some(frame_precharge.unwrap_or_default()),
+        )
+    } else {
+        transaction.effective_tip_per_gas_u256(base_fee).unwrap_or_default().saturating_mul(used)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{SignableTransaction, TxEip1559, TxEip8141, TxLegacy};
+    use alloy_eips::{
+        eip4844::DATA_GAS_PER_BLOB,
+        eip8141::{Frame, FrameLimits, FrameMode},
+    };
+    use alloy_primitives::{Sealable, Signature, B256};
+
+    fn frame_transaction(priority_fee: U256, max_fee: U256) -> TxEip8141 {
+        let mut transaction = TxEip8141 {
+            nonce_keys: Some(vec![]),
+            frames: vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                limits: FrameLimits { execution: 100_000, state: 0 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        transaction.fees.max_priority_fee_per_gas = priority_fee;
+        transaction.fees.max_fee = max_fee;
+        transaction
+    }
+
+    #[test]
+    fn frame_tip_uses_actual_gas_and_native_escrow() {
+        let transaction = frame_transaction(U256::from(1), U256::from(150_000));
+        let transaction = TransactionSigned::Eip8141(transaction.seal_slow());
+        assert_eq!(
+            transaction_tip(&transaction, 50_000, Some(U256::from(150_000)), 1, U256::ZERO),
+            U256::from(50_000),
+        );
+        assert_eq!(
+            transaction_tip(&transaction, 100_000, Some(U256::from(150_000)), 1, U256::ZERO),
+            U256::from(50_000),
+        );
+    }
+
+    #[test]
+    fn frame_tip_excludes_blob_charge_and_caps_full_width_priority_fee() {
+        for blob_fee in [U256::from(2), U256::from(u64::MAX) + U256::ONE] {
+            let blob_charge = U256::from(DATA_GAS_PER_BLOB) * blob_fee;
+            let precharge = blob_charge + U256::from(150_000);
+            let mut transaction = frame_transaction(U256::MAX, precharge);
+            transaction.blob_versioned_hashes.push(B256::repeat_byte(1));
+            let transaction = TransactionSigned::Eip8141(transaction.seal_slow());
+            assert_eq!(
+                transaction_tip(&transaction, 50_000, Some(precharge), 1, blob_fee),
+                U256::from(100_000)
+            );
+        }
+    }
+
+    #[test]
+    fn ordinary_tip_uses_effective_per_gas_fee() {
+        for (transaction, expected) in [
+            (
+                TransactionSigned::Legacy(
+                    TxLegacy { gas_price: 5, ..Default::default() }
+                        .into_signed(Signature::test_signature()),
+                ),
+                4,
+            ),
+            (
+                TransactionSigned::Eip1559(
+                    TxEip1559 {
+                        max_fee_per_gas: 3,
+                        max_priority_fee_per_gas: 5,
+                        ..Default::default()
+                    }
+                    .into_signed(Signature::test_signature()),
+                ),
+                2,
+            ),
+        ] {
+            assert_eq!(
+                transaction_tip(&transaction, 21_000, None, 1, U256::from(2)),
+                U256::from(expected * 21_000),
+            );
+        }
+    }
 }

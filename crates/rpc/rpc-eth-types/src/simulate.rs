@@ -2,19 +2,23 @@
 
 use crate::{
     error::{api::FromEthApiError, FromEvmError, ToRpcError},
+    transaction::resolve_frame_nonce,
     EthApiError,
 };
 use alloy_chains::Chain;
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_eips::{eip2718::WithEncoded, eip8141::FrameStatus};
 use alloy_network::{NetworkTransactionBuilder, TransactionBuilder};
 use alloy_primitives::{keccak256, map::AddressMap, Address, Bytes, TxKind, U256};
 use alloy_rpc_types_eth::{
-    simulate::{SimBlock, SimCallResult, SimulateError, SimulatedBlock},
+    simulate::{FrameCallResult, SimBlock, SimCallResult, SimulateError, SimulatedBlock},
     state::StateOverride,
     BlockId, BlockOverrides, BlockTransactionsKind,
 };
-use evm2::{interpreter::InstrStop, precompiles::MovePrecompileError, EvmFeatures, TxResult};
+use evm2::{
+    ethereum::eip8141::FrameGas, interpreter::InstrStop, precompiles::MovePrecompileError,
+    EvmFeatures, FrameTransactionResult, TxResult,
+};
 use evm2_inspectors::transfer::TransferInspector;
 use jsonrpsee_types::{error::INTERNAL_ERROR_CODE, ErrorObject};
 use reth_errors::ProviderResult;
@@ -31,6 +35,10 @@ use reth_storage_api::{noop::NoopProvider, HashedPostStateProvider, StateProvide
 use reth_tasks::cancel::is_cancelled;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use std::mem;
+
+pub use alloy_rpc_types_eth::simulate::{
+    FrameSimulationFrameResult, FrameSimulationPrefixShape, FrameSimulationResult,
+};
 
 /// Fallback seconds added between simulated block timestamps when neither the user nor the chain
 /// hint provides a value.
@@ -364,6 +372,7 @@ where
         if is_cancelled() {
             return Err(EthApiError::InternalEthError)
         }
+        let is_frame = call.as_ref().minimal_tx_type().is_eip8141();
         let block_gas_remaining = if is_amsterdam {
             let regular_available_gas = block_gas_limit.saturating_sub(block_regular_gas_used);
             let state_available_gas = block_gas_limit.saturating_sub(block_state_gas_used);
@@ -378,13 +387,14 @@ where
         };
         let mut default_gas_limit = block_gas_remaining;
 
-        if let Some(gas_limit) = call.as_ref().gas_limit() &&
+        if !is_frame &&
+            let Some(gas_limit) = call.as_ref().gas_limit() &&
             gas_limit > block_gas_remaining
         {
             return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded))
         }
 
-        if let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
+        if !is_frame && let Some(remaining_call_gas_limit) = *remaining_call_gas_limit {
             if let Some(gas_limit) = call.as_ref().gas_limit() {
                 if gas_limit > remaining_call_gas_limit {
                     call.as_mut().set_gas_limit(remaining_call_gas_limit);
@@ -411,6 +421,15 @@ where
             builder.evm_mut(),
             converter,
         )?;
+        if let Some(frame) = tx.frame_transaction() {
+            ensure_frame_simulation_gas(
+                frame,
+                builder.evm_env().version(),
+                *remaining_call_gas_limit,
+                block_gas_limit.saturating_sub(block_regular_gas_used),
+                block_gas_limit.saturating_sub(block_state_gas_used),
+            )?;
+        }
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
         let tx = WithEncoded::new(Default::default(), tx);
@@ -471,7 +490,7 @@ where
 ///
 /// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 pub fn resolve_transaction<DB: Database, Tx, T>(
-    tx: RpcTxReq<T::Network>,
+    mut tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
@@ -483,6 +502,9 @@ where
     DB::Error: Into<EthApiError>,
     T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
 {
+    resolve_frame_nonce(tx.as_mut(), |address, key| {
+        db.get_storage(&address, &key).map_err(Into::into)
+    })?;
     resolve_transaction_with_account(
         tx,
         default_gas_limit,
@@ -495,7 +517,7 @@ where
 }
 
 fn resolve_transaction_with_evm<Tx, T, E>(
-    tx: RpcTxReq<T::Network>,
+    mut tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
@@ -507,6 +529,9 @@ where
     T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
     E: RethEvm,
 {
+    resolve_frame_nonce(tx.as_mut(), |address, key| {
+        evm.state_db_mut().get_storage(&address, &key).map_err(Into::into)
+    })?;
     resolve_transaction_with_account(
         tx,
         default_gas_limit,
@@ -543,6 +568,25 @@ where
         tx.as_mut().set_from(Address::ZERO);
         Address::ZERO
     });
+
+    if tx_type.is_eip8141() {
+        reth_rpc_convert::ensure_frame_request_fields(tx.as_ref())?;
+        if tx.as_ref().nonce().is_none() {
+            let nonce = account(&from)?.map(|account| account.nonce).unwrap_or_default();
+            tx.as_mut().set_nonce(nonce);
+        }
+        tx.as_mut().chain_id.get_or_insert(chain_id);
+        tx.as_mut().nonce_keys.get_or_insert_with(Vec::new);
+        tx.as_mut().signatures.get_or_insert_with(Vec::new);
+        if tx.as_ref().eip8141_fees.is_none() {
+            tx.as_mut().max_fee.get_or_insert(U256::ZERO);
+            tx.as_mut().max_priority_fee_per_gas.get_or_insert(0);
+        }
+        let tx = converter
+            .build_simulate_v1_transaction(tx)
+            .map_err(|error| EthApiError::other(error.into()))?;
+        return Ok(Recovered::new_unchecked(tx, from));
+    }
 
     let state_nonce = account(&from)?.map(|acc| acc.nonce).unwrap_or_default();
     if tx.as_ref().nonce().is_none() {
@@ -617,11 +661,35 @@ where
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
-    for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
+    for (index, (mut result, tx)) in
+        results.into_iter().zip(block.body().transactions()).enumerate()
+    {
         let gas_used = result.tx_gas_used();
         let max_used_gas = Some(result.total_gas_spent.max(result.floor_gas));
-        let call = if result.status {
+        let call = if let Some(frame) = result.frame.take() {
+            frame_call_result(
+                gas_used,
+                result.total_gas_spent.max(result.floor_gas),
+                frame,
+                |log| {
+                    let current_index = log_index;
+                    log_index += 1;
+                    alloy_rpc_types_eth::Log {
+                        inner: log,
+                        log_index: Some(current_index),
+                        transaction_index: Some(index as u64),
+                        transaction_hash: Some(*tx.tx_hash()),
+                        block_hash: Some(block.hash()),
+                        block_number: Some(block.header().number()),
+                        block_timestamp: Some(block.header().timestamp()),
+                        ..Default::default()
+                    }
+                },
+            )
+        } else if result.status {
             SimCallResult {
+                payer: None,
+                frame_results: None,
                 return_data: result.output,
                 error: None,
                 gas_used,
@@ -648,6 +716,8 @@ where
         } else if result.stop == InstrStop::Revert {
             let error = Err::from_revert(result.output.clone());
             SimCallResult {
+                payer: None,
+                frame_results: None,
                 return_data: Bytes::new(),
                 error: Some(SimulateError {
                     message: error.to_string(),
@@ -662,6 +732,8 @@ where
         } else {
             let error = Err::from_evm_halt(result.stop, tx.gas_limit());
             SimCallResult {
+                payer: None,
+                frame_results: None,
                 return_data: Bytes::new(),
                 error: Some(SimulateError {
                     message: error.to_string(),
@@ -743,19 +815,78 @@ impl SimulatedState {
     }
 }
 
+/// Checks the frame envelope against the remaining RPC, execution and state gas budgets.
+pub fn ensure_frame_simulation_gas(
+    frame: &alloy_consensus::TxEip8141,
+    version: &evm2::Version,
+    remaining_rpc_gas: Option<u64>,
+    available_execution_gas: u64,
+    available_state_gas: u64,
+) -> Result<(), EthApiError> {
+    let gas = FrameGas::calculate(frame, version).map_err(reth_evm::execute::map_handler_error)?;
+    if remaining_rpc_gas.is_some_and(|remaining| gas.maximum > remaining) {
+        return Err(EthApiError::other(EthSimulateError::GasLimitReached));
+    }
+    if gas.execution > available_execution_gas || gas.state > available_state_gas {
+        return Err(EthApiError::other(EthSimulateError::BlockGasLimitExceeded));
+    }
+    Ok(())
+}
+
+fn frame_call_result(
+    gas_used: u64,
+    max_used_gas: u64,
+    frame: FrameTransactionResult,
+    mut map_log: impl FnMut(alloy_primitives::Log) -> alloy_rpc_types_eth::Log,
+) -> SimCallResult {
+    assert_eq!(frame.receipts.len(), frame.outputs.len());
+    let frame_results: Vec<_> = frame
+        .receipts
+        .into_iter()
+        .zip(frame.outputs)
+        .map(|(receipt, output)| FrameCallResult {
+            status: receipt.status,
+            gas_used: receipt.gas_used.execution.saturating_add(receipt.gas_used.state),
+            execution_gas_used: receipt.gas_used.execution,
+            state_gas_used: receipt.gas_used.state,
+            logs: receipt.logs.into_iter().map(&mut map_log).collect(),
+            return_data: output,
+            error: None,
+        })
+        .collect();
+    let failed = frame_results.iter().find(|frame| frame.status != FrameStatus::Success);
+    let status = failed.is_none();
+    let return_data = failed
+        .or_else(|| frame_results.last())
+        .map(|frame| frame.return_data.clone())
+        .unwrap_or_default();
+    SimCallResult {
+        payer: Some(frame.payer),
+        logs: frame_results.iter().flat_map(|frame| frame.logs.iter().cloned()).collect(),
+        frame_results: Some(frame_results),
+        return_data,
+        status,
+        error: (!status).then(|| SimulateError {
+            code: SIMULATE_VM_ERROR_CODE,
+            message: "vm execution error: frame failed".into(),
+            data: None,
+        }),
+        gas_used,
+        max_used_gas: Some(max_used_gas),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        apply_precompile_overrides, sanitize_chain, EthSimulateError, ProviderResult,
-        SimulatedState, INTERNAL_ERROR_CODE,
-    };
+    use super::*;
     use crate::{cache::db::apply_state_overrides_with_state, error::ToRpcError, EthApiError};
     use alloy_chains::Chain;
-    use alloy_consensus::Header;
+    use alloy_consensus::{Header, TxEip8141};
+    use alloy_eips::eip8141::{Frame, FrameGasUsed, FrameLimits, FrameMode, FrameReceipt};
     use alloy_primitives::{
         address, keccak256,
         map::{AddressMap, B256Map},
-        Address, B256, U256,
+        Address, Bytes, Log, B256, U256,
     };
     use alloy_rpc_types_eth::{
         simulate::SimBlock,
@@ -774,6 +905,128 @@ mod tests {
     use reth_storage_api::HashedPostStateProvider;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
     use std::collections::BTreeMap;
+
+    #[test]
+    fn simulated_frame_outputs_preserve_payer_gas_logs_and_failures() {
+        for status in [FrameStatus::Success, FrameStatus::Failure, FrameStatus::SkippedAtomicBatch]
+        {
+            let successful = status == FrameStatus::Success;
+            let first = Bytes::from_static(&[0xab]);
+            let last = Bytes::from_static(&[0xcd]);
+            let frame = FrameTransactionResult {
+                payer: Address::repeat_byte(0x11),
+                receipts: vec![
+                    FrameReceipt {
+                        status,
+                        gas_used: FrameGasUsed { execution: 21, state: 3 },
+                        logs: if successful { vec![Log::default()] } else { vec![] },
+                    },
+                    FrameReceipt {
+                        status: FrameStatus::Success,
+                        gas_used: FrameGasUsed { execution: 5, state: 7 },
+                        logs: vec![],
+                    },
+                ],
+                outputs: vec![first.clone(), last.clone()],
+                ..Default::default()
+            };
+            let result = frame_call_result(40, 50, frame, |inner| alloy_rpc_types_eth::Log {
+                inner,
+                ..Default::default()
+            });
+            assert_eq!(result.status, successful);
+            assert_eq!(result.error.is_none(), successful);
+            assert_eq!(result.return_data, if successful { last } else { first });
+            assert_eq!(result.logs.len(), usize::from(successful));
+            assert_eq!(result.payer, Some(Address::repeat_byte(0x11)));
+            assert_eq!(result.gas_used, 40);
+            assert_eq!(result.max_used_gas, Some(50));
+            let frames = result.frame_results.unwrap();
+            assert_eq!(frames[0].status, status);
+            assert_eq!(frames[0].gas_used, 24);
+            assert_eq!(frames[0].execution_gas_used, 21);
+            assert_eq!(frames[0].state_gas_used, 3);
+            assert_eq!(frames[0].logs.len(), usize::from(successful));
+            assert_eq!(frames[1].return_data, Bytes::from_static(&[0xcd]));
+        }
+    }
+
+    #[test]
+    fn frame_simulation_checks_the_rpc_and_both_block_gas_dimensions() {
+        let tx = TxEip8141 {
+            chain_id: 1,
+            nonce_keys: Some(vec![]),
+            frames: vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                limits: FrameLimits { execution: 50_000, state: 7_000 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let version = evm2::Version::new(SpecId::BOGOTA);
+        let gas = FrameGas::calculate(&tx, &version).unwrap();
+        assert!(ensure_frame_simulation_gas(
+            &tx,
+            &version,
+            Some(gas.maximum),
+            gas.execution,
+            gas.state
+        )
+        .is_ok());
+        assert!(ensure_frame_simulation_gas(&tx, &version, None, gas.execution, gas.state).is_ok());
+        assert_eq!(
+            ensure_frame_simulation_gas(
+                &tx,
+                &version,
+                Some(gas.maximum - 1),
+                gas.execution,
+                gas.state
+            )
+            .unwrap_err()
+            .into_rpc_err()
+            .code(),
+            EthSimulateError::GasLimitReached.error_code()
+        );
+        for (execution, state) in [(gas.execution - 1, gas.state), (gas.execution, gas.state - 1)] {
+            assert_eq!(
+                ensure_frame_simulation_gas(&tx, &version, None, execution, state)
+                    .unwrap_err()
+                    .into_rpc_err()
+                    .code(),
+                EthSimulateError::BlockGasLimitExceeded.error_code()
+            );
+        }
+    }
+
+    #[test]
+    fn frame_simulation_resolves_keyed_sequences_and_preserves_single_use_nonce() {
+        let mut request = TransactionRequest {
+            transaction_type: Some(6),
+            nonce_keys: Some(vec![U256::ZERO, U256::ONE]),
+            ..Default::default()
+        };
+        resolve_frame_nonce(&mut request, |address, _| {
+            assert_eq!(address, alloy_eips::eip8250::NONCE_MANAGER);
+            Ok(U256::from(9))
+        })
+        .unwrap();
+        assert_eq!(request.nonce, Some(9));
+        request.nonce = Some(u64::MAX);
+        resolve_frame_nonce(&mut request, |_, _| {
+            panic!("explicit single-use nonce must not be replaced")
+        })
+        .unwrap();
+        assert_eq!(request.nonce, Some(u64::MAX));
+        request.nonce = None;
+        let mut values = [U256::from(9), U256::from(10)].into_iter();
+        assert_eq!(
+            resolve_frame_nonce(&mut request, |_, _| Ok(values.next().unwrap()))
+                .unwrap_err()
+                .to_string(),
+            "nonce keys require one non-exhausted sequence"
+        );
+    }
 
     fn test_evm() -> Evm<'static, BaseEvmTypes> {
         Evm::new(

@@ -17,7 +17,7 @@ const PRESTATE_SNAPSHOT: &str =
     include_str!("../../../../../testing/prestate/tx-selfdestruct-prestate.json");
 
 /// Replays the selfdestruct transaction via `debug_traceCall` and ensures Reth's prestate matches
-/// Geth's captured snapshot.
+/// Geth's captured snapshot with the pre-Bogotá response fields.
 // <https://github.com/paradigmxyz/reth/issues/19703>
 #[tokio::test]
 async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
@@ -26,11 +26,14 @@ async fn debug_trace_call_matches_geth_prestate_snapshot() -> Result<()> {
     let mut genesis: Genesis = MAINNET.genesis().clone();
     genesis.coinbase = address!("0x95222290dd7278aa3ddd389cc1e1d165cc4bafe5");
 
-    let expected_frame = expected_snapshot_frame()?;
-    let prestate_mode = match &expected_frame {
-        PreStateFrame::Default(mode) => mode.clone(),
-        _ => return Err(eyre!("snapshot must contain default prestate frame")),
+    let mut expected_frame = expected_snapshot_frame()?;
+    let PreStateFrame::Default(prestate_mode) = &mut expected_frame else {
+        return Err(eyre!("snapshot must contain default prestate frame"))
     };
+    // The snapshot includes code hashes, which Reth emits starting at Bogotá.
+    for account in prestate_mode.0.values_mut() {
+        account.code_hash = None;
+    }
 
     genesis.alloc.extend(
         prestate_mode

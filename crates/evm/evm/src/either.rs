@@ -114,4 +114,11 @@ where
             Self::Right(b) => b.take_bal(),
         }
     }
+
+    fn set_parent_timestamp(&mut self, parent_timestamp: u64) {
+        match self {
+            Self::Left(a) => a.set_parent_timestamp(parent_timestamp),
+            Self::Right(b) => b.set_parent_timestamp(parent_timestamp),
+        }
+    }
 }

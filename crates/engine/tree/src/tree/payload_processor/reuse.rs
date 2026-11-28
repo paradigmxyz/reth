@@ -1362,6 +1362,7 @@ mod tests {
         let evm = config.evm_with_env(parent_state(), env);
         let ctx = EthBlockExecutionCtx {
             parent_hash: B256::ZERO,
+            parent_timestamp: None,
             parent_beacon_block_root: None,
             ommers: &[],
             withdrawals: None,

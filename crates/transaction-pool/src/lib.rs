@@ -276,6 +276,8 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub use alloy_consensus::transaction::eip8141::TxEip8141ValidationError;
+
 pub use imbl::OrdMap;
 
 pub use crate::{
@@ -875,6 +877,10 @@ where
 
     fn on_canonical_state_change(&self, update: CanonicalStateUpdate<'_, Self::Block>) {
         self.pool.on_canonical_state_change(update);
+    }
+
+    async fn revalidate_frame_transactions(&self) {
+        self.pool.revalidate_frame_transactions().await;
     }
 
     fn update_accounts(&self, accounts: Vec<ChangedAccount>) {

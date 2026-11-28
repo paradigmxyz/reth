@@ -93,6 +93,7 @@ alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-genesis.workspace = true
 alloy-signer.workspace = true
+alloy-signer-local.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }

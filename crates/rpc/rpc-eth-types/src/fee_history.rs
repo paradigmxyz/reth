@@ -445,6 +445,6 @@ mod tests {
     }
 
     fn receipt(cumulative_gas_used: u64) -> Receipt {
-        Receipt { tx_type: TxType::Eip1559, success: true, cumulative_gas_used, logs: Vec::new() }
+        Receipt::standard(TxType::Eip1559, true, cumulative_gas_used, Vec::new())
     }
 }

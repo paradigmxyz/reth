@@ -27,7 +27,7 @@ use evm2::{
         CONSOLIDATION_REQUEST_ADDRESS, HISTORY_STORAGE_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
     },
     interpreter::InstrStop,
-    registry::HandlerError,
+    registry::{FrameTransactionError, HandlerError},
     Evm, EvmTypes, SpecId, TxResult, TxResultWithState,
 };
 use reth_ethereum_forks::EthereumHardforks;
@@ -264,8 +264,8 @@ mod tests {
         )
         .expect("EVM execution succeeds");
 
-        assert_eq!(output.result.receipts[0].cumulative_gas_used, 43_106);
-        assert!(output.result.receipts[0].success);
+        assert_eq!(output.result.receipts[0].cumulative_gas_used(), 43_106);
+        assert!(output.result.receipts[0].success());
         assert_eq!(output.account(&contract).unwrap().unwrap().balance, U256::from(1));
         let sender = output.account(&caller).unwrap().unwrap();
         assert_eq!(sender.nonce, 1);
@@ -531,7 +531,7 @@ mod tests {
             address: MAINNET_DEPOSIT_CONTRACT_ADDRESS,
             data: deposit,
         });
-        let receipt = Receipt { tx_type: TxType::Legacy, logs: vec![log], ..Default::default() };
+        let receipt = Receipt::standard(TxType::Legacy, false, 0, vec![log]);
 
         let requests = block_requests_from_receipts(
             SpecId::PRAGUE,
@@ -550,7 +550,35 @@ mod tests {
 
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0][0], DEPOSIT_REQUEST_TYPE);
+        const DEPOSIT_BYTES_SIZE: usize = 48 + 32 + 8 + 96 + 8;
         assert_eq!(requests[0].len(), 1 + DEPOSIT_BYTES_SIZE);
+    }
+
+    #[test]
+    fn validation_errors_preserve_transaction_classification() {
+        let hash = B256::with_last_byte(1);
+        for error in [
+            HandlerError::InvalidFrameTransaction(FrameTransactionError::VerifyFrameFailed),
+            HandlerError::FrameFeeBudgetTooLow { required: U256::from(2), got: U256::ONE },
+            HandlerError::GasLimitBelowFloor { required: 21_001, got: 21_000 },
+            HandlerError::IntrinsicGasGreaterThanCap { required: 21_001, cap: 21_000 },
+        ] {
+            let expected = error.clone();
+            let BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                hash: actual,
+                error,
+            }) = map_transaction_error(error, hash)
+            else {
+                panic!("expected an invalid transaction error for {expected}");
+            };
+            assert_eq!(actual, hash);
+            assert_eq!(error.as_any().downcast_ref::<HandlerError>(), Some(&expected));
+            assert_eq!(
+                error.is_gas_limit_too_low(),
+                matches!(expected, HandlerError::GasLimitBelowFloor { .. })
+            );
+            assert!(!error.is_gas_limit_too_high());
+        }
     }
 
     fn return_byte_code(value: u8) -> Bytecode {

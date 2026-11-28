@@ -3,8 +3,8 @@
 use crate::{ConfigureEvm, Database, DynDatabase, EvmEnv, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{
-    transaction::{Either, Recovered, TransactionEnvelope},
-    BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxLegacy,
+    transaction::{Either, Recovered},
+    BlockHeader as _, Header, Transaction, TxEip2930, TxEip4844, TxEip8141, TxLegacy,
 };
 use alloy_eip7928::{
     bal::DecodedBal, compute_block_access_list_hash_with_buf, BlockAccessIndex, BlockAccessList,
@@ -12,14 +12,18 @@ use alloy_eip7928::{
 use alloy_eips::{
     eip2718::{Typed2718, WithEncoded},
     eip2930::AccessList,
+    eip8141::{Frame, FrameReceipt},
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use core::fmt::Debug;
-use evm2::interpreter::{Interpreter, Message, MessageResult};
+use evm2::{
+    ethereum::eip8141::FrameGas,
+    interpreter::{InstrStop, Interpreter, Message, MessageResult},
+    registry::{FrameTransactionError, HandlerError},
+};
 use reth_execution_types::{BlockExecutionResult, StateUpdate};
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, SignedTransaction,
-    TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, TxTy,
 };
 use reth_storage_api::StateProvider;
 use reth_trie_common::{bundle_state::BundleState, updates::TrieUpdates, HashedPostState};
@@ -31,32 +35,17 @@ use reth_execution_types::BundleSource;
 #[cfg(feature = "std")]
 use reth_primitives_traits::BlockTy;
 
-pub use evm2::block::{
-    map_database_error, map_handler_error, BlockTransactionResult, CommitChanges, GasOutput,
-    ReceiptBuilderCtx,
+pub use evm2::{
+    block::{
+        map_database_error, map_handler_error, BlockTransactionResult, CommitChanges, GasOutput,
+        ReceiptBuilder, ReceiptBuilderCtx,
+    },
+    ethereum::eip8141::FrameValidationResult,
 };
 pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError, InvalidTxError,
 };
 pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
-
-/// Builds chain-specific receipts from raw transaction execution results.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait ReceiptBuilder {
-    /// Consensus transaction type accepted by the executor.
-    type Transaction: SignedTransaction + TransactionEnvelope<TxType: Send + 'static>;
-    /// Receipt produced by this builder.
-    type Receipt: reth_primitives_traits::Receipt;
-
-    /// Builds a receipt for the transaction execution result.
-    fn build_receipt<T: evm2::EvmTypes>(
-        &self,
-        ctx: ReceiptBuilderCtx<
-            <Self::Transaction as TransactionEnvelope>::TxType,
-            evm2::TxResult<T>,
-        >,
-    ) -> Self::Receipt;
-}
 
 /// A configured EVM instance.
 pub trait Evm {
@@ -91,6 +80,17 @@ pub trait Evm {
     ) -> Result<(I, evm2::TxResultWithState<Self::EvmTypes>), BlockExecutionError>
     where
         I: evm2::Inspector<Self::EvmTypes> + 'static;
+
+    /// Executes with a borrowed inspector, discarding writes without materializing detached state.
+    ///
+    /// The caller retains inspector observations on success and error.
+    fn transact_result_with_inspector<I>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        inspector: &mut I,
+    ) -> Result<evm2::TxResult<Self::EvmTypes>, BlockExecutionError>
+    where
+        I: evm2::Inspector<Self::EvmTypes>;
 
     /// Sets the inspector used by subsequent transactions.
     fn set_inspector<I>(&mut self, inspector: I)
@@ -145,6 +145,27 @@ pub trait Evm {
         transaction: &Recovered<Self::Transaction>,
         observe: impl FnOnce(&evm2::ExecutedTx<'_, '_, Self::EvmTypes>) -> R,
     ) -> Result<R, BlockExecutionError>;
+
+    /// Validates a frame prefix and returns the inspector together with the validation result.
+    ///
+    /// The inspector observes interpreted prefix execution. Prefix writes are discarded on both
+    /// success and error, and the inspector is detached before this method returns.
+    fn validate_frame_prefix_with_inspector<I>(
+        &mut self,
+        _: &Recovered<Self::Transaction>,
+        _: usize,
+        inspector: I,
+    ) -> (I, Result<FrameValidationResult, BlockExecutionError>)
+    where
+        I: evm2::Inspector<Self::EvmTypes>,
+    {
+        (
+            inspector,
+            Err(map_handler_error(HandlerError::InvalidFrameTransaction(
+                FrameTransactionError::PrefixRequiresFrameTransaction,
+            ))),
+        )
+    }
 }
 
 impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
@@ -185,6 +206,16 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
             .map(|executed| executed.detach())
             .map_err(map_handler_error);
         result.map(|result| (inspector, result))
+    }
+
+    fn transact_result_with_inspector<I: evm2::Inspector<T>>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        inspector: &mut I,
+    ) -> Result<evm2::TxResult<T>, BlockExecutionError> {
+        evm2::Evm::transact_with_inspector(self, transaction, inspector)
+            .map(|executed| executed.discard())
+            .map_err(map_handler_error)
     }
 
     fn set_inspector<I: evm2::Inspector<T> + 'a>(&mut self, inspector: I) {
@@ -251,6 +282,25 @@ impl<'a, T: evm2::EvmTypes<Tx: Typed2718>> Evm for evm2::Evm<'a, T> {
         let observed = observe(&executed);
         drop(executed);
         Ok(observed)
+    }
+
+    fn validate_frame_prefix_with_inspector<I>(
+        &mut self,
+        transaction: &Recovered<Self::Transaction>,
+        prefix_end: usize,
+        mut inspector: I,
+    ) -> (I, Result<FrameValidationResult, BlockExecutionError>)
+    where
+        I: evm2::Inspector<T>,
+    {
+        let result = evm2::Evm::validate_frame_prefix_with_inspector(
+            self,
+            transaction,
+            prefix_end,
+            &mut inspector,
+        )
+        .map_err(map_handler_error);
+        (inspector, result)
     }
 }
 
@@ -349,6 +399,34 @@ impl<T: evm2::EvmTypesHost, I: evm2::Inspector<T>> evm2::Inspector<T> for Traced
         host: &mut T::Host<'_>,
     ) {
         self.0.selfdestruct(contract, target, value, host);
+    }
+
+    fn frame_transaction_start(
+        &mut self,
+        tx: &Arc<TxEip8141>,
+        gas: &FrameGas,
+        host: &mut T::Host<'_>,
+    ) {
+        self.0.frame_transaction_start(tx, gas, host);
+    }
+
+    fn frame_start(&mut self, index: usize, frame: &Frame, host: &mut T::Host<'_>) {
+        self.0.frame_start(index, frame, host);
+    }
+
+    fn frame_end(
+        &mut self,
+        index: usize,
+        receipt: &FrameReceipt,
+        output: &Bytes,
+        stop: InstrStop,
+        host: &mut T::Host<'_>,
+    ) {
+        self.0.frame_end(index, receipt, output, stop, host);
+    }
+
+    fn frame_transaction_end(&mut self, result: &evm2::TxResult<T>, host: &mut T::Host<'_>) {
+        self.0.frame_transaction_end(result, host);
     }
 }
 
@@ -1054,6 +1132,11 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Takes the canonical block access list from executor.
     fn take_bal(&mut self) -> Option<BlockAccessList>;
+
+    /// Supplies the actual parent's timestamp before executing the first block in a batch.
+    /// Executors that do not use parent-dependent transitions may ignore it. Implementations
+    /// should advance it only after a block executes successfully.
+    fn set_parent_timestamp(&mut self, _parent_timestamp: u64) {}
 }
 
 /// Generic block executor backed by a [`ConfigureEvm`] implementation.
@@ -1064,6 +1147,7 @@ pub struct BasicBlockExecutor<Evm, DB: Database> {
     batch_database: CacheDB<Db<DB>>,
     batch_state: BundleState,
     block_access_list: Option<BlockAccessList>,
+    parent_timestamp: Option<u64>,
 }
 
 #[cfg(feature = "std")]
@@ -1075,6 +1159,7 @@ impl<Evm, DB: Database> BasicBlockExecutor<Evm, DB> {
             batch_database: CacheDB::new(Db::new(database)),
             batch_state: BundleState::default(),
             block_access_list: None,
+            parent_timestamp: None,
         }
     }
 }
@@ -1104,11 +1189,18 @@ where
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
+        parent_timestamp: Option<u64>,
     ) -> Result<
         (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
         BlockExecutionError,
     > {
-        Self::execute_block_with_database_and_state_hook(evm_config, block, database, None)
+        Self::execute_block_with_database_and_state_hook(
+            evm_config,
+            block,
+            database,
+            parent_timestamp,
+            None,
+        )
     }
 
     #[expect(clippy::type_complexity)]
@@ -1116,6 +1208,7 @@ where
         evm_config: &Evm,
         block: &RecoveredBlock<BlockTy<Evm::Primitives>>,
         database: impl DynDatabase,
+        parent_timestamp: Option<u64>,
         state_hook: Option<Box<dyn FnMut(StateUpdate) + Send>>,
     ) -> Result<
         (BlockExecutionOutput<ReceiptTy<Evm::Primitives>>, Option<BlockAccessList>),
@@ -1123,9 +1216,13 @@ where
     > {
         let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
         let evm = evm_config.block_executor_factory().evm_with_env(database, evm_env);
-        let ctx = evm_config
-            .context_for_block(block.sealed_block())
-            .map_err(BlockExecutionError::other)?;
+        let ctx = match parent_timestamp {
+            Some(timestamp) => {
+                evm_config.context_for_block_with_parent_timestamp(block.sealed_block(), timestamp)
+            }
+            None => evm_config.context_for_block(block.sealed_block()),
+        }
+        .map_err(BlockExecutionError::other)?;
         let mut executor = evm_config.block_executor_factory().create_executor(evm, ctx);
         if block.header().block_access_list_hash().is_some() {
             executor.enable_block_access_list_builder();
@@ -1159,8 +1256,13 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let (output, block_access_list) =
-            Self::execute_block_with_database(&self.evm_config, block, &mut self.batch_database)?;
+        let (output, block_access_list) = Self::execute_block_with_database(
+            &self.evm_config,
+            block,
+            &mut self.batch_database,
+            self.parent_timestamp,
+        )?;
+        self.parent_timestamp = Some(block.header().timestamp());
         self.block_access_list = block_access_list;
         self.batch_database.commit_source(&BundleSource(&output.state));
 
@@ -1182,8 +1284,10 @@ where
             &self.evm_config,
             block,
             &mut self.batch_database,
+            self.parent_timestamp,
             Some(Box::new(state_hook)),
         )?;
+        self.parent_timestamp = Some(block.header().timestamp());
         self.block_access_list = block_access_list;
         self.batch_database.commit_source(&BundleSource(&output.state));
 
@@ -1198,8 +1302,13 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let Self { evm_config, batch_database, batch_state, .. } = self;
-        let (output, _) = Self::execute_block_with_database(&evm_config, block, batch_database)?;
+        let Self { evm_config, batch_database, batch_state, parent_timestamp, .. } = self;
+        let (output, _) = Self::execute_block_with_database(
+            &evm_config,
+            block,
+            batch_database,
+            parent_timestamp,
+        )?;
         Ok(Self::merge_batch_output(batch_state, output))
     }
 
@@ -1211,11 +1320,12 @@ where
     where
         F: FnMut(StateUpdate) + Send + 'static,
     {
-        let Self { evm_config, batch_database, batch_state, .. } = self;
+        let Self { evm_config, batch_database, batch_state, parent_timestamp, .. } = self;
         let (output, _) = Self::execute_block_with_database_and_state_hook(
             &evm_config,
             block,
             batch_database,
+            parent_timestamp,
             Some(Box::new(state_hook)),
         )?;
         Ok(Self::merge_batch_output(batch_state, output))
@@ -1231,6 +1341,10 @@ where
 
     fn take_bal(&mut self) -> Option<BlockAccessList> {
         self.block_access_list.take()
+    }
+
+    fn set_parent_timestamp(&mut self, parent_timestamp: u64) {
+        self.parent_timestamp = Some(parent_timestamp);
     }
 }
 
@@ -1490,10 +1604,10 @@ where
 /// Implementations update the transaction fields only: values derived when the environment was
 /// created (sender, recovered authorities, or other cached metadata) are preserved.
 pub trait TransactionEnvMut: Transaction + Clone {
-    /// Sets the gas limit.
+    /// Sets an ordinary transaction's gas limit. Frame budgets are set per frame.
     fn set_gas_limit(&mut self, gas_limit: u64);
 
-    /// Sets the access list.
+    /// Sets an ordinary transaction's access list. Frame transactions have no access list.
     fn set_access_list(&mut self, access_list: AccessList);
 }
 
@@ -1505,6 +1619,8 @@ impl TransactionEnvMut for evm2::ethereum::TxEnvelope {
             Self::Eip1559(tx) => tx.gas_limit = gas_limit,
             Self::Eip4844(tx) => AsMut::<TxEip4844>::as_mut(tx).gas_limit = gas_limit,
             Self::Eip7702(tx) => tx.gas_limit = gas_limit,
+            // Frame transactions carry independent budgets on each frame.
+            Self::Eip8141(_) => {}
         }
     }
 
@@ -1530,6 +1646,7 @@ impl TransactionEnvMut for evm2::ethereum::TxEnvelope {
             Self::Eip1559(tx) => tx.access_list = access_list,
             Self::Eip4844(tx) => AsMut::<TxEip4844>::as_mut(tx).access_list = access_list,
             Self::Eip7702(tx) => tx.access_list = access_list,
+            Self::Eip8141(_) => {}
         }
     }
 }
@@ -1665,10 +1782,41 @@ impl<TxEnv, T: RecoveredTx<Tx>, Tx> ExecutableTxParts<TxEnv, Tx> for WithTxEnv<T
     }
 }
 
+/// Returns the execution tip for a frame transaction, excluding its blob charge.
+///
+/// `precharge` uses the escrow reported by native execution when present. Otherwise the escrow
+/// is reconstructed using Alloy's reserved gas limit and the selected block prices.
+pub fn frame_transaction_tip(
+    tx: &TxEip8141,
+    gas_used: u64,
+    base_fee: u64,
+    blob_charge: U256,
+    precharge: Option<U256>,
+) -> U256 {
+    let fees = &tx.fees;
+    let base_fee = U256::from(base_fee);
+    let used = U256::from(gas_used);
+    let precharge = precharge.unwrap_or_else(|| {
+        let maximum = U256::from(tx.calculate_gas_limit());
+        let required = (maximum * base_fee).saturating_add(blob_charge);
+        required.saturating_add(
+            fees.max_priority_fee_per_gas
+                .saturating_mul(maximum)
+                .min(fees.max_fee.saturating_sub(required)),
+        )
+    });
+    fees.max_priority_fee_per_gas
+        .saturating_mul(used)
+        .min(precharge.saturating_sub(used * base_fee).saturating_sub(blob_charge))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip2930::AccessListItem;
+    use alloy_eips::{
+        eip2930::AccessListItem,
+        eip8141::{Frame, FrameLimits, FrameMode},
+    };
     use alloy_primitives::{Bytes, TxKind, U256};
 
     #[test]
@@ -1741,5 +1889,29 @@ mod tests {
         assert_parts(&Either::<_, Recovered<TxLegacy>>::Left(recovered.clone()));
         assert_parts(&Either::<Recovered<TxLegacy>, _>::Right(recovered.clone()));
         assert_parts(&WithTxEnv { tx_env: (), tx: Arc::new(recovered) });
+    }
+
+    #[test]
+    fn frame_tip_reconstructed_escrow_matches_native_escrow() {
+        let mut tx = TxEip8141 {
+            nonce_keys: Some(vec![]),
+            frames: vec![Frame {
+                mode: FrameMode::Verify,
+                flags: 3,
+                limits: FrameLimits { execution: 100_000, state: 0 },
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        tx.fees.max_fee = U256::from(1_000_000);
+        tx.fees.max_priority_fee_per_gas = U256::MAX;
+        let blob_charge = U256::from(200_000);
+        for precharge in [None, Some(tx.fees.max_fee)] {
+            assert_eq!(
+                frame_transaction_tip(&tx, 25_000, 3, blob_charge, precharge),
+                U256::from(725_000),
+            );
+            assert_eq!(frame_transaction_tip(&tx, 0, 3, blob_charge, precharge), U256::ZERO);
+        }
     }
 }

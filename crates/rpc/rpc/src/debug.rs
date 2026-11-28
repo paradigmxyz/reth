@@ -712,11 +712,15 @@ where
         let block_number = block.header().number();
         self.eth_api()
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let output = eth_api
-                    .evm_config()
-                    .executor(&mut db)
-                    .execute(&block)
-                    .map_err(|err| EthApiError::Internal(err.into()))?;
+                let parent = eth_api
+                    .provider()
+                    .header(block.parent_hash())
+                    .map_err(EthApiError::from)?
+                    .ok_or_else(|| EthApiError::HeaderNotFound(block.parent_hash().into()))?;
+                let mut executor = eth_api.evm_config().executor(&mut db);
+                executor.set_parent_timestamp(parent.timestamp());
+                let output =
+                    executor.execute(&block).map_err(|err| EthApiError::Internal(err.into()))?;
                 let codes = ExecutionWitnessRecord::commit_execution(&mut db, &output.state);
 
                 Ok(ExecutionWitnessRecord::new(&db)
@@ -1903,7 +1907,10 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let tx_hash = *transactions[1].tx_hash();
-        let header = Header { number: 1, gas_limit: 30_000_000, ..Default::default() };
+        let parent = Block::default();
+        let parent_hash = parent.header.hash_slow();
+        provider.add_block(parent_hash, parent);
+        let header = Header { number: 1, parent_hash, gas_limit: 30_000_000, ..Default::default() };
         let block_hash = header.hash_slow();
         let block = Block { header, body: BlockBody { transactions, ..Default::default() } };
         provider.add_block(block_hash, block.clone());

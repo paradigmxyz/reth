@@ -1018,7 +1018,8 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
         let provider = setup_test_provider(&static_dir, 2);
         let segment = StaticFileSegment::Receipts;
-        let replacement = Receipt { cumulative_gas_used: 1, ..Default::default() };
+        let mut replacement = Receipt::default();
+        replacement.set_cumulative_gas_used(1);
 
         {
             let mut writer = provider.latest_writer(segment).unwrap();

@@ -1222,8 +1222,7 @@ impl ChainSpecBuilder {
     ///
     /// # Panics
     ///
-    /// This function panics if the chain ID and genesis is not set ([`Self::chain`] and
-    /// [`Self::genesis`])
+    /// Panics if the chain or genesis is missing.
     pub fn build(self) -> ChainSpec {
         let paris_block_and_final_difficulty = {
             self.hardforks.get(EthereumHardfork::Paris).and_then(|cond| {
@@ -1296,7 +1295,11 @@ mod tests {
 
     use super::*;
     use alloy_chains::Chain;
-    use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
+    use alloy_eips::{
+        eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
+        eip7840::BlobParams,
+        eip8250::{NONCE_MANAGER, NONCE_MANAGER_CODE},
+    };
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
@@ -1323,6 +1326,109 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn keyed_nonce_genesis_preserves_alloc_and_hash() {
+        for account in [
+            None,
+            Some(GenesisAccount { balance: U256::from(19), nonce: Some(7), ..Default::default() }),
+            Some(GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                code: Some(NONCE_MANAGER_CODE.into()),
+                storage: Some([(B256::from(U256::from(1)), B256::from(U256::from(7)))].into()),
+                ..Default::default()
+            }),
+        ] {
+            let mut genesis = Genesis::default();
+            genesis.config.amsterdam_time = Some(0);
+            genesis.config.bogota_time = Some(0);
+            if let Some(account) = account {
+                genesis.alloc.insert(NONCE_MANAGER, account);
+            }
+            let parsed = ChainSpec::from(genesis.clone());
+            let built = ChainSpecBuilder::default()
+                .chain(genesis.config.chain_id.into())
+                .genesis(genesis.clone())
+                .bogota_activated()
+                .build();
+            let mut amsterdam_only_genesis = genesis.clone();
+            amsterdam_only_genesis.config.bogota_time = None;
+            let amsterdam_only = ChainSpec::from(amsterdam_only_genesis.clone());
+            assert!(parsed.is_bogota_active_at_timestamp(0));
+            assert!(built.is_bogota_active_at_timestamp(0));
+            assert!(amsterdam_only.is_amsterdam_active_at_timestamp(0));
+            assert!(!amsterdam_only.is_bogota_active_at_timestamp(0));
+            for (spec, original) in
+                [(parsed, &genesis), (built, &genesis), (amsterdam_only, &amsterdam_only_genesis)]
+            {
+                assert_eq!(spec.genesis.alloc, original.alloc);
+                let expected = make_genesis_header(original, &spec.hardforks);
+                assert_eq!(spec.genesis_header.state_root, expected.state_root);
+                assert_eq!(spec.genesis_hash(), expected.hash_slow());
+            }
+        }
+    }
+
+    #[test]
+    fn keyed_nonce_future_activation_preserves_genesis_balance() {
+        let mut genesis = Genesis::default();
+        genesis.alloc.insert(
+            NONCE_MANAGER,
+            GenesisAccount {
+                balance: U256::from(19),
+                nonce: Some(7),
+                code: Some(NONCE_MANAGER_CODE.into()),
+                storage: Some([(B256::from(U256::from(1)), B256::from(U256::from(7)))].into()),
+                ..Default::default()
+            },
+        );
+        let builder = ChainSpecBuilder::default().chain(1.into()).genesis(genesis);
+        let disabled = builder.clone().build();
+        assert_eq!(disabled.genesis.alloc[&NONCE_MANAGER].code, Some(NONCE_MANAGER_CODE.into()));
+        let future = builder.with_bogota_at(10).build();
+        assert_eq!(
+            future.genesis.alloc[&NONCE_MANAGER].code,
+            disabled.genesis.alloc[&NONCE_MANAGER].code
+        );
+        let account = &future.genesis.alloc[&NONCE_MANAGER];
+        assert_eq!(account.balance, U256::from(19));
+        assert_eq!(account.nonce, Some(7));
+        assert_eq!(account.storage, disabled.genesis.alloc[&NONCE_MANAGER].storage);
+        assert_eq!(future.genesis_header.state_root, disabled.genesis_header.state_root);
+    }
+
+    #[test]
+    fn eip8253_chain_accounts_preserve_genesis() {
+        assert_eq!(MAINNET.eip8253_accounts(), &alloy_genesis::EIP8253_MAINNET_ACCOUNTS);
+        for spec in [&*SEPOLIA, &*HOLESKY, &*HOODI] {
+            assert!(spec.eip8253_accounts().is_empty());
+        }
+        for accounts in [None, Some(vec![]), Some(vec![Address::with_last_byte(1)])] {
+            let mut genesis = Genesis::default();
+            genesis.config.chain_id = 1;
+            genesis.config.bogota_time = Some(0);
+            genesis.config.eip8253_accounts = accounts.clone();
+            let address = Address::with_last_byte(1);
+            genesis.alloc.insert(
+                address,
+                GenesisAccount {
+                    balance: U256::from(19),
+                    nonce: Some(0),
+                    storage: Some([(B256::ZERO, B256::with_last_byte(7))].into()),
+                    ..Default::default()
+                },
+            );
+            let spec = ChainSpec::from(genesis.clone());
+            assert_eq!(spec.eip8253_accounts(), accounts.as_deref().unwrap_or_default());
+            assert_eq!(spec.genesis.alloc, genesis.alloc);
+            let expected = make_genesis_header(&genesis, &spec.hardforks);
+            assert_eq!(spec.genesis_hash(), expected.hash_slow());
+        }
+        let mut mainnet = MAINNET.as_ref().clone();
+        mainnet.genesis.config.eip8253_accounts = Some(vec![]);
+        assert!(mainnet.eip8253_accounts().is_empty());
     }
 
     #[test]
@@ -3047,5 +3153,21 @@ Post-merge hard forks (timestamp based):
                 fork_block: None,
             }
         )
+    }
+
+    #[test]
+    fn eip8253_config_preserves_target_accounts() {
+        let address = Address::with_last_byte(1);
+        let genesis: Genesis = serde_json::from_value(serde_json::json!({
+            "config": {
+                "bogotaTime": 15_000,
+                "eip8253Accounts": [address]
+            },
+            "alloc": {}
+        }))
+        .unwrap();
+        let spec = ChainSpec::from(genesis);
+        assert_eq!(spec.eip8253_accounts(), &[address]);
+        assert!(spec.genesis.alloc.is_empty());
     }
 }

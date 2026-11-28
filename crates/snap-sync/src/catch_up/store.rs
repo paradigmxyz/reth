@@ -8,12 +8,13 @@ use crate::{
     SnapAccountStore, SnapAttemptStore, SnapBytecodeStore, SnapStorageStore, SnapSyncError,
     SnapWrite, StorageProgress,
 };
-use alloy_eip7928::AccountChanges;
+use alloy_eip7928::{AccountChanges, CodeChange};
 use alloy_eips::BlockNumHash;
-use alloy_primitives::{keccak256, B256, KECCAK256_EMPTY};
+use alloy_primitives::{keccak256, map::B256Map, B256, KECCAK256_EMPTY};
 use reth_db_api::{
     tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable,
 };
 use reth_primitives_traits::Account;
 use reth_storage_api::{
@@ -193,6 +194,7 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
         Self: DBProvider,
     {
         let mut update = BalStateUpdate::default();
+        let mut supplied_codes = None;
         for account_changes in bal {
             let account_info = account_changes.account_info();
             // Read-only entries record accesses, not changes.
@@ -228,6 +230,39 @@ impl<T: MetadataProvider> SnapCatchUpStore for T {
                 .zip(account_changes.code_post_state().filter(|code| !code.is_empty()))
             {
                 update.bytecodes.insert(code_hash, code.clone());
+            } else if let Some(change) = account_changes.code_changes().last() &&
+                let Some(hash) = change.adopted_code_hash() &&
+                hash != KECCAK256_EMPTY
+            {
+                let supplied_codes = supplied_codes.get_or_insert_with(|| {
+                    let mut codes = B256Map::<&CodeChange>::default();
+                    for supplied in bal.iter().flat_map(AccountChanges::code_changes) {
+                        if supplied.adopted_code_hash().is_none() && !supplied.new_code().is_empty()
+                        {
+                            codes
+                                .entry(supplied.code_hash())
+                                .and_modify(|earliest| {
+                                    if supplied.block_access_index < earliest.block_access_index {
+                                        *earliest = supplied;
+                                    }
+                                })
+                                .or_insert(supplied);
+                        }
+                    }
+                    codes
+                });
+                if let Some(supplied) = supplied_codes
+                    .get(&hash)
+                    .filter(|supplied| supplied.block_access_index < change.block_access_index)
+                {
+                    update.bytecodes.entry(hash).or_insert_with(|| supplied.new_code().clone());
+                } else if self
+                    .tx_ref()
+                    .get::<RawTable<tables::Bytecodes>>(RawKey::new(hash))?
+                    .is_none()
+                {
+                    return Err(SnapSyncError::MissingCode { hash })
+                }
             }
         }
         Ok(update)

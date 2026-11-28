@@ -186,9 +186,17 @@ where
             blocks.push(block);
         }
 
+        let Some(first_block) = blocks.first() else { return Ok(None) };
+        let parent = self
+            .provider()
+            .header(first_block.parent_hash())?
+            .ok_or_else(|| EthApiError::HeaderNotFound(first_block.parent_hash().into()))?;
+        let mut executor = self.evm_config().executor(db);
+        executor.set_parent_timestamp(parent.timestamp());
+
         // stop between blocks once the request is dropped
         let blocks = blocks.iter().take_while(|_| !cancel.is_cancelled());
-        let outcome = self.evm_config().executor(db).execute_batch(blocks).map_err(
+        let outcome = executor.execute_batch(blocks).map_err(
             |e: reth_evm::execute::BlockExecutionError| {
                 EthApiError::Internal(reth_errors::RethError::Other(e.into()))
             },

@@ -138,7 +138,11 @@ impl Ere {
             .then(|| block.receipts.as_ref().map(|r| r.decode_receipts()))
             .flatten()
             .transpose()?
-            .map(|slim| receipts_from_envelopes(number, slim.into_iter().map(Into::into).collect()))
+            .map(|slim| {
+                let envelopes =
+                    slim.into_iter().map(TryInto::try_into).collect::<Result<_, _>>()?;
+                receipts_from_envelopes(number, envelopes)
+            })
             .transpose()?;
 
         Ok((header, body, receipts))
@@ -919,12 +923,7 @@ mod tests {
             TxLegacy::default().into(),
             Signature::test_signature(),
         );
-        let receipt = Receipt {
-            tx_type: TxType::Legacy,
-            success: true,
-            cumulative_gas_used: 21_000,
-            logs: vec![],
-        };
+        let receipt = Receipt::standard(TxType::Legacy, true, 21_000, vec![]);
 
         let with_bloom = vec![TxReceipt::with_bloom_ref(&receipt)];
         let header = Header {
@@ -1017,12 +1016,12 @@ mod tests {
             Ok(std::iter::once(Ok((
                 Header { number: 1, ..Default::default() },
                 BlockBody::default(),
-                Some(vec![reth_ethereum_primitives::Receipt {
-                    tx_type: alloy_consensus::TxType::Legacy,
-                    success: true,
-                    cumulative_gas_used: 0,
-                    logs: vec![],
-                }]),
+                Some(vec![reth_ethereum_primitives::Receipt::standard(
+                    alloy_consensus::TxType::Legacy,
+                    true,
+                    0,
+                    vec![],
+                )]),
             ))))
         }
     }
@@ -1640,7 +1639,8 @@ mod tests {
 
         // Right receipt count, wrong contents: only the recomputed root catches this.
         let (header, body, receipt) = block_with_one_receipt(1);
-        let tampered = Receipt { cumulative_gas_used: 42_000, ..receipt };
+        let mut tampered = receipt;
+        tampered.set_cumulative_gas_used(42_000);
 
         let provider = pf.database_provider_rw().unwrap();
         let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap();
@@ -1669,8 +1669,8 @@ mod tests {
 
         let receipts = receipts.unwrap();
         assert_eq!(receipts.len(), 1);
-        assert!(receipts[0].success);
-        assert_eq!(receipts[0].cumulative_gas_used, 21_000);
+        assert!(receipts[0].success());
+        assert_eq!(receipts[0].cumulative_gas_used(), 21_000);
     }
 
     #[test]
@@ -1703,18 +1703,8 @@ mod tests {
         assert_eq!(
             receipts,
             Some(vec![
-                Receipt {
-                    tx_type: TxType::Eip2930,
-                    success: true,
-                    cumulative_gas_used: 21_000,
-                    logs,
-                },
-                Receipt {
-                    tx_type: TxType::Eip1559,
-                    success: false,
-                    cumulative_gas_used: 42_000,
-                    logs: vec![],
-                },
+                Receipt::standard(TxType::Eip2930, true, 21_000, logs),
+                Receipt::standard(TxType::Eip1559, false, 42_000, vec![]),
             ])
         );
     }
@@ -1801,17 +1791,33 @@ mod tests {
     }
 
     #[test]
+    fn verify_receipts_rejects_tampered_contents() {
+        let receipts = vec![Receipt::standard(TxType::Legacy, true, 21_000, vec![])];
+
+        // Commit the header to the receipts as decoded.
+        let with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
+        let header = Header {
+            receipts_root: calculate_receipt_root(&with_bloom),
+            logs_bloom: with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref()),
+            ..Default::default()
+        };
+        verify_receipts(&header, &receipts, true).unwrap();
+
+        // Same receipt count, different contents: the recomputed root no longer matches.
+        let mut tampered_receipt = receipts[0].clone();
+        tampered_receipt.set_cumulative_gas_used(42_000);
+        let tampered = vec![tampered_receipt];
+        assert!(verify_receipts(&header, &tampered, true).is_err());
+    }
+
+    #[test]
     fn verify_receipts_checks_the_bloom_even_without_the_root() {
-        let receipts = vec![Receipt {
-            tx_type: TxType::Legacy,
-            success: true,
-            cumulative_gas_used: 21_000,
-            logs: vec![Log::new_unchecked(
-                Address::ZERO,
-                vec![B256::repeat_byte(1)],
-                Bytes::default(),
-            )],
-        }];
+        let receipts = vec![Receipt::standard(
+            TxType::Legacy,
+            true,
+            21_000,
+            vec![Log::new_unchecked(Address::ZERO, vec![B256::repeat_byte(1)], Bytes::default())],
+        )];
 
         // The header commits to no logs at all, so the bloom cannot match.
         assert!(verify_receipts(&Header::default(), &receipts, false).is_err());

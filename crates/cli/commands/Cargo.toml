@@ -64,7 +64,7 @@ reth-discv5.workspace = true
 alloy-eip7928.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rlp.workspace = true
+alloy-rlp = { workspace = true, features = ["derive"] }
 alloy-consensus.workspace = true
 alloy-chains.workspace = true
 
@@ -107,6 +107,7 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-cli.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

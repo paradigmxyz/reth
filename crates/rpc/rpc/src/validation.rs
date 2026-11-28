@@ -253,6 +253,7 @@ where
                 .reads
                 .as_db_mut(StateProviderDatabase::new((&state_provider).into_evm_state_provider()));
             let mut executor = self.evm_config.batch_executor(cached_db);
+            executor.set_parent_timestamp(parent_header.timestamp());
 
             let result = executor.execute_one(&block)?;
 

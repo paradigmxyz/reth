@@ -5,7 +5,7 @@ use alloy_genesis::GenesisAccount;
 use alloy_primitives::{
     keccak256,
     map::{AddressMap, B256Map, B256Set, HashMap},
-    Address, B256, U256,
+    Address, Bytes, B256, U256,
 };
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
@@ -391,17 +391,10 @@ where
 
     for (address, account) in alloc {
         let bytecode_hash = if let Some(code) = &account.code {
-            match Bytecode::new_raw_checked(code.clone()) {
-                Ok(bytecode) => {
-                    let hash = bytecode.hash_slow();
-                    contracts.insert(hash, bytecode);
-                    Some(hash)
-                }
-                Err(err) => {
-                    error!(%address, %err, "Failed to decode genesis bytecode.");
-                    return Err(DatabaseError::Other(err.to_string()).into());
-                }
-            }
+            let bytecode = account_bytecode(code);
+            let hash = bytecode.hash_slow();
+            contracts.insert(hash, bytecode);
+            Some(hash)
         } else {
             None
         };
@@ -1063,8 +1056,7 @@ fn write_account_to_db<TX: DbTx + DbTxMut>(
     seen_bytecodes: &mut B256Set,
 ) -> Result<(), eyre::Error> {
     let bytecode_hash = if let Some(code) = &genesis_account.code {
-        let bytecode = Bytecode::new_raw_checked(code.clone())
-            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let bytecode = account_bytecode(code);
         let hash = bytecode.hash_slow();
         if seen_bytecodes.insert(hash) {
             tx.put::<tables::Bytecodes>(hash, bytecode)?;
@@ -1168,8 +1160,7 @@ where
     N: NodePrimitives,
 {
     let bytecode_hash = if let Some(code) = &genesis_account.code {
-        let bytecode = Bytecode::new_raw_checked(code.clone())
-            .map_err(|e| eyre::eyre!("Invalid bytecode for {address}: {e}"))?;
+        let bytecode = account_bytecode(code);
         let hash = bytecode.hash_slow();
         if seen_bytecodes.insert(hash) {
             tx.put::<tables::Bytecodes>(hash, bytecode)?;
@@ -1404,6 +1395,11 @@ struct GenesisAccountWithAddress {
     genesis_account: GenesisAccount,
     /// The account's address.
     address: Address,
+}
+
+// Stored state can contain legacy code that resembles an invalid delegation.
+fn account_bytecode(code: &Bytes) -> Bytecode {
+    Bytecode::new_raw_checked(code.clone()).unwrap_or_else(|_| Bytecode::new_legacy(code.clone()))
 }
 
 #[cfg(test)]
@@ -2305,5 +2301,47 @@ mod tests {
         let result = init_genesis_with_settings(&factory, settings);
 
         assert!(result.is_ok());
+    }
+
+    #[reth_concurrency::test]
+    fn genesis_preserves_invalid_delegation_markers() {
+        let mut delegation = vec![0; 23];
+        delegation[..3].copy_from_slice(&[0xef, 0x01, 0]);
+        delegation[22] = 1;
+        let mut cases = vec![(Bytes::from_static(&[0x5b, 0]), true), (delegation.into(), false)];
+        for (version, len) in [(0, 22), (0, 24), (1, 23)] {
+            let mut code = vec![0; len];
+            code[..3].copy_from_slice(&[0xef, 0x01, version]);
+            cases.push((Bytes::from(code), true));
+        }
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let alloc = cases
+                .iter()
+                .enumerate()
+                .map(|(index, (code, _))| {
+                    (
+                        Address::with_last_byte(u8::try_from(index + 1).unwrap()),
+                        GenesisAccount {
+                            nonce: Some(1),
+                            balance: U256::ONE,
+                            code: Some(code.clone()),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect();
+            let chain_spec = Arc::new(ChainSpec::from(Genesis { alloc, ..Default::default() }));
+            let factory = create_test_provider_factory_with_chain_spec(chain_spec);
+            init_genesis_with_settings(&factory, settings).unwrap();
+            factory.set_storage_settings_cache(settings);
+            let provider = factory.provider().unwrap();
+            for (code, legacy) in &cases {
+                let hash = keccak256(code);
+                let stored = provider.tx_ref().get::<tables::Bytecodes>(hash).unwrap().unwrap();
+                assert_eq!(stored.original_byte_slice(), code.as_ref());
+                assert_eq!(stored.hash_slow(), hash);
+                assert_eq!(stored.is_legacy(), *legacy);
+            }
+        }
     }
 }

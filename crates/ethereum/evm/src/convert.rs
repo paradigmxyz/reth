@@ -25,7 +25,9 @@ pub fn spec_id_by_timestamp_and_block_number<C>(
 where
     C: EthereumHardforks,
 {
-    if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
+    if chain_spec.is_bogota_active_at_timestamp(timestamp) {
+        SpecId::BOGOTA
+    } else if chain_spec.is_amsterdam_active_at_timestamp(timestamp) {
         SpecId::AMSTERDAM
     } else if chain_spec.is_osaka_active_at_timestamp(timestamp) {
         SpecId::OSAKA
@@ -184,6 +186,7 @@ impl ExecutableTxParts<RecoveredTxEnvelope, TransactionSigned> for ExecutableRec
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use reth_chainspec::ChainSpecBuilder;
 
     #[test]
     fn block_env_uses_header_slot_number() {
@@ -192,5 +195,16 @@ mod tests {
         let env = block_env_with_blob_params(&header, None);
 
         assert_eq!(env.slot_num, U256::from(42));
+    }
+
+    #[test]
+    fn bogota_activation_selects_native_frame_rules() {
+        let chain_spec =
+            ChainSpecBuilder::mainnet().amsterdam_activated().with_bogota_at(10).build();
+        for (timestamp, expected) in
+            [(9, SpecId::AMSTERDAM), (10, SpecId::BOGOTA), (11, SpecId::BOGOTA)]
+        {
+            assert_eq!(spec_id_by_timestamp_and_block_number(&chain_spec, timestamp, 0), expected);
+        }
     }
 }

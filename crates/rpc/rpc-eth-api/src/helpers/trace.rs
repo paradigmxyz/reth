@@ -18,7 +18,7 @@ use reth_evm::{
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock};
 use reth_rpc_eth_types::{cache::db::attach_bal_before_tx, EthApiError, StateCacheDb};
-use reth_storage_api::ProviderBlock;
+use reth_storage_api::{HeaderProvider, ProviderBlock};
 use reth_tasks::cancel::is_cancelled;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -526,9 +526,14 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         db: &mut StateCacheDb,
     ) -> Result<reth_trie_common::bundle_state::BundleState, Self::Error> {
         let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
+        let parent = self
+            .provider()
+            .header(block.parent_hash())
+            .map_err(Self::Error::from_eth_err)?
+            .ok_or_else(|| EthApiError::HeaderNotFound(block.parent_hash().into()))?;
         let ctx = self
             .evm_config()
-            .context_for_block(block.sealed_block())
+            .context_for_block_with_parent_timestamp(block.sealed_block(), parent.timestamp())
             .map_err(RethError::other)
             .map_err(Self::Error::from_eth_err)?;
         let changes = self

@@ -82,6 +82,15 @@ where
                 .map_err(BlockExecutionError::other)?
                 .into_evm_state_provider(),
         ));
+        if let Some(parent_number) = self.range.start().checked_sub(1) {
+            let parent = self
+                .provider
+                .header_by_number(parent_number)
+                .map_err(BlockExecutionError::other)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(parent_number.into()))
+                .map_err(BlockExecutionError::other)?;
+            executor.set_parent_timestamp(parent.timestamp());
+        }
 
         let mut fetch_block_duration = Duration::default();
         let mut execution_duration = Duration::default();
@@ -206,12 +215,22 @@ where
             .map_err(BlockExecutionError::other)?;
 
         // Configure the executor to use the previous block's state.
-        let executor = self.evm_config.batch_executor(StateProviderDatabase::new(
+        let mut executor = self.evm_config.batch_executor(StateProviderDatabase::new(
             self.provider
                 .history_by_block_number(block_number.saturating_sub(1))
                 .map_err(BlockExecutionError::other)?
                 .into_evm_state_provider(),
         ));
+        if block_number != 0 {
+            let parent_hash = block_with_senders.parent_hash();
+            let parent = self
+                .provider
+                .sealed_header_by_hash(parent_hash)
+                .map_err(BlockExecutionError::other)?
+                .ok_or_else(|| ProviderError::HeaderNotFound(parent_hash.into()))
+                .map_err(BlockExecutionError::other)?;
+            executor.set_parent_timestamp(parent.timestamp());
+        }
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
