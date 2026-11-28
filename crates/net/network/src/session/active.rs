@@ -103,6 +103,13 @@ const RECEIVE_MESSAGE_BUDGET: usize = 16;
 /// rather than messages, so that many small messages don't trigger aggressive drops unnecessarily.
 const MAX_QUEUED_BROADCAST_ITEMS: usize = 4096;
 
+/// How long a session waits for its disconnect message to be flushed before it gives up and
+/// closes anyway.
+///
+/// The flush can stay pending forever when the remote stops reading but keeps the connection open,
+/// which would otherwise keep the session (and the peer's slot) alive indefinitely.
+const DISCONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Shared counter for in-flight broadcast items (tx hashes, transactions, blocks) across the
 /// bounded command channel, unbounded overflow channel, and session outgoing queue.
 ///
@@ -205,6 +212,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// The last latest block number we sent in a range update
     /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
     pub(crate) last_sent_latest_block: Option<u64>,
+    /// Deadline for flushing the disconnect message, armed when the disconnect starts.
+    pub(crate) disconnect_deadline: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -718,8 +727,16 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn poll_disconnect(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         debug_assert!(self.is_disconnecting(), "not disconnecting");
 
-        // try to close the flush out the remaining Disconnect message
-        let _ = ready!(self.conn.poll_close_unpin(cx));
+        let deadline = self
+            .disconnect_deadline
+            .get_or_insert_with(|| Box::pin(tokio::time::sleep(DISCONNECT_TIMEOUT)));
+
+        // try to close the flush out the remaining Disconnect message, but don't wait forever: a
+        // peer that stops reading would otherwise pin this session.
+        if self.conn.poll_close_unpin(cx).is_pending() {
+            ready!(deadline.as_mut().poll(cx));
+            debug!(target: "net::session", remote_peer_id=?self.remote_peer_id, "timed out flushing disconnect");
+        }
         self.emit_disconnect(cx)
     }
 
@@ -1366,13 +1383,15 @@ mod tests {
             AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage,
             GetBlockAccessListsMessage,
         },
-        BlockAccessLists, CellMasks, Cells, EthMessageID, GetCells, NewPooledTransactionHashes72,
+        BlockAccessLists, BlockHashNumber, CellMasks, Cells, EthMessageID, GetCells,
+        NewBlockHashes, NewPooledTransactionHashes72,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_p2p::error::RequestResult;
     use reth_network_peers::pk2id;
     use reth_network_types::session::config::PROTOCOL_BREACH_REQUEST_TIMEOUT;
     use secp256k1::SecretKey;
+    use std::future::poll_fn;
     use tokio::{
         net::{TcpListener, TcpStream},
         sync::mpsc,
@@ -1514,6 +1533,7 @@ mod tests {
                         ),
                         range_update_interval: None,
                         last_sent_latest_block: None,
+                        disconnect_deadline: None,
                     }
                 }
                 ev => {
@@ -2346,6 +2366,69 @@ mod tests {
             } => {}
             _ => unreachable!(),
         }
+    }
+
+    // This tests that a disconnect completes even if the remote keeps the connection open but
+    // stops reading, so the disconnect message can never be flushed.
+    #[tokio::test]
+    async fn test_disconnect_completes_when_remote_stops_reading() {
+        let mut builder = SessionBuilder::default();
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        // The remote completes the handshake and then holds the connection without reading.
+        let (client_tx, client_rx) = oneshot::channel();
+        let fut = builder.with_client_stream(local_addr, async move |client_stream| {
+            let _ = client_tx.send(client_stream);
+        });
+        tokio::task::spawn(fut);
+
+        let (incoming, _) = listener.accept().await.unwrap();
+        let mut session = builder.connect_incoming(incoming).await;
+        let _client_stream = client_rx.await.unwrap();
+        let commands = builder.to_sessions.pop().unwrap();
+
+        // Queue large, incompressible broadcasts until the socket stops draining and messages
+        // stay queued in the session.
+        let mut stalled_rounds = 0;
+        while stalled_rounds < 50 {
+            let hashes = (0..4096)
+                .map(|number| BlockHashNumber {
+                    hash: B256::from(rand::random::<[u8; 32]>()),
+                    number,
+                })
+                .collect();
+            commands
+                .try_send(SessionCommand::Message(PeerMessage::NewBlockHashes(NewBlockHashes(
+                    hashes,
+                ))))
+                .unwrap();
+            let _ = tokio::time::timeout(
+                Duration::from_millis(1),
+                poll_fn(|cx| Pin::new(&mut session).poll(cx)),
+            )
+            .await;
+            if session.queued_outgoing.is_empty() {
+                stalled_rounds = 0;
+            } else {
+                stalled_rounds += 1;
+            }
+        }
+
+        // Pause the clock so the disconnect deadline elapses without waiting in real time.
+        tokio::time::pause();
+        commands.try_send(SessionCommand::Disconnect { reason: None }).unwrap();
+        tokio::time::timeout(DISCONNECT_TIMEOUT * 2, poll_fn(|cx| Pin::new(&mut session).poll(cx)))
+            .await
+            .expect("session did not terminate after a disconnect command");
+
+        let msg = futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten();
+        assert!(
+            matches!(msg, Some(ActiveSessionMessage::Disconnected { .. })),
+            "expected a disconnected message, got {msg:?}"
+        );
+        assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next()).is_none());
     }
 
     #[test]
