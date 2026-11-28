@@ -85,6 +85,7 @@ async fn decodes_positional_params() {
 
     assert_eq!(call(&module, "test_optional", Some("[5]")).await, result("5"));
     assert_eq!(call(&module, "test_optional", Some("[]")).await, result("null"));
+    assert_eq!(call(&module, "test_optional", Some("[ ]")).await, result("null"));
     assert_eq!(call(&module, "test_optional", None).await, result("null"));
 
     assert_eq!(call(&module, "test_noParams", None).await, result("7"));
@@ -100,6 +101,7 @@ async fn rejects_invalid_params() {
     // A required parameter is missing.
     let missing = invalid_params("No more params");
     assert_eq!(call(&module, "test_add", Some("[]")).await, missing);
+    assert_eq!(call(&module, "test_add", Some("[\t\r\n]")).await, missing);
     assert_eq!(call(&module, "test_add", None).await, missing);
 
     // A parameter has the wrong type.

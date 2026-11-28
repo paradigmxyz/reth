@@ -102,14 +102,14 @@ impl<'a> Params<'a> {
     ///
     /// This allows sequential parsing of the incoming params, using an `Iterator`-style API and is
     /// useful when the RPC request has optional parameters at the tail that may or may not be
-    /// present.
+    /// present. An empty array, including one containing only JSON whitespace, has no parameters.
     pub fn sequence(&self) -> ParamsSequence<'_> {
-        let json = match self.0.as_ref() {
-            // It's assumed that params is `[a,b,c]`, if empty regard as no params.
-            Some(json) if json == "[]" => "",
-            Some(json) => json,
-            None => "",
-        };
+        let json = self.as_str().unwrap_or_default();
+        if let [b'[', inner @ .., b']'] = json.as_bytes() &&
+            inner.iter().all(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+        {
+            return ParamsSequence("")
+        }
         ParamsSequence(json)
     }
 
@@ -476,9 +476,7 @@ fn invalid_params(e: impl ToString) -> ErrorObjectOwned {
 
 #[cfg(test)]
 mod test {
-    use super::{
-        Cow, Id, JsonValue, Params, SubscriptionId, TwoPointZero, MAX_INVALID_PARAMS_DATA,
-    };
+    use super::*;
     use crate::response::SubscriptionPayload;
     use serde::Deserialize;
 
@@ -764,5 +762,31 @@ mod test {
         let err = Params::new(Some(&params)).sequence().next::<u64>().unwrap_err();
         let data = serde_json::from_str::<String>(err.data().unwrap().get()).unwrap();
         assert_eq!(data, format!("invalid type: string \"{}", "🦀".repeat(250)));
+    }
+
+    #[ephyra::test]
+    fn positional_params_ignore_json_whitespace(values: Vec<Option<String>>, layout: u8) {
+        let whitespace = ["", " ", "\t", "\r", "\n", " \r\n\t"];
+        let pad = whitespace[usize::from(layout) % whitespace.len()];
+        let items: Vec<_> =
+            values.iter().map(|value| serde_json::to_string(value).unwrap()).collect();
+        let raw = format!("[{pad}{}{pad}]", items.join(&format!("{pad},{pad}")));
+        let params = Params::new(Some(&raw));
+        let mut seq = params.sequence();
+
+        for expected in params.parse::<Vec<Option<String>>>().unwrap() {
+            assert_eq!(seq.next::<Option<String>>().unwrap(), expected);
+        }
+        assert_eq!(seq.next::<String>(), Err(invalid_params("No more params")));
+        assert_eq!(seq.optional_next::<String>().unwrap(), None);
+    }
+
+    #[test]
+    fn empty_params_only_allow_json_whitespace() {
+        let params = Params::new(Some("[\u{000c}]"));
+        assert_eq!(
+            params.sequence().optional_next::<String>(),
+            Err(invalid_params("expected value at line 1 column 1"))
+        );
     }
 }

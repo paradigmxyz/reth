@@ -22,3 +22,6 @@ manual_async_fn = "allow"
 serde = { workspace = true, features = ["derive", "alloc"] }
 serde_json = { workspace = true, features = ["raw_value"] }
 thiserror = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+ephyra.workspace = true

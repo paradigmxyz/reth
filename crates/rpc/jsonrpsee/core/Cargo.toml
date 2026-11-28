@@ -55,6 +55,7 @@ server = [
 ]
 
 [dev-dependencies]
+ephyra.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
 tokio = { workspace = true, features = ["macros", "rt"] }
 jsonrpsee = { path = "../jsonrpsee", features = ["server", "macros"] }
