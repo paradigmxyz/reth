@@ -6,7 +6,7 @@ use crate::blobstore::{
     BlobTransactionCellSidecar, PooledBlobSidecar, RebuiltSidecars,
 };
 use alloy_eips::{
-    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
+    eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1, Bytes48},
     eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, Cell},
     eip7840::BlobParams,
     merge::EPOCH_SLOTS,
@@ -15,7 +15,7 @@ use alloy_primitives::{
     map::{B256Map, B256Set, FbBuildHasher},
     TxHash, B256,
 };
-use alloy_rlp::{Decodable, Encodable};
+use alloy_rlp::{Decodable, Encodable, Header};
 use parking_lot::{Mutex, RwLock};
 use reth_lru::LruMap;
 use std::{
@@ -730,9 +730,7 @@ impl DiskFileBlobStoreInner {
         if path.is_file() {
             return Ok(())
         }
-        let mut buf = Vec::with_capacity(1 + data.length());
-        buf.push(CELL_SIDECAR_TAG);
-        data.encode(&mut buf);
+        let buf = StoredSidecar::encode_cells(&data);
 
         let file = CellSidecarFile {
             recoverable: data.is_recoverable(),
@@ -1055,7 +1053,7 @@ struct CellSidecarFile {
 }
 
 // A sidecar decoded from its blob file.
-enum StoredSidecar {
+pub(super) enum StoredSidecar {
     Full(BlobTransactionSidecarVariant),
     Cells(BlobTransactionCellSidecar),
 }
@@ -1064,10 +1062,45 @@ impl StoredSidecar {
     fn decode(data: &[u8]) -> alloy_rlp::Result<Self> {
         match data.split_first() {
             Some((&CELL_SIDECAR_TAG, mut cells)) => {
-                BlobTransactionCellSidecar::decode(&mut cells).map(Self::Cells)
+                let mut fields = Header::decode_bytes(&mut cells, true)?;
+                let mask = BlobCellMask::from_bits(Decodable::decode(&mut fields)?);
+                let sidecar = BlobTransactionCellSidecar::new(
+                    Decodable::decode(&mut fields)?,
+                    Decodable::decode(&mut fields)?,
+                    Decodable::decode(&mut fields)?,
+                    mask,
+                )
+                .ok_or(alloy_rlp::Error::Custom("cell sidecar counts do not match"))?;
+                if !fields.is_empty() {
+                    return Err(alloy_rlp::Error::ListLengthMismatch {
+                        expected: 0,
+                        got: fields.len(),
+                    })
+                }
+                Ok(Self::Cells(sidecar))
             }
             _ => BlobTransactionSidecarVariant::rlp_decode_fields(&mut &data[..]).map(Self::Full),
         }
+    }
+
+    // Encodes the blob file of `cells`: the tag, then `rlp([mask, commitments, proofs, cells])`
+    // with the mask as a `u128`.
+    pub(super) fn encode_cells(cells: &BlobTransactionCellSidecar) -> Vec<u8> {
+        let header = Header {
+            list: true,
+            payload_length: cells.mask().bits().length() +
+                alloy_rlp::list_length::<_, Bytes48>(cells.commitments()) +
+                alloy_rlp::list_length::<_, Bytes48>(cells.proofs()) +
+                alloy_rlp::list_length::<_, Cell>(cells.cells()),
+        };
+        let mut buf = Vec::with_capacity(1 + header.length_with_payload());
+        buf.push(CELL_SIDECAR_TAG);
+        header.encode(&mut buf);
+        cells.mask().bits().encode(&mut buf);
+        alloy_rlp::encode_list::<_, Bytes48>(cells.commitments(), &mut buf);
+        alloy_rlp::encode_list::<_, Bytes48>(cells.proofs(), &mut buf);
+        alloy_rlp::encode_list::<_, Cell>(cells.cells(), &mut buf);
+        buf
     }
 }
 
@@ -1075,7 +1108,7 @@ impl StoredSidecar {
 mod tests {
     use alloy_consensus::BlobTransactionSidecar;
     use alloy_eips::{
-        eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2, Bytes48},
+        eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2},
         eip7594::{
             BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB,
         },
@@ -1083,6 +1116,7 @@ mod tests {
 
     use super::*;
     use crate::blobstore::cells::tests::{fixture, subset};
+    use alloy_primitives::{b256, hex, keccak256};
     use std::sync::atomic::Ordering;
 
     fn tmp_store() -> (DiskFileBlobStore, tempfile::TempDir) {
@@ -1513,7 +1547,7 @@ mod tests {
         let cells = single_cell_sidecar();
         store.insert_cells(tx, cells.clone()).unwrap();
         let file = fs::read(store.inner.blob_disk_file(tx)).unwrap();
-        assert_eq!(file, [&[CELL_SIDECAR_TAG][..], &alloy_rlp::encode(&cells)].concat());
+        assert_eq!(file, StoredSidecar::encode_cells(&cells));
 
         store.delete(tx).unwrap();
         store.cleanup();
@@ -1636,5 +1670,46 @@ mod tests {
 
         assert!(store.get_by_versioned_hashes_v3(&[hash]).unwrap()[0].is_some());
         assert_eq!(store.inner.rebuilt.cache.lock().sidecars.len(), 1);
+    }
+
+    #[test]
+    fn cell_sidecar_encoding_round_trips_and_is_pinned() {
+        let kept = subset(BlobCellMask::from_bits(0b1011));
+        let file = StoredSidecar::encode_cells(&kept);
+        assert!(
+            matches!(StoredSidecar::decode(&file), Ok(StoredSidecar::Cells(cells)) if cells == kept)
+        );
+        // Blob files already on disk use this format, so changing it must be deliberate.
+        let encoded = &file[1..];
+        assert_eq!(encoded.len(), 24960);
+        // `list(24957 bytes) || mask 0b1011 || list(2 commitments)`, then the proofs and cells.
+        assert_eq!(encoded[..6], hex!("f9617d0bf862"));
+        assert_eq!(
+            keccak256(encoded),
+            b256!("0x742b1fe64f3373584a06565e19373be52a44f3790489650a35ba3b6b2f96a992")
+        );
+
+        // Encodes the fields of `kept` with `cells` in place of its cells, followed by `trailing`.
+        let file_with = |cells: &[Cell], trailing: &[u8]| {
+            let mut fields = Vec::new();
+            kept.mask().bits().encode(&mut fields);
+            alloy_rlp::encode_list::<_, Bytes48>(kept.commitments(), &mut fields);
+            alloy_rlp::encode_list::<_, Bytes48>(kept.proofs(), &mut fields);
+            alloy_rlp::encode_list::<_, Cell>(cells, &mut fields);
+            fields.extend_from_slice(trailing);
+            let mut file = vec![CELL_SIDECAR_TAG];
+            Header { list: true, payload_length: fields.len() }.encode(&mut file);
+            file.extend(fields);
+            file
+        };
+        assert_eq!(file_with(kept.cells(), &[]), file);
+        assert_eq!(
+            StoredSidecar::decode(&file_with(kept.cells(), &[alloy_rlp::EMPTY_STRING_CODE])).err(),
+            Some(alloy_rlp::Error::ListLengthMismatch { expected: 0, got: 1 })
+        );
+        assert_eq!(
+            StoredSidecar::decode(&file_with(&kept.cells()[1..], &[])).err(),
+            Some(alloy_rlp::Error::Custom("cell sidecar counts do not match"))
+        );
     }
 }

@@ -701,37 +701,37 @@ evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a
 evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47" }
 
 [patch.crates-io]
-# alloy-rs/alloy#4604 (stacked on #4601): BlobCellMask helpers and the cell sidecar. Drop once released.
-alloy-consensus = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-consensus-any = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-contract = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-eips = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-genesis = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-json-rpc = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-network = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-network-primitives = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-node-bindings = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-provider = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-pubsub = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-client = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-admin = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-anvil = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-any = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-beacon = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-debug = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-engine = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-eth = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-mev = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-trace = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-rpc-types-txpool = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-serde = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-signer = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-signer-local = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-transport = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-transport-http = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-transport-ipc = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
-alloy-transport-ws = { git = "https://github.com/lean-apple/alloy", rev = "4e8c73fdae71c26e2d125e8ba039c4c343f84699" }
+# alloy-rs/alloy#4604 on top of the unreleased #4601: BlobCellMask helpers and the cell sidecar. Drop once released.
+alloy-consensus = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-consensus-any = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-contract = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-eips = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-genesis = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-json-rpc = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-network = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-network-primitives = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-node-bindings = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-provider = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-pubsub = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-client = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-admin = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-anvil = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-any = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-beacon = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-debug = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-engine = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-eth = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-mev = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-trace = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-rpc-types-txpool = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-serde = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-signer = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-signer-local = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-transport = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-transport-http = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-transport-ipc = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
+alloy-transport-ws = { git = "https://github.com/lean-apple/alloy", rev = "0efd39877f08a6f96eb5a5f23e753428195ac6be" }
 
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }

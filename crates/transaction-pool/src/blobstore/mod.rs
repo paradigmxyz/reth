@@ -484,7 +484,7 @@ mod tests {
             },
             TestStore {
                 store: Box::new(disk),
-                cells_size: 1 + alloy_rlp::Encodable::length(cells),
+                cells_size: disk::StoredSidecar::encode_cells(cells).len(),
                 full_size: full.rlp_encoded_fields_length(),
                 _dir: Some(dir),
             },

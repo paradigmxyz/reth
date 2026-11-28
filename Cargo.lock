@@ -132,7 +132,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -159,7 +159,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -173,7 +173,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -289,7 +289,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -316,7 +316,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -369,7 +369,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -383,7 +383,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -408,7 +408,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -420,7 +420,7 @@ dependencies = [
 [[package]]
 name = "alloy-node-bindings"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-genesis",
  "alloy-hardforks 0.2.13",
@@ -473,7 +473,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -517,7 +517,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -560,7 +560,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -585,7 +585,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -597,7 +597,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -608,7 +608,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -619,7 +619,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus-any",
  "alloy-network-primitives",
@@ -633,7 +633,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -652,7 +652,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -664,7 +664,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -684,7 +684,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -706,7 +706,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -720,7 +720,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -733,7 +733,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -755,7 +755,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -769,7 +769,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -857,7 +857,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-json-rpc",
  "auto_impl",
@@ -880,7 +880,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -895,7 +895,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -915,7 +915,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -954,7 +954,7 @@ dependencies = [
 [[package]]
 name = "alloy-tx-macros"
 version = "2.6.1"
-source = "git+https://github.com/lean-apple/alloy?rev=4e8c73fdae71c26e2d125e8ba039c4c343f84699#4e8c73fdae71c26e2d125e8ba039c4c343f84699"
+source = "git+https://github.com/lean-apple/alloy?rev=0efd39877f08a6f96eb5a5f23e753428195ac6be#0efd39877f08a6f96eb5a5f23e753428195ac6be"
 dependencies = [
  "darling 0.24.1",
  "proc-macro2",
