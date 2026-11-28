@@ -324,10 +324,25 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
             return Ok(())
         };
 
-        // Overwrite the root node's first nibble
-        // We need to sync the stack with the trie structure when consuming a new node. This is
-        // necessary for proper traversal and accurately representing the trie in the stack.
-        if !key.is_empty() && !self.stack.is_empty() {
+        if self.walk_all_changed_branch_children {
+            // A lower-bound seek can leave a missing ancestor's entire range. Discard those
+            // synthetic frames iteratively rather than recursively seeking each empty sibling.
+            while self
+                .stack
+                .last()
+                .is_some_and(|subnode| subnode.node.is_none() && !key.starts_with(&subnode.key))
+            {
+                self.stack.pop();
+            }
+            // No cached siblings precede the returned key. Only synthetic frames may seek ahead;
+            // a stored ancestor must keep its position until its child range is checked below.
+            if let Some(subnode) = self.stack.last_mut() &&
+                subnode.node.is_none() &&
+                key.len() > subnode.key.len()
+            {
+                subnode.set_nibble(key.get_unchecked(subnode.key.len()));
+            }
+        } else if !key.is_empty() && !self.stack.is_empty() {
             self.stack[0].set_nibble(key.get_unchecked(0));
         }
 
@@ -345,6 +360,21 @@ impl<C: TrieCursor, K: AsRef<AddedRemovedKeys>> TrieWalker<C, K> {
         }
 
         self.remove_orphaned_descendants(key, node.tree_mask)?;
+
+        if self.walk_all_changed_branch_children &&
+            let Some(parent) = self.stack.last()
+        {
+            // Masked updates can remove an ancestor while leaving several cached descendants.
+            // Keep the missing levels on the stack so backtracking visits their siblings too.
+            let mut prefix = *parent.full_key();
+            for index in prefix.len()..key.len() {
+                let nibble = key.get_unchecked(index);
+                let mut ancestor = CursorSubNode::new(prefix, None);
+                ancestor.set_nibble(nibble);
+                self.stack.push(ancestor);
+                prefix.push(nibble);
+            }
+        }
 
         // Create a new CursorSubNode and push it to the stack.
         let subnode = CursorSubNode::new(key, Some(node));
@@ -793,6 +823,130 @@ mod tests {
 
         fn reset(&mut self) {
             unreachable!("initialization only seeks the root exactly")
+        }
+    }
+
+    #[test]
+    fn recovery_visits_siblings_of_missing_ancestors() {
+        let first = Nibbles::from_nibbles([0xd, 0x5]);
+        let stale = Nibbles::from_nibbles([0xd, 0xb, 0x5]);
+        let nodes =
+            BTreeMap::from([(first, branch_node(0b11, 0, 1)), (stale, branch_node(0x0341, 0, 1))]);
+        let factory = MockTrieCursorFactory::new(
+            BTreeMap::default(),
+            B256Map::from_iter([(B256::ZERO, nodes)]),
+        );
+        for enabled in [false, true] {
+            let mut walker = TrieWalker::<_>::storage_trie(
+                factory.storage_trie_cursor(B256::ZERO).unwrap(),
+                PrefixSet::all_paths(),
+            )
+            .unwrap()
+            .with_walk_all_changed_branch_children(enabled)
+            .with_deletions_retained(true);
+            while walker.key().is_some() {
+                walker.advance().unwrap();
+            }
+            assert_eq!(
+                walker.take_removed_keys(),
+                if enabled {
+                    HashSet::from_iter([first, stale])
+                } else {
+                    HashSet::from_iter([first])
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_missing_ancestor_seek_preserves_next_root_child() {
+        for missing_depth in [0, 60] {
+            let prefix = std::iter::once(0xd).chain(std::iter::repeat_n(0, missing_depth));
+            let paths = [
+                Nibbles::from_nibbles(prefix.clone().chain([0x5]).collect::<Vec<_>>()),
+                Nibbles::from_nibbles(prefix.chain([0xb, 0x5]).collect::<Vec<_>>()),
+                Nibbles::from_nibbles([0xe, 0x3]),
+                Nibbles::from_nibbles([0xe, 0x8]),
+            ];
+            for root_present in [false, true] {
+                let mut nodes = BTreeMap::from_iter(
+                    paths.into_iter().map(|path| (path, branch_node(0b11, 0, 1))),
+                );
+                if root_present {
+                    nodes.insert(
+                        Nibbles::default(),
+                        root_branch_node((1 << 0xd) | (1 << 0xe), (1 << 0xd) | (1 << 0xe), 0),
+                    );
+                }
+                let factory = MockTrieCursorFactory::new(nodes, B256Map::default());
+                let mut walker = TrieWalker::<_>::state_trie(
+                    factory.account_trie_cursor().unwrap(),
+                    PrefixSet::all_paths(),
+                )
+                .unwrap()
+                .with_walk_all_changed_branch_children(true)
+                .with_deletions_retained(true);
+                while walker.key().is_some() {
+                    walker.advance().unwrap();
+                }
+                assert_eq!(walker.take_removed_keys(), HashSet::from_iter(paths));
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_missing_ancestors_restore_canonical_storage_cache() {
+        let storage = BTreeMap::from([
+            (B256::right_padding_from(&[0xd5, 0x00]), U256::ONE),
+            (B256::right_padding_from(&[0xd5, 0x01]), U256::from(2)),
+            (B256::right_padding_from(&[0xd5, 0x10]), U256::from(3)),
+            (B256::right_padding_from(&[0xd5, 0x11]), U256::from(4)),
+            (B256::right_padding_from(&[0xdb, 0x50]), U256::from(5)),
+            (B256::right_padding_from(&[0xe3, 0x00]), U256::from(6)),
+            (B256::right_padding_from(&[0xe3, 0x01]), U256::from(7)),
+            (B256::right_padding_from(&[0xe3, 0x10]), U256::from(8)),
+            (B256::right_padding_from(&[0xe3, 0x11]), U256::from(9)),
+        ]);
+        let mut harness = TrieTestHarness::new(storage.clone());
+        let expected_nodes = harness
+            .storage_trie_updates()
+            .storage_nodes
+            .iter()
+            .map(|(path, node)| (*path, node.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut stored_nodes = expected_nodes.clone();
+        for path in [
+            Nibbles::default(),
+            Nibbles::from_nibbles([0xd]),
+            Nibbles::from_nibbles([0xd, 0xb]),
+            Nibbles::from_nibbles([0xe]),
+        ] {
+            stored_nodes.remove(&path);
+        }
+        assert!(stored_nodes.contains_key(&Nibbles::from_nibbles([0xd, 0x5])));
+        stored_nodes.insert(Nibbles::from_nibbles([0xd, 0xb, 0x5]), branch_node(0x0341, 0, 1));
+        harness.set_trie_nodes(stored_nodes.clone());
+        let selective_changes = PrefixSetMut::from([
+            Nibbles::from_nibbles([0xd, 0x5]),
+            Nibbles::from_nibbles([0xd, 0xb, 0x5]),
+        ])
+        .freeze();
+        for (changes, threshold) in [
+            (PrefixSet::all_paths(), u64::MAX),
+            (PrefixSet::all_paths(), 1),
+            (selective_changes, u64::MAX),
+        ] {
+            let (root, updates) = storage_root_with_progress(&harness, changes, true, threshold);
+            let mut resulting_nodes = stored_nodes.clone();
+            for (path, node) in updates.into_sorted().storage_nodes {
+                if let Some(node) = node {
+                    resulting_nodes.insert(path, node);
+                } else {
+                    resulting_nodes.remove(&path);
+                }
+            }
+            assert_eq!(root, storage_root_prehashed(storage.clone()));
+            assert_eq!(resulting_nodes, expected_nodes);
         }
     }
 }
