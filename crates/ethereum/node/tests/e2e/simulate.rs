@@ -425,6 +425,50 @@ async fn test_simulate_v1_applies_withdrawals_override() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn test_simulate_v1_withdrawals_limit() -> eyre::Result<()> {
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Shanghai).build_single().await?;
+    let provider = node.rpc_provider();
+
+    for count in [16, 17] {
+        let withdrawals = Withdrawals::new(
+            (0..count)
+                .map(|index| Withdrawal {
+                    index,
+                    validator_index: index,
+                    address: Address::with_last_byte(0xaa),
+                    amount: 1,
+                })
+                .collect(),
+        );
+        let mut payload = SimulatePayload::<TransactionRequest>::default().extend(
+            SimBlock::default().with_block_overrides(BlockOverrides {
+                withdrawals: Some(withdrawals.clone()),
+                ..Default::default()
+            }),
+        );
+        for validation in [false, true] {
+            payload.validation = validation;
+            let result = provider
+                .raw_request::<_, Vec<SimulatedBlock>>(
+                    "eth_simulateV1".into(),
+                    (&payload, "latest"),
+                )
+                .await;
+            if count == 16 {
+                assert_eq!(result?[0].inner.withdrawals.as_ref(), Some(&withdrawals));
+            } else {
+                let err = result.unwrap_err();
+                let err = err.as_error_resp().expect("expected JSON-RPC error response");
+                assert_eq!(err.code, -32602);
+                assert_eq!(err.message, "withdrawals count 17 exceeds limit 16");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_simulate_v1_explicit_gas_over_remaining_block_gas_errors() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();
 

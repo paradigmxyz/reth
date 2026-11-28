@@ -36,6 +36,9 @@ use std::mem;
 /// hint provides a value.
 const SIMULATE_FALLBACK_TIMESTAMP_INCREMENT: u64 = 12;
 
+/// Maximum length of a block's withdrawals override in the execution-apis withdrawals schema.
+const MAX_WITHDRAWALS_PER_PAYLOAD: usize = 16;
+
 /// Error code for execution reverted in `eth_simulateV1`.
 ///
 /// Consistent with `eth_call` revert error code.
@@ -157,6 +160,7 @@ impl ToRpcError for EthSimulateError {
 /// Walks the provided block-state calls in order and:
 /// - validates that each block number and timestamp strictly increases relative to the parent and
 ///   prior simulated block;
+/// - rejects withdrawals overrides longer than the per-block limit;
 /// - inserts empty filler blocks for every gap in block numbers, so a request like `[block at
 ///   number N + k]` over a parent at `N` expands to `k - 1` empty blocks followed by the requested
 ///   one (per the execution-apis spec: "If the block number is increased more than `1` compared to
@@ -190,6 +194,15 @@ where
 
     for mut block in blocks {
         let overrides = block.block_overrides.get_or_insert_with(BlockOverrides::default);
+
+        if let Some(withdrawals) = &overrides.withdrawals &&
+            withdrawals.len() > MAX_WITHDRAWALS_PER_PAYLOAD
+        {
+            return Err(EthApiError::InvalidParams(format!(
+                "withdrawals count {} exceeds limit {MAX_WITHDRAWALS_PER_PAYLOAD}",
+                withdrawals.len()
+            )))
+        }
 
         // Default block number to prev + 1 if not specified.
         let target_number = if let Some(n) = overrides.number {
