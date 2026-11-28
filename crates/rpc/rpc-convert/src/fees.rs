@@ -27,14 +27,20 @@ impl CallFees {
     /// If the `maxFeePerBlobGas` or `blobVersionedHashes` are set we treat it as an EIP-4844
     /// transaction.
     ///
+    /// `maxFeePerBlobGas` only prices blob gas, so it does not take part in the execution fee
+    /// checks: a legacy `gasPrice` prices the execution gas of a blob transaction, as it does in
+    /// geth's `eth_call`, while `gasPrice` together with `maxFeePerGas` or `maxPriorityFeePerGas`
+    /// is rejected.
+    ///
     /// Note: Due to the `Default` impl of `BlockEnv` (Some(0)) this assumes the `block_blob_fee`
     /// is always `Some`
     ///
     /// ## Notable design decisions
     ///
-    /// For compatibility reasons, this contains several exceptions when fee values are validated:
-    /// - If both `maxFeePerGas` and `maxPriorityFeePerGas` are set to `0` they are treated as
-    ///   missing values, bypassing fee checks wrt. `baseFeePerGas`.
+    /// Like geth's call defaults, an omitted fee field is zero and a request whose execution fees
+    /// are all zero runs free, bypassing fee checks wrt. `baseFeePerGas`. Any other request is
+    /// validated like a transaction: a priority fee above the fee cap is rejected first, then a
+    /// fee cap or legacy gas price below the base fee.
     ///
     /// This mirrors geth's behaviour when transaction requests are executed: <https://github.com/ethereum/go-ethereum/blob/380688c636a654becc8f114438c2a5d93d2db032/core/state_transition.go#L306-L306>
     pub fn ensure_fees(
@@ -46,97 +52,60 @@ impl CallFees {
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> Result<Self, CallFeesError> {
-        /// Get the effective gas price of a transaction as specified in EIP-1559 with relevant
-        /// checks.
-        fn get_effective_gas_price(
-            max_fee_per_gas: Option<U256>,
-            max_priority_fee_per_gas: Option<U256>,
-            block_base_fee: U256,
-        ) -> Result<U256, CallFeesError> {
-            match max_fee_per_gas {
-                Some(max_fee) => {
-                    let max_priority_fee_per_gas = max_priority_fee_per_gas.unwrap_or(U256::ZERO);
-
-                    // only enforce the fee cap if provided input is not zero
-                    if !(max_fee.is_zero() && max_priority_fee_per_gas.is_zero()) &&
-                        max_fee < block_base_fee
-                    {
-                        // `base_fee_per_gas` is greater than the `max_fee_per_gas`
-                        return Err(CallFeesError::FeeCapTooLow);
-                    }
-                    if max_fee < max_priority_fee_per_gas {
-                        return Err(
-                            // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                            CallFeesError::TipAboveFeeCap,
-                        );
-                    }
-                    // ref <https://github.com/ethereum/go-ethereum/blob/0dd173a727dd2d2409b8e401b22e85d20c25b71f/internal/ethapi/transaction_args.go#L446-L446>
-                    Ok(min(
-                        max_fee,
-                        block_base_fee
-                            .checked_add(max_priority_fee_per_gas)
-                            .ok_or(CallFeesError::TipVeryHigh)?,
-                    ))
-                }
-                None => Ok(block_base_fee
-                    .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
-                    .ok_or(CallFeesError::TipVeryHigh)?),
-            }
-        }
-
         let has_blob_hashes =
             blob_versioned_hashes.as_ref().map(|blobs| !blobs.is_empty()).unwrap_or(false);
 
-        match (call_gas_price, call_max_fee, call_priority_fee, max_fee_per_blob_gas) {
-            (gas_price, None, None, None) => {
-                // either legacy transaction or no fee fields are specified
-                // when no fields are specified, set gas price to zero
-                let gas_price = gas_price.unwrap_or(U256::ZERO);
-                Ok(Self {
-                    gas_price,
-                    max_priority_fee_per_gas: None,
-                    max_fee_per_blob_gas: has_blob_hashes.then_some(block_blob_fee).flatten(),
-                })
-            }
-            (None, max_fee_per_gas, max_priority_fee_per_gas, None) => {
-                // request for eip-1559 transaction
-                let effective_gas_price = get_effective_gas_price(
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                    block_base_fee,
-                )?;
-                let max_fee_per_blob_gas = has_blob_hashes.then_some(block_blob_fee).flatten();
-
-                Ok(Self {
-                    gas_price: effective_gas_price,
-                    max_priority_fee_per_gas,
-                    max_fee_per_blob_gas,
-                })
-            }
-            (None, max_fee_per_gas, max_priority_fee_per_gas, Some(max_fee_per_blob_gas)) => {
-                // request for eip-4844 transaction
-                let effective_gas_price = get_effective_gas_price(
-                    max_fee_per_gas,
-                    max_priority_fee_per_gas,
-                    block_base_fee,
-                )?;
-                // Ensure blob_hashes are present
-                if !has_blob_hashes {
-                    // Blob transaction but no blob hashes
-                    return Err(CallFeesError::BlobTransactionMissingBlobHashes);
+        let (gas_price, max_priority_fee_per_gas) =
+            match (call_gas_price, call_max_fee, call_priority_fee) {
+                (gas_price, None, None) => {
+                    // either legacy transaction or no fee fields are specified
+                    // when no fields are specified, set gas price to zero
+                    let gas_price = gas_price.unwrap_or(U256::ZERO);
+                    if !gas_price.is_zero() && gas_price < block_base_fee {
+                        return Err(CallFeesError::FeeCapTooLow);
+                    }
+                    (gas_price, None)
                 }
+                (None, max_fee_per_gas, max_priority_fee_per_gas) => {
+                    // request for eip-1559 transaction
+                    let max_fee = max_fee_per_gas.unwrap_or(U256::ZERO);
+                    let priority_fee = max_priority_fee_per_gas.unwrap_or(U256::ZERO);
+                    if max_fee.is_zero() && priority_fee.is_zero() {
+                        (U256::ZERO, max_priority_fee_per_gas)
+                    } else {
+                        if max_fee < priority_fee {
+                            return Err(CallFeesError::TipAboveFeeCap);
+                        }
+                        if max_fee < block_base_fee {
+                            return Err(CallFeesError::FeeCapTooLow);
+                        }
+                        // ref <https://github.com/ethereum/go-ethereum/blob/0dd173a727dd2d2409b8e401b22e85d20c25b71f/internal/ethapi/transaction_args.go#L446-L446>
+                        let effective_gas_price = min(
+                            max_fee,
+                            block_base_fee
+                                .checked_add(priority_fee)
+                                .ok_or(CallFeesError::TipVeryHigh)?,
+                        );
+                        (effective_gas_price, max_priority_fee_per_gas)
+                    }
+                }
+                _ => {
+                    // gasPrice together with maxFeePerGas or maxPriorityFeePerGas
+                    return Err(CallFeesError::ConflictingFeeFieldsInRequest);
+                }
+            };
 
-                Ok(Self {
-                    gas_price: effective_gas_price,
-                    max_priority_fee_per_gas,
-                    max_fee_per_blob_gas: Some(max_fee_per_blob_gas),
-                })
+        // The blob fee cap only prices blob gas, so it combines with either fee style.
+        let max_fee_per_blob_gas = match max_fee_per_blob_gas {
+            Some(_) if !has_blob_hashes => {
+                // Blob transaction but no blob hashes
+                return Err(CallFeesError::BlobTransactionMissingBlobHashes);
             }
-            _ => {
-                // this fallback covers incompatible combinations of fields
-                Err(CallFeesError::ConflictingFeeFieldsInRequest)
-            }
-        }
+            Some(max_fee_per_blob_gas) => Some(max_fee_per_blob_gas),
+            None => has_blob_hashes.then_some(block_blob_fee).flatten(),
+        };
+
+        Ok(Self { gas_price, max_priority_fee_per_gas, max_fee_per_blob_gas })
     }
 }
 
@@ -203,6 +172,123 @@ mod tests {
         .unwrap();
         assert!(gas_price.is_zero());
         assert_eq!(max_fee_per_blob_gas, Some(U256::from(99)));
+    }
+
+    #[test]
+    fn test_legacy_blob_fees() {
+        let gas_price = U256::from(2 * GWEI_TO_WEI);
+        let base_fee = U256::from(GWEI_TO_WEI);
+        let blob_hashes = [B256::with_last_byte(1)];
+
+        // a blob fee cap is priced on its own, execution gas at gasPrice
+        let CallFees { gas_price: price, max_priority_fee_per_gas, max_fee_per_blob_gas } =
+            CallFees::ensure_fees(
+                Some(gas_price),
+                None,
+                None,
+                base_fee,
+                Some(&blob_hashes),
+                Some(U256::from(5)),
+                Some(U256::from(1)),
+            )
+            .unwrap();
+        assert_eq!(price, gas_price);
+        assert_eq!(max_priority_fee_per_gas, None);
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(5)));
+
+        // without a blob fee cap the block's blob fee applies
+        let CallFees { gas_price: price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
+            Some(gas_price),
+            None,
+            None,
+            base_fee,
+            Some(&blob_hashes),
+            None,
+            Some(U256::from(7)),
+        )
+        .unwrap();
+        assert_eq!(price, gas_price);
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(7)));
+
+        // a blob fee cap still needs blob hashes
+        for hashes in [None, Some(&[][..])] {
+            let err = CallFees::ensure_fees(
+                Some(gas_price),
+                None,
+                None,
+                base_fee,
+                hashes,
+                Some(U256::from(5)),
+                Some(U256::from(1)),
+            )
+            .unwrap_err();
+            assert!(matches!(err, CallFeesError::BlobTransactionMissingBlobHashes));
+        }
+    }
+
+    #[test]
+    fn test_blob_fee_cap_without_execution_fees() {
+        // a blob fee cap alone does not price execution gas
+        let CallFees { gas_price, max_priority_fee_per_gas, max_fee_per_blob_gas } =
+            CallFees::ensure_fees(
+                None,
+                None,
+                None,
+                U256::from(GWEI_TO_WEI),
+                Some(&[B256::with_last_byte(1)]),
+                Some(U256::from(5)),
+                Some(U256::from(1)),
+            )
+            .unwrap();
+        assert!(gas_price.is_zero());
+        assert_eq!(max_priority_fee_per_gas, None);
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(5)));
+    }
+
+    #[test]
+    fn test_eip_4844_fees() {
+        let CallFees { gas_price, max_priority_fee_per_gas, max_fee_per_blob_gas } =
+            CallFees::ensure_fees(
+                None,
+                Some(U256::from(3 * GWEI_TO_WEI)),
+                Some(U256::from(GWEI_TO_WEI)),
+                U256::from(GWEI_TO_WEI),
+                Some(&[B256::with_last_byte(1)]),
+                Some(U256::from(5)),
+                Some(U256::from(1)),
+            )
+            .unwrap();
+        assert_eq!(gas_price, U256::from(2 * GWEI_TO_WEI));
+        assert_eq!(max_priority_fee_per_gas, Some(U256::from(GWEI_TO_WEI)));
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(5)));
+    }
+
+    #[test]
+    fn test_conflicting_fee_fields() {
+        let gas_price = Some(U256::from(2 * GWEI_TO_WEI));
+        let fee = Some(U256::from(3 * GWEI_TO_WEI));
+        let blob_hashes = [B256::with_last_byte(1)];
+
+        for (max_fee, priority_fee) in [(fee, None), (None, fee), (fee, fee)] {
+            for (hashes, blob_fee) in [
+                (None, None),
+                (None, Some(U256::from(5))),
+                (Some(&blob_hashes[..]), None),
+                (Some(&blob_hashes[..]), Some(U256::from(5))),
+            ] {
+                let err = CallFees::ensure_fees(
+                    gas_price,
+                    max_fee,
+                    priority_fee,
+                    U256::from(GWEI_TO_WEI),
+                    hashes,
+                    blob_fee,
+                    Some(U256::from(1)),
+                )
+                .unwrap_err();
+                assert!(matches!(err, CallFeesError::ConflictingFeeFieldsInRequest));
+            }
+        }
     }
 
     #[test]
@@ -275,5 +361,39 @@ mod tests {
             Some(U256::ZERO),
         );
         assert!(call_fees.is_err());
+    }
+
+    #[test]
+    fn test_fee_checks_follow_geth() {
+        let base_fee = U256::from(10);
+        let fees = |gas_price: Option<u64>, max_fee: Option<u64>, priority_fee: Option<u64>| {
+            CallFees::ensure_fees(
+                gas_price.map(U256::from),
+                max_fee.map(U256::from),
+                priority_fee.map(U256::from),
+                base_fee,
+                None,
+                None,
+                Some(U256::ZERO),
+            )
+        };
+
+        // all-zero execution fees run free, whichever fields carry them
+        for (gas_price, max_fee, priority_fee) in
+            [(Some(0), None, None), (None, None, Some(0)), (None, Some(0), None)]
+        {
+            assert_eq!(fees(gas_price, max_fee, priority_fee).unwrap().gas_price, U256::ZERO);
+        }
+
+        // a positive legacy gas price below the base fee is rejected
+        assert!(matches!(fees(Some(9), None, None), Err(CallFeesError::FeeCapTooLow)));
+        assert_eq!(fees(Some(10), None, None).unwrap().gas_price, U256::from(10));
+
+        // an omitted fee cap is zero, so a positive priority fee alone exceeds it
+        assert!(matches!(fees(None, None, Some(1)), Err(CallFeesError::TipAboveFeeCap)));
+
+        // a priority fee above the fee cap takes precedence over a fee cap below the base fee
+        assert!(matches!(fees(None, Some(0), Some(1)), Err(CallFeesError::TipAboveFeeCap)));
+        assert!(matches!(fees(None, Some(5), Some(1)), Err(CallFeesError::FeeCapTooLow)));
     }
 }

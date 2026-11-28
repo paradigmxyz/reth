@@ -118,6 +118,11 @@ pub trait EstimateCall: Call {
         };
 
         let request_gas_price = request_gas_price(request.as_ref(), evm_env.block_base_fee());
+        // An unpriced request runs with BASEFEE 0, as in eth_call and geth's estimator, so
+        // estimation sees the same environment as the call it estimates.
+        if request_gas_price == 0 {
+            evm_env.block_env_mut().basefee = U256::ZERO;
+        }
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).

@@ -656,6 +656,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_fill_transaction_estimates_tip_only_request() {
+        let address = Address::random();
+        let balance = U256::from(100u128) * U256::from(1_000_000_000_000_000_000u128);
+        let accounts = AddressMap::from_iter([(address, ExtendedAccount::new(0, balance))]);
+        let eth_api = mock_eth_api(accounts);
+
+        // Without a gas limit the request is estimated, which must see the filled fee cap rather
+        // than reject the tip as above an omitted, zero cap.
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            max_priority_fee_per_gas: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let filled =
+            eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
+
+        assert_eq!(filled.tx.gas_limit(), 21_000);
+        assert_eq!(filled.tx.max_priority_fee_per_gas(), Some(1_000_000_000));
+        assert!(filled.tx.max_fee_per_gas() >= 1_000_000_000);
+    }
+
+    #[tokio::test]
+    async fn test_fill_transaction_estimates_at_latest_base_fee() {
+        let address = Address::random();
+        let balance = U256::from(100u128) * U256::from(1_000_000_000_000_000_000u128);
+        let accounts = AddressMap::from_iter([(address, ExtendedAccount::new(0, balance))]);
+        let eth_api = mock_eth_api(accounts);
+        // A full block at base fee 1 gwei, so the pending block's base fee is higher.
+        let header = Header {
+            number: 1,
+            parent_hash: B256::ZERO,
+            gas_limit: 30_000_000,
+            gas_used: 30_000_000,
+            timestamp: 13,
+            excess_blob_gas: Some(0),
+            base_fee_per_gas: Some(1_000_000_000),
+            blob_gas_used: Some(0),
+            ..Default::default()
+        };
+        eth_api.provider().add_block(header.hash_slow(), Block::new(header, Default::default()));
+
+        // A legacy price covering the latest base fee is estimated, not rejected for being below
+        // the pending block's.
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(Address::random().into()),
+            gas_price: Some(1_000_000_000),
+            ..Default::default()
+        };
+
+        let filled =
+            eth_api.fill_transaction(tx_req).await.expect("fill_transaction should succeed");
+
+        assert_eq!(filled.tx.gas_limit(), 21_000);
+    }
+
+    #[tokio::test]
     async fn test_fill_transaction_fills_all_missing_fields() {
         let address = Address::random();
 

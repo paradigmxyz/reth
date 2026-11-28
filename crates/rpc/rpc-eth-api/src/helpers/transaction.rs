@@ -16,7 +16,9 @@ use alloy_eip7928::bal::DecodedBal;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::{TransactionBuilder, TransactionBuilder4844};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
-use alloy_rpc_types_eth::{state::EvmOverrides, TransactionInfo, TransactionRequest};
+use alloy_rpc_types_eth::{
+    state::EvmOverrides, BlockOverrides, TransactionInfo, TransactionRequest,
+};
 use evm2::evm::Bal as EvmBal;
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
@@ -569,9 +571,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             if request.as_ref().gas_limit().is_none() {
-                let estimated_gas = self
-                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
-                    .await?;
+                let header = self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                let overrides =
+                    latest_base_fee_overrides(header.and_then(|h| h.base_fee_per_gas()));
+                let estimated_gas =
+                    self.estimate_gas_at(request.clone(), BlockId::pending(), overrides).await?;
                 request.as_mut().set_gas_limit(estimated_gas.to());
             }
 
@@ -648,13 +652,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 request.as_mut().populate_blob_hashes();
             }
 
-            if request.as_ref().gas_limit().is_none() {
-                let estimated_gas = self
-                    .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
-                    .await?;
-                request.as_mut().set_gas_limit(estimated_gas.to());
-            }
-
+            // Fill the fees before estimating, as geth's setDefaults does: the estimate validates
+            // the fees, and an omitted fee cap would count as zero, below a supplied tip.
             if request.as_ref().gas_price().is_none() {
                 let tip = if let Some(tip) = request.as_ref().max_priority_fee_per_gas() {
                     tip
@@ -675,6 +674,15 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     // `base_fee + min(tip, max_fee_per_gas - base_fee)`.
                     request.as_mut().set_max_fee_per_gas(base_fee as u128 * 2 + tip);
                 }
+            }
+
+            if request.as_ref().gas_limit().is_none() {
+                let header = self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+                let overrides =
+                    latest_base_fee_overrides(header.and_then(|h| h.base_fee_per_gas()));
+                let estimated_gas =
+                    self.estimate_gas_at(request.clone(), BlockId::pending(), overrides).await?;
+                request.as_mut().set_gas_limit(estimated_gas.to());
             }
 
             let tx = self.converter().build_simulate_v1_transaction(request)?;
@@ -991,4 +999,16 @@ const fn ensure_no_conflicting_fee_fields(request: &TransactionRequest) -> EthRe
         return Err(EthApiError::ConflictingFeeFieldsInRequest)
     }
     Ok(())
+}
+
+/// Overrides for estimating the gas of a transaction to send in the pending block.
+///
+/// The fee defaults are filled from the latest base fee, and a transaction priced at it is valid,
+/// so the estimate runs at the latest base fee: the pending block's can be higher and would
+/// reject such a price.
+fn latest_base_fee_overrides(latest_base_fee: Option<u64>) -> EvmOverrides {
+    let block = latest_base_fee.map(|base_fee| {
+        Box::new(BlockOverrides { base_fee: Some(U256::from(base_fee)), ..Default::default() })
+    });
+    EvmOverrides::new(None, block)
 }
