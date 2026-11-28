@@ -36,6 +36,9 @@ pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
 };
 pub use simulate::SimulateV1Request;
-pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
+pub use types::{
+    EthApiTypes, FullEthApiTypes, RpcBlock, RpcFilledTransaction, RpcHeader, RpcReceipt,
+    RpcTransaction,
+};
 
 use reth_trie_common as _;
