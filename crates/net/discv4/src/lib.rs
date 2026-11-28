@@ -1366,18 +1366,27 @@ impl Discv4Service {
             return
         }
 
-        let may_use_reserved = matches!(reason, PingReason::Lookup(..)) ||
+        if self.pending_pings.len() <
+            self.max_pending_pings(&node, matches!(reason, PingReason::Lookup(..)))
+        {
+            self.send_ping(node, reason);
+        } else if self.queued_pings.len() < MAX_QUEUED_PINGS {
+            self.queued_pings.push_back((node, reason));
+        }
+    }
+
+    // Returns how many pings may be in flight before a ping to `node` has to wait. Lookups and
+    // pings to an endpoint the node already proved may also use the `RESERVED_PINGS` slots.
+    fn max_pending_pings(&mut self, node: &NodeRecord, is_lookup: bool) -> usize {
+        let may_use_reserved = is_lookup ||
             self.on_entry(node.id, |entry| {
                 entry.has_endpoint_proof && entry.record.udp_addr() == node.udp_addr()
             })
             .unwrap_or_default();
-        let max_pending =
-            if may_use_reserved { MAX_NODES_PING } else { MAX_NODES_PING - RESERVED_PINGS };
-
-        if self.pending_pings.len() < max_pending {
-            self.send_ping(node, reason);
-        } else if self.queued_pings.len() < MAX_QUEUED_PINGS {
-            self.queued_pings.push_back((node, reason));
+        if may_use_reserved {
+            MAX_NODES_PING
+        } else {
+            MAX_NODES_PING - RESERVED_PINGS
         }
     }
 
@@ -1894,14 +1903,20 @@ impl Discv4Service {
     }
 
     /// Pops buffered ping requests and sends them.
+    ///
+    /// While only reserved slots are free, pings that can't use them stay queued in place.
     fn ping_buffered(&mut self) {
+        let mut idx = 0;
         for _ in 0..self.queued_pings.len() {
             if self.pending_pings.len() >= MAX_NODES_PING {
                 break
             }
-            match self.queued_pings.pop_front() {
-                Some((next, reason)) => self.try_ping(next, reason),
-                None => break,
+            let Some((node, reason)) = self.queued_pings.get(idx) else { break };
+            let (node, is_lookup) = (*node, matches!(reason, PingReason::Lookup(..)));
+            if self.pending_pings.len() >= self.max_pending_pings(&node, is_lookup) {
+                idx += 1;
+            } else if let Some((node, reason)) = self.queued_pings.remove(idx) {
+                self.try_ping(node, reason);
             }
         }
     }
@@ -3240,6 +3255,19 @@ mod tests {
         };
         service.on_ping(ping, renewal.udp_addr(), renewal.id, B256::random());
         assert!(matches!(service.pending_pings[&renewal.id].reason, PingReason::EstablishBond));
+
+        // Draining the queue sends a queued lookup and leaves the other pings queued in place.
+        service.queued_pings.truncate(2);
+        let queued = service.queued_pings.iter().map(|(node, _)| node.id).collect::<Vec<_>>();
+        let lookup = NodeRecord::new("127.0.0.5:30303".parse().unwrap(), PeerId::random());
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        service.queued_pings.insert(1, (lookup, PingReason::Lookup(lookup, ctx)));
+        service.ping_buffered();
+        assert!(service.pending_pings.contains_key(&lookup.id));
+        assert_eq!(
+            service.queued_pings.iter().map(|(node, _)| node.id).collect::<Vec<_>>(),
+            queued
+        );
     }
 
     // Bootstraps with mainnet boot nodes
