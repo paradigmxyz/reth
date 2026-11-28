@@ -1554,10 +1554,6 @@ pub trait PoolTransaction:
         false
     }
 
-    /// Sets the cells kept for a blob transaction whose sidecar is already stored, such as one
-    /// reinjected after a reorg. Does nothing for other transactions.
-    fn set_blob_cell_availability(&mut self, _availability: BlobCellAvailability) {}
-
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1708,7 +1704,7 @@ impl<T: SignedTransaction> EthPooledTransaction<T> {
             // because the blob sidecar is not included in this transaction variant, mark it as
             // missing
             blob_sidecar = EthBlobTransactionSidecar::Missing;
-            // Validation replaces this with the stored mask, which can hold fewer cells.
+            // TODO: Initialize this with the actual mask once sparse sidecars are supported.
             blob_cell_availability = Some(BlobCellAvailability::full());
         }
 
@@ -1877,12 +1873,6 @@ impl PoolTransaction for EthPooledTransaction {
         self.blob_cell_availability = Some(sidecar.availability().clone());
         self.blob_sidecar = EthBlobTransactionSidecar::Present(sidecar);
         true
-    }
-
-    fn set_blob_cell_availability(&mut self, availability: BlobCellAvailability) {
-        if self.is_eip4844() {
-            self.blob_cell_availability = Some(availability);
-        }
     }
 }
 

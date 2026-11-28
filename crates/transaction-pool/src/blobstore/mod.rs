@@ -311,13 +311,6 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
         cell_mask: BlobCellMask,
     ) -> Result<Option<Vec<Cell>>, BlobStoreError>;
 
-    /// Returns the cells kept for every blob of `tx`, or `None` if `tx` is missing.
-    ///
-    /// The default treats every stored sidecar as full, which holds for stores without cells.
-    fn cell_mask(&self, tx: B256) -> Result<Option<BlobCellMask>, BlobStoreError> {
-        Ok(self.contains(tx)?.then_some(BlobCellMask::from_bits(u128::MAX)))
-    }
-
     /// Data size of all transactions in the blob store.
     fn data_size_hint(&self) -> Option<usize>;
 
@@ -613,7 +606,6 @@ mod tests {
             store.insert(tx, (*full).clone().into()).unwrap();
             store.insert_cells(tx, half.clone()).unwrap();
             assert_eq!(store.get(tx).unwrap(), Some(full.clone()));
-            assert_eq!(store.cell_mask(tx).unwrap(), Some(BlobCellMask::from_bits(u128::MAX)));
             assert_eq!(store.get_without_blobs(tx).unwrap(), Some(half.without_blobs()));
             assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(full_size)));
             let other = B256::random();
@@ -635,7 +627,6 @@ mod tests {
             let tx = B256::random();
             store.insert_cells(tx, partial.clone()).unwrap();
             assert_eq!((store.blobs_len(), store.data_size_hint()), (1, Some(cells_size)));
-            assert_eq!(store.cell_mask(tx).unwrap(), Some(kept));
             assert_eq!(store.get(tx).unwrap(), None);
             assert!(matches!(
                 store.get_exact(vec![tx]),
@@ -662,7 +653,6 @@ mod tests {
             assert!(!store.contains(tx).unwrap());
             assert_eq!((store.blobs_len(), store.data_size_hint()), (0, Some(0)));
             assert_eq!(store.get_cells(tx, kept).unwrap(), None);
-            assert_eq!(store.cell_mask(tx).unwrap(), None);
         }
     }
 
