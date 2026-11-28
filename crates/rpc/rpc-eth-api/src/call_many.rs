@@ -58,7 +58,7 @@ const MAX_INVALID_PARAMS_LEN: usize = 1024;
 
 /// Returns [`EthApiError::InvalidParams`] for a decode error, truncated to
 /// [`MAX_INVALID_PARAMS_LEN`].
-fn invalid_params(err: serde_json::Error) -> EthApiError {
+pub(crate) fn invalid_params(err: serde_json::Error) -> EthApiError {
     let mut msg = err.to_string();
     msg.truncate(msg.floor_char_boundary(MAX_INVALID_PARAMS_LEN));
     EthApiError::InvalidParams(msg)

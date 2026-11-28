@@ -59,6 +59,7 @@ use reth_rpc_server_types::RpcModuleSelection;
 use reth_storage_overlay::OverlayManager;
 use reth_tasks::Runtime;
 use reth_transaction_pool::test_utils::TransactionGenerator;
+use serde_json::value::RawValue;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -1391,6 +1392,139 @@ async fn test_mine_signed() -> eyre::Result<()> {
         "{err}"
     );
     assert_eq!(node.rpc_provider().get_block_number().await?, 2);
+
+    Ok(())
+}
+
+/// `debug_traceCall` rejects a block override key it does not support, including a case variant
+/// of a supported key, and `difficulty` after the merge, with -32602, while `eth_call` still
+/// accepts both: <https://github.com/paradigmxyz/reth/issues/28712>
+#[tokio::test]
+async fn debug_trace_call_validates_block_overrides() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut node, wallet) =
+        EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    // `txIndex` traces within a block, so mine one with a transaction.
+    let transfer = wallet.account(0).transfer(Address::with_last_byte(1), U256::ONE).await;
+    node.mine([transfer]).await?;
+    let provider = node.rpc_provider();
+
+    let call = TransactionRequest::default()
+        .from(Address::with_last_byte(1))
+        .to(Address::with_last_byte(2))
+        .gas_limit(100_000);
+    let difficulty = "difficulty block override is not supported after the merge";
+    // Raw options, since alloy's `BlockOverrides` drops the keys under test.
+    for (block, opts, message) in [
+        (
+            "latest",
+            r#"{"tracer":"callTracer","blockOverrides":{"fooBar":"0x1"}}"#,
+            "unsupported block override key: fooBar at line 1 column 49",
+        ),
+        (
+            "latest",
+            r#"{"tracer":"callTracer","blockOverrides":{"Time":"0x1"}}"#,
+            "unsupported block override key: Time at line 1 column 47",
+        ),
+        (
+            "latest",
+            r#"{"tracer":"callTracer","blockOverrides":{"time":"0x1","Time":"0x1"}}"#,
+            "unsupported block override key: Time at line 1 column 60",
+        ),
+        ("latest", r#"{"tracer":"callTracer","blockOverrides":{"difficulty":"0x1"}}"#, difficulty),
+        (
+            "0x1",
+            r#"{"tracer":"callTracer","txIndex":"0x0","blockOverrides":{"difficulty":"0x1"}}"#,
+            difficulty,
+        ),
+    ] {
+        let err = provider
+            .raw_request::<_, serde_json::Value>(
+                "debug_traceCall".into(),
+                (&call, block, RawValue::from_string(opts.to_string())?),
+            )
+            .await
+            .expect_err(opts);
+        let err = err.as_error_resp().expect("expected JSON-RPC error response");
+        assert_eq!(err.code, -32602, "{opts}");
+        assert_eq!(err.message, message, "{opts}");
+    }
+
+    // `TIMESTAMP PUSH0 MSTORE PUSH1 0x20 PUSH0 RETURN`: returns the block timestamp.
+    let clock = Address::with_last_byte(0x42);
+    let overrides = StateOverride::from_iter([(
+        clock,
+        AccountOverride::default().with_code(bytes!("425f5260205ff3")),
+    )]);
+    let call = TransactionRequest::default().to(clock);
+    let time = B256::with_last_byte(0x2a);
+    for (block, tx_index) in [("latest", None), ("0x1", Some("0x0"))] {
+        for key in ["time", "timestamp"] {
+            let opts = serde_json::json!({
+                "tracer": "callTracer",
+                "stateOverrides": &overrides,
+                "txIndex": tx_index,
+                "blockOverrides": { key: "0x2a" },
+            });
+            let trace: serde_json::Value =
+                provider.raw_request("debug_traceCall".into(), (&call, block, &opts)).await?;
+            assert_eq!(trace["output"], serde_json::json!(time), "{opts}: {trace}");
+        }
+    }
+
+    for block_overrides in
+        [r#"{"fooBar":"0x1","timestamp":"0x2a"}"#, r#"{"difficulty":"0x1","time":"0x2a"}"#]
+    {
+        let output: Bytes = provider
+            .raw_request(
+                "eth_call".into(),
+                (&call, "latest", &overrides, RawValue::from_string(block_overrides.to_string())?),
+            )
+            .await?;
+        assert_eq!(output.as_ref(), time.as_slice(), "{block_overrides}");
+    }
+
+    Ok(())
+}
+
+/// A chain without the merge applies the `difficulty` block override in `debug_traceCall` and
+/// `eth_simulateV1`.
+#[tokio::test]
+async fn difficulty_block_override_before_merge() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::London).build_single().await?;
+    let provider = node.rpc_provider();
+
+    // `DIFFICULTY PUSH1 0 MSTORE PUSH1 0x20 PUSH1 0 RETURN`, without Shanghai's `PUSH0`.
+    let contract = Address::with_last_byte(0x42);
+    let overrides = StateOverride::from_iter([(
+        contract,
+        AccountOverride::default().with_code(bytes!("4460005260206000f3")),
+    )]);
+    let call = TransactionRequest::default().to(contract);
+    let difficulty = serde_json::json!(B256::with_last_byte(0x2a));
+
+    let opts = serde_json::json!({
+        "tracer": "callTracer",
+        "stateOverrides": &overrides,
+        "blockOverrides": { "difficulty": "0x2a" },
+    });
+    let trace: serde_json::Value =
+        provider.raw_request("debug_traceCall".into(), (&call, "latest", &opts)).await?;
+    assert_eq!(trace["output"], difficulty, "{trace}");
+
+    let payload = serde_json::json!({
+        "blockStateCalls": [{
+            "blockOverrides": { "difficulty": "0x2a" },
+            "stateOverrides": &overrides,
+            "calls": [&call],
+        }],
+    });
+    let blocks: serde_json::Value =
+        provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+    assert_eq!(blocks[0]["calls"][0]["returnData"], difficulty, "{blocks}");
 
     Ok(())
 }

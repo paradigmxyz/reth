@@ -21,6 +21,7 @@ pub mod helpers;
 pub mod node;
 pub mod pubsub;
 mod simulate;
+mod trace_call;
 pub mod types;
 
 pub use bundle::{EthBundleApiServer, EthCallBundleApiServer};
@@ -36,6 +37,7 @@ pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
 };
 pub use simulate::SimulateV1Request;
+pub use trace_call::DebugTraceCallOptions;
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 
 use reth_trie_common as _;

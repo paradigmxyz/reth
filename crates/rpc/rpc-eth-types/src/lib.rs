@@ -12,6 +12,7 @@
 use url as _;
 
 pub mod block;
+pub mod block_overrides;
 pub mod builder;
 pub mod cache;
 pub mod capabilities;

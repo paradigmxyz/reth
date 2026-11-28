@@ -12,6 +12,7 @@ use alloy_rpc_types_eth::{
 use reth_chainspec::{EthereumHardfork, ForkCondition};
 use reth_e2e_test_utils::{test_chain_spec_builder, E2ETestSetupExt};
 use reth_node_ethereum::EthereumNode;
+use serde_json::value::RawValue;
 use std::sync::Arc;
 
 #[tokio::test]
@@ -666,6 +667,55 @@ async fn test_simulate_v1_sender_at_max_nonce_errors() -> eyre::Result<()> {
         assert_eq!(err.code, -32603);
         assert_eq!(err.message, "nonce has max value");
         assert!(err.data.is_none());
+    }
+
+    Ok(())
+}
+
+/// `eth_simulateV1` rejects a block override key it does not support, including a case variant of
+/// a supported key, and `difficulty` after the merge, with -32602:
+/// <https://github.com/paradigmxyz/reth/issues/28712>
+#[tokio::test]
+async fn test_simulate_v1_validates_block_overrides() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun).build_single().await?;
+    let provider = node.rpc_provider();
+    // A raw payload, since alloy's `BlockOverrides` drops the keys under test.
+    let payload = |block_overrides: &str| {
+        RawValue::from_string(format!(
+            r#"{{"blockStateCalls":[{{"blockOverrides":{block_overrides},"calls":[{{}}]}}]}}"#
+        ))
+    };
+
+    for (block_overrides, message) in [
+        (r#"{"fooBar":"0x1"}"#, "unsupported block override key: fooBar at line 1 column 47"),
+        (r#"{"Time":"0x1"}"#, "unsupported block override key: Time at line 1 column 45"),
+        (
+            r#"{"time":"0x1","Time":"0x1"}"#,
+            "unsupported block override key: Time at line 1 column 58",
+        ),
+        (r#"{"difficulty":"0x1"}"#, "difficulty block override is not supported after the merge"),
+    ] {
+        let err = provider
+            .raw_request::<_, Vec<SimulatedBlock>>(
+                "eth_simulateV1".into(),
+                (payload(block_overrides)?, "latest"),
+            )
+            .await
+            .map(drop)
+            .expect_err(block_overrides);
+        let err = err.as_error_resp().expect("expected JSON-RPC error response");
+        assert_eq!(err.code, -32602, "{block_overrides}");
+        assert_eq!(err.message, message, "{block_overrides}");
+    }
+
+    // The genesis block is at timestamp 0.
+    for block_overrides in [r#"{"time":"0x2a"}"#, r#"{"timestamp":"0x2a"}"#] {
+        let blocks: Vec<SimulatedBlock> = provider
+            .raw_request("eth_simulateV1".into(), (payload(block_overrides)?, "latest"))
+            .await?;
+        assert_eq!(blocks[0].inner.header.timestamp, 0x2a, "{block_overrides}");
     }
 
     Ok(())
