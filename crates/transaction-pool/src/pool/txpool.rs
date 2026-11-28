@@ -39,7 +39,7 @@ use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 #[cfg(test)]
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::{
     cmp::Ordering,
     collections::{btree_map::Entry, hash_map, BTreeMap},
@@ -680,24 +680,71 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// Updates the transactions for the changed senders.
     pub(crate) fn update_accounts(
         &mut self,
-        changed_senders: FxHashMap<SenderId, SenderInfo>,
+        changed_senders: impl IntoIterator<Item = (SenderId, SenderInfo)>,
     ) -> UpdateOutcome<T::Transaction> {
+        let mut changed_senders: Vec<(SenderId, SenderInfo)> =
+            changed_senders.into_iter().collect();
+        if changed_senders.len() > 1 && changed_senders.windows(2).any(|w| w[0].0 >= w[1].0) {
+            if changed_senders.len() <= 32 {
+                // Small batches: sort in-place without extra allocation; stable sort preserves
+                // input order for duplicate senders so the last entry wins.
+                changed_senders.sort_by_key(|(id, _)| *id);
+                if changed_senders.windows(2).any(|w| w[0].0 == w[1].0) {
+                    let mut write = 0;
+                    for read in 0..changed_senders.len() {
+                        if read + 1 == changed_senders.len() ||
+                            changed_senders[read].0 != changed_senders[read + 1].0
+                        {
+                            changed_senders.swap(write, read);
+                            write += 1;
+                        }
+                    }
+                    changed_senders.truncate(write);
+                }
+            } else {
+                // Large batches: sort compact (SenderId, original_index) pairs instead of moving
+                // 48-byte elements; original_index breaks ties so the last entry wins, matching
+                // HashMap overwrite semantics.
+                let mut order: Vec<(SenderId, usize)> =
+                    changed_senders.iter().enumerate().map(|(idx, (id, _))| (*id, idx)).collect();
+                order.sort_unstable();
+                let mut sorted = Vec::with_capacity(order.len());
+                for i in 0..order.len() {
+                    if i + 1 == order.len() || order[i].0 != order[i + 1].0 {
+                        sorted.push(changed_senders[order[i].1].clone());
+                    }
+                }
+                changed_senders = sorted;
+            }
+        }
+
         // Apply the state changes to the total set of transactions which triggers sub-pool updates.
         let mut updates = self.all_transactions.update(&changed_senders);
 
         // Process the sub-pool updates
         let mut outcome = UpdateOutcome::default();
+        let has_updates = !updates.is_empty();
         if self.config.enforce_tracked_nonce {
             // Track the changed accounts only after the discards: a discard that removes the
             // sender's last transaction also removes its info, and the tracked nonce must survive
             // for `add_transaction` to reject a stale validation result.
-            #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
-            self.process_updates(updates.drain(..), &mut outcome);
+            if has_updates {
+                #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+                self.process_updates(updates.drain(..), &mut outcome);
+            }
             self.all_transactions.sender_info.extend(changed_senders);
         } else {
-            self.all_transactions.sender_info.extend(changed_senders);
-            #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
-            self.process_updates(updates.drain(..), &mut outcome);
+            for (sender, info) in changed_senders {
+                if let Some(entry) = self.all_transactions.sender_info.get_mut(&sender) {
+                    *entry = info;
+                } else if self.all_transactions.tx_counter.contains_key(&sender) {
+                    self.all_transactions.sender_info.insert(sender, info);
+                }
+            }
+            if has_updates {
+                #[expect(clippy::iter_with_drain, reason = "retain the scratch buffer allocation")]
+                self.process_updates(updates.drain(..), &mut outcome);
+            }
         }
         self.all_transactions.update_buffer = updates;
         // update the metrics after the update
@@ -713,7 +760,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         &mut self,
         block_info: BlockInfo,
         mined_transactions: Vec<TxHash>,
-        changed_senders: FxHashMap<SenderId, SenderInfo>,
+        changed_senders: impl IntoIterator<Item = (SenderId, SenderInfo)>,
         _update_kind: PoolUpdateKind,
     ) -> OnNewCanonicalStateOutcome<T::Transaction> {
         // update block info
@@ -1471,10 +1518,10 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// Snapshot of [`Self::pending_fees`] recorded after the most recent all-transactions pass in
     /// [`Self::update`].
     ///
-    /// The all-transactions pass calls [`Self::update_txs`] over every entry in [`Self::txs`].
-    /// This field is initialized to the default fees because an empty pool trivially reflects
-    /// them. It is not necessarily the immediately preceding fee value: partial sender updates
-    /// and fee changes do not modify it.
+    /// The all-transactions pass calls [`Self::update_txs_sorted`] over every entry in
+    /// [`Self::txs`]. This field is initialized to the default fees because an empty pool
+    /// trivially reflects them. It is not necessarily the immediately preceding fee value: partial
+    /// sender updates and fee changes do not modify it.
     last_full_update_fees: PendingFees,
     /// Configured price bump settings for replacements
     price_bumps: PriceBumpConfig,
@@ -1597,25 +1644,34 @@ impl<T: PoolTransaction> AllTransactions<T> {
     /// that got transaction included in the block.
     pub(crate) fn update(
         &mut self,
-        changed_accounts: &FxHashMap<SenderId, SenderInfo>,
+        changed_accounts: &[(SenderId, SenderInfo)],
     ) -> Vec<PoolUpdate> {
         let mut updates = std::mem::take(&mut self.update_buffer);
         let pending_fees = self.pending_fees;
+        let fees_changed = self.last_full_update_fees != pending_fees;
 
-        let update_all = self.last_full_update_fees != self.pending_fees ||
-            self.should_update_all_senders(changed_accounts.len());
+        let update_all = fees_changed || self.should_update_all_senders(changed_accounts.len());
 
         if update_all {
-            Self::update_txs(pending_fees, changed_accounts, &mut updates, self.txs.iter_mut());
+            Self::update_txs_sorted(
+                pending_fees,
+                fees_changed,
+                changed_accounts,
+                &mut updates,
+                self.txs.iter_mut(),
+            );
             self.last_full_update_fees = self.pending_fees;
         } else {
             // Fee eligibility is unchanged, while nonce gaps, ancestors, and cumulative cost are
             // sender-local; only transactions from changed accounts can require updates.
-            for sender in changed_accounts.keys() {
+            for (sender, info) in changed_accounts {
+                if !self.tx_counter.contains_key(sender) {
+                    continue;
+                }
                 let range = TransactionId::new(*sender, 0)..=TransactionId::new(*sender, u64::MAX);
-                Self::update_txs(
+                Self::update_sender_txs(
                     pending_fees,
-                    changed_accounts,
+                    Some(info),
                     &mut updates,
                     self.txs.range_mut(range),
                 );
@@ -1633,63 +1689,34 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 changed_sender_count >= pool_sender_count.div_ceil(FULL_UPDATE_SENDER_RATIO))
     }
 
-    /// Updates the given transactions, which must be ordered by [`TransactionId`] and must start
-    /// at the lowest tracked nonce of the first sender they contain.
-    ///
-    /// Records a [`PoolUpdate`] for every transaction whose sub-pool changed.
-    fn update_txs<'a, I>(
+    /// Updates a single sender's transactions (already scoped to one sender, ordered by nonce).
+    #[inline]
+    fn update_sender_txs<'a, I>(
         pending_fees: PendingFees,
-        changed_accounts: &FxHashMap<SenderId, SenderInfo>,
+        sender_info: Option<&SenderInfo>,
         updates: &mut Vec<PoolUpdate>,
-        txs: I,
+        mut txs: I,
     ) where
         T: 'a,
         I: Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)>,
     {
-        let mut iter = txs.peekable();
-
-        // Loop over all individual senders and update all affected transactions.
-        // One sender may have up to `max_account_slots` transactions here, which means, worst case
-        // `max_accounts_slots` need to be updated, for example if the first transaction is blocked
-        // due to too low base fee.
-        // However, we don't have to necessarily check every transaction of a sender. If no updates
-        // are possible (nonce gap) then we can skip to the next sender.
-
-        // The `unique_sender` loop will process the first transaction of all senders, update its
-        // state and internally update all consecutive transactions
-        'transactions: while let Some((id, tx)) = iter.next() {
-            macro_rules! next_sender {
-                ($iter:ident) => {
-                    'this: while let Some((peek, _)) = iter.peek() {
-                        if peek.sender != id.sender {
-                            break 'this
-                        }
-                        iter.next();
-                    }
-                };
-            }
-
-            // track the balance if the sender was changed in the block
-            // check if this is a changed account
-            let changed_balance = if let Some(info) = changed_accounts.get(&id.sender) {
-                // discard all transactions with a nonce lower than the current state nonce
+        while let Some((id, tx)) = txs.next() {
+            let changed_balance = if let Some(info) = sender_info {
                 if id.nonce < info.state_nonce {
                     updates.push(PoolUpdate {
                         id: *tx.transaction.id(),
                         current: tx.subpool,
                         destination: Destination::Discard,
                     });
-                    continue 'transactions
+                    continue;
                 }
 
                 let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
-                // If there's no ancestor then this is the next transaction.
                 if ancestor.is_none() {
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                     tx.cumulative_cost = U256::ZERO;
                     if tx.transaction.cost() > &info.balance {
-                        // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
                         tx.state.insert(TxState::ENOUGH_BALANCE);
@@ -1701,76 +1728,193 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 None
             };
 
-            // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {
-                next_sender!(iter);
-                continue 'transactions
+                return;
             }
 
-            // Since this is the first transaction of the sender, it has no parked ancestors
             tx.state.insert(TxState::NO_PARKED_ANCESTORS);
-
-            // Update the first transaction of this sender.
             Self::update_tx_fees(pending_fees, tx);
-            // Track if the transaction's sub-pool changed.
             Self::record_subpool_update(updates, tx);
 
-            // Track blocking transactions.
+            let Some((_, next_tx)) = txs.next() else { return };
+
             let mut has_parked_ancestor = !tx.state.is_pending();
-
             let mut cumulative_cost = tx.next_cumulative_cost();
+            let mut next_nonce_in_line = id.nonce.saturating_add(1);
 
-            // the next expected nonce after this transaction: nonce + 1
-            let mut next_nonce_in_line = tx.transaction.nonce().saturating_add(1);
-
-            // Update all consecutive transaction of this sender
-            while let Some((peek, tx)) = iter.peek_mut() {
-                if peek.sender != id.sender {
-                    // Found the next sender we need to check
-                    continue 'transactions
-                }
-
+            let mut cur = Some(next_tx);
+            while let Some(tx) = cur {
                 if tx.transaction.nonce() == next_nonce_in_line {
-                    // no longer nonce gapped
                     tx.state.insert(TxState::NO_NONCE_GAPS);
                 } else {
-                    // can short circuit if there's still a nonce gap
-                    next_sender!(iter);
-                    continue 'transactions
+                    return;
                 }
 
-                // update for next iteration of this sender's loop
                 next_nonce_in_line = next_nonce_in_line.saturating_add(1);
-
-                // update cumulative cost
                 tx.cumulative_cost = cumulative_cost;
-                // Update for next transaction
                 cumulative_cost = tx.next_cumulative_cost();
 
-                // If the account changed in the block, check the balance.
                 if let Some(changed_balance) = changed_balance {
                     if &cumulative_cost > changed_balance {
-                        // sender lacks sufficient funds to pay for this transaction
                         tx.state.remove(TxState::ENOUGH_BALANCE);
                     } else {
                         tx.state.insert(TxState::ENOUGH_BALANCE);
                     }
                 }
 
-                // Update ancestor condition.
                 if has_parked_ancestor {
                     tx.state.remove(TxState::NO_PARKED_ANCESTORS);
                 } else {
                     tx.state.insert(TxState::NO_PARKED_ANCESTORS);
                 }
 
-                // Update and record sub-pool changes.
                 Self::update_tx_fees(pending_fees, tx);
                 Self::record_subpool_update(updates, tx);
                 has_parked_ancestor = !tx.state.is_pending();
 
-                // Advance iterator
-                iter.next();
+                cur = txs.next().map(|(_, tx)| tx);
+            }
+            return;
+        }
+    }
+
+    /// Updates transactions ordered by `TransactionId` using a two-pointer merge against
+    /// `changed_accounts` (which must be sorted and deduplicated by `SenderId`).
+    fn update_txs_sorted<'a, I>(
+        pending_fees: PendingFees,
+        fees_changed: bool,
+        changed_accounts: &[(SenderId, SenderInfo)],
+        updates: &mut Vec<PoolUpdate>,
+        mut txs: I,
+    ) where
+        T: 'a,
+        I: Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)>,
+    {
+        let mut changed_idx = 0usize;
+        let changed_len = changed_accounts.len();
+        let mut next_item = txs.next();
+
+        'transactions: while let Some((id, tx)) = next_item {
+            let sender = id.sender;
+
+            while changed_idx < changed_len && changed_accounts[changed_idx].0 < sender {
+                changed_idx += 1;
+            }
+
+            let info = if changed_idx < changed_len && changed_accounts[changed_idx].0 == sender {
+                Some(&changed_accounts[changed_idx].1)
+            } else {
+                if !fees_changed {
+                    if changed_idx >= changed_len {
+                        break 'transactions;
+                    }
+                    next_item = txs.next();
+                    while let Some((peek_id, _)) = next_item {
+                        if peek_id.sender != sender {
+                            break;
+                        }
+                        next_item = txs.next();
+                    }
+                    continue 'transactions;
+                }
+                None
+            };
+
+            let changed_balance = if let Some(info) = info {
+                if id.nonce < info.state_nonce {
+                    updates.push(PoolUpdate {
+                        id: *tx.transaction.id(),
+                        current: tx.subpool,
+                        destination: Destination::Discard,
+                    });
+                    next_item = txs.next();
+                    continue 'transactions;
+                }
+
+                let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, sender);
+                if ancestor.is_none() {
+                    tx.state.insert(TxState::NO_NONCE_GAPS);
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                    tx.cumulative_cost = U256::ZERO;
+                    if tx.transaction.cost() > &info.balance {
+                        tx.state.remove(TxState::ENOUGH_BALANCE);
+                    } else {
+                        tx.state.insert(TxState::ENOUGH_BALANCE);
+                    }
+                }
+
+                Some(&info.balance)
+            } else {
+                None
+            };
+
+            if tx.state.has_nonce_gap() {
+                next_item = txs.next();
+                while let Some((peek_id, _)) = next_item {
+                    if peek_id.sender != sender {
+                        break;
+                    }
+                    next_item = txs.next();
+                }
+                continue 'transactions;
+            }
+
+            tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+            Self::update_tx_fees(pending_fees, tx);
+            Self::record_subpool_update(updates, tx);
+
+            next_item = txs.next();
+            let Some((peek_id, _)) = next_item else { break 'transactions };
+            if peek_id.sender != sender {
+                continue 'transactions;
+            }
+
+            let mut has_parked_ancestor = !tx.state.is_pending();
+            let mut cumulative_cost = tx.next_cumulative_cost();
+            let mut next_nonce_in_line = id.nonce.saturating_add(1);
+
+            while let Some((cur_id, cur_tx)) = next_item {
+                if cur_id.sender != sender {
+                    next_item = Some((cur_id, cur_tx));
+                    continue 'transactions;
+                }
+
+                if cur_tx.transaction.nonce() == next_nonce_in_line {
+                    cur_tx.state.insert(TxState::NO_NONCE_GAPS);
+                } else {
+                    next_item = txs.next();
+                    while let Some((peek_id, _)) = next_item {
+                        if peek_id.sender != sender {
+                            break;
+                        }
+                        next_item = txs.next();
+                    }
+                    continue 'transactions;
+                }
+
+                next_nonce_in_line = next_nonce_in_line.saturating_add(1);
+                cur_tx.cumulative_cost = cumulative_cost;
+                cumulative_cost = cur_tx.next_cumulative_cost();
+
+                if let Some(changed_balance) = changed_balance {
+                    if &cumulative_cost > changed_balance {
+                        cur_tx.state.remove(TxState::ENOUGH_BALANCE);
+                    } else {
+                        cur_tx.state.insert(TxState::ENOUGH_BALANCE);
+                    }
+                }
+
+                if has_parked_ancestor {
+                    cur_tx.state.remove(TxState::NO_PARKED_ANCESTORS);
+                } else {
+                    cur_tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                }
+
+                Self::update_tx_fees(pending_fees, cur_tx);
+                Self::record_subpool_update(updates, cur_tx);
+                has_parked_ancestor = !cur_tx.state.is_pending();
+
+                next_item = txs.next();
             }
         }
     }
@@ -3687,7 +3831,7 @@ mod tests {
             }
 
             // The fee differs from the initial marker, so this takes the all-transactions path.
-            pool.update(&Default::default());
+            pool.update(&[]);
             let sender_ids = senders.map(|sender| f.ids.sender_id(&sender).unwrap());
             (pool, sender_ids)
         };
@@ -3706,11 +3850,13 @@ mod tests {
             SenderInfo { state_nonce: starting_nonces[1], balance: U256::ZERO },
         );
 
-        let mut changed_sender_updates = changed_senders_only.update(&changed);
+        let mut changed_vec: Vec<_> = changed.into_iter().collect();
+        changed_vec.sort_by_key(|(id, _)| *id);
+        let mut changed_sender_updates = changed_senders_only.update(&changed_vec);
         // Force the reference pool through the all-transactions path with the same pending fees.
         full_update.last_full_update_fees.base_fee =
             full_update.last_full_update_fees.base_fee.saturating_add(1);
-        let mut full_updates = full_update.update(&changed);
+        let mut full_updates = full_update.update(&changed_vec);
 
         let update_key = |update: &PoolUpdate| {
             let destination = match &update.destination {
@@ -3745,7 +3891,7 @@ mod tests {
         let id = *validated.id();
         pool.add_transaction(validated, U256::from(1_000_000), 0, None).unwrap();
 
-        pool.all_transactions.update(&Default::default());
+        pool.all_transactions.update(&[]);
         assert!(pool
             .all_transactions
             .txs
@@ -3757,7 +3903,7 @@ mod tests {
         // raising the base fee past the tx must still reach it even though no account changed,
         // otherwise the fast path would leave a stale fee bit behind
         pool.all_transactions.pending_fees.base_fee = (tx.max_fee_per_gas() + 1) as u64;
-        pool.all_transactions.update(&Default::default());
+        pool.all_transactions.update(&[]);
 
         assert!(
             !pool
@@ -3776,7 +3922,7 @@ mod tests {
         let mut pool = AllTransactions::<MockTransaction>::default();
         pool.pending_fees.blob_fee += 1;
 
-        pool.update(&Default::default());
+        pool.update(&[]);
 
         assert_eq!(pool.last_full_update_fees, pool.pending_fees);
     }
@@ -3799,12 +3945,12 @@ mod tests {
         let descendant = f.validated(descendant);
         let descendant_id = *descendant.id();
         pool.insert_tx(descendant, balance, 0).unwrap();
-        pool.update(&Default::default());
+        pool.update(&[]);
 
         // The fee increase cannot affect a nonce-gapped transaction yet, but closing its gap must
         // evaluate it against the current fee.
         pool.pending_fees.base_fee = 200;
-        pool.update(&Default::default());
+        pool.update(&[]);
         assert!(pool.get(&descendant_id).unwrap().state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
 
         let predecessor = MockTransaction::eip1559()
@@ -3846,7 +3992,7 @@ mod tests {
         }
 
         pool.pending_fees.base_fee = 100;
-        pool.update(&Default::default());
+        pool.update(&[]);
 
         for id in ids {
             assert_eq!(pool.get(&id).unwrap().subpool, SubPool::Pending);
@@ -3876,7 +4022,7 @@ mod tests {
         }
 
         pool.pending_fees.base_fee = 100;
-        pool.update(&Default::default());
+        pool.update(&[]);
 
         assert_eq!(pool.get(&ids[0]).unwrap().subpool, SubPool::Pending);
         assert_eq!(pool.get(&ids[1]).unwrap().subpool, SubPool::BaseFee);
@@ -4375,7 +4521,7 @@ mod tests {
 
         assert_eq!(pool.pending_pool.len(), 2);
 
-        let mut changed_senders = HashMap::default();
+        let mut changed_senders = FxHashMap::default();
         changed_senders.insert(
             id.sender,
             SenderInfo { state_nonce: next.nonce(), balance: U256::from(1_000) },
@@ -4429,7 +4575,7 @@ mod tests {
         let sender = first.sender_id();
         pool.add_transaction(first, U256::from(1_000), 0, None).unwrap();
 
-        let mut changed_senders = HashMap::default();
+        let mut changed_senders = FxHashMap::default();
         changed_senders.insert(sender, SenderInfo { state_nonce: 1, balance: U256::from(1_000) });
         let outcome = pool.update_accounts(changed_senders);
         assert_eq!(outcome.discarded.len(), 1);
@@ -4768,7 +4914,7 @@ mod tests {
         assert_eq!(2, pool.queued_transactions().len());
 
         // Simulate new block arrival - and chain balance increase.
-        let mut updated_accounts = HashMap::default();
+        let mut updated_accounts = FxHashMap::default();
         on_chain_balance = U256::from(300);
         updated_accounts.insert(
             v0.sender_id(),
@@ -4822,7 +4968,7 @@ mod tests {
         assert!(pool.pending_transactions().is_empty());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::default();
+        let mut updated_accounts = FxHashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),
@@ -5094,7 +5240,7 @@ mod tests {
         assert_eq!(1, pool.pending_transactions().len());
 
         // Simulate new block arrival - and chain nonce increasing.
-        let mut updated_accounts = HashMap::default();
+        let mut updated_accounts = FxHashMap::default();
         on_chain_nonce += 1;
         updated_accounts.insert(
             v0.sender_id(),
@@ -5635,5 +5781,162 @@ mod tests {
         assert_eq!(t1.id().nonce, 1, "expected nonce 1, got {}", t1.id().nonce);
         assert_eq!(t2.id().nonce, 2, "expected nonce 2, got {}", t2.id().nonce);
         assert_eq!(t3.id().nonce, 3, "expected nonce 3, got {}", t3.id().nonce);
+    }
+
+    #[test]
+    fn update_accounts_unsorted_duplicate_sender_keeps_last() {
+        for extra_senders in [0usize, 40usize] {
+            let mut f = MockTransactionFactory::default();
+            let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+            let tx = f.validated(MockTransaction::eip1559().with_nonce(1).rng_hash());
+            let sender = tx.sender_id();
+            pool.add_transaction(tx, U256::from(10_000), 0, None).unwrap();
+            assert_eq!(pool.queued_pool.len(), 1);
+
+            let mut updates = Vec::new();
+            // Earlier entry would discard nonce 1; later entry keeps nonce 1 and promotes it.
+            updates.push((sender, SenderInfo { state_nonce: 5, balance: U256::ZERO }));
+            for i in 0..extra_senders {
+                updates.push((
+                    SenderId::from(10_000 + (extra_senders - i) as u64),
+                    SenderInfo { state_nonce: 1, balance: U256::from(1) },
+                ));
+            }
+            updates.push((sender, SenderInfo { state_nonce: 1, balance: U256::from(10_000) }));
+
+            let outcome = pool.update_accounts(updates);
+            assert!(outcome.discarded.is_empty());
+            assert_eq!(outcome.promoted.len(), 1);
+            assert_eq!(pool.pending_pool.len(), 1);
+            assert_eq!(pool.all_transactions.sender_info[&sender].state_nonce, 1);
+            assert_eq!(pool.all_transactions.sender_info[&sender].balance, U256::from(10_000));
+            // Untracked senders should not accumulate in sender_info when enforce_tracked_nonce is
+            // false.
+            assert_eq!(pool.all_transactions.sender_info.len(), 1);
+        }
+    }
+
+    #[test]
+    fn update_accounts_gap_close_rechecks_fee_eligibility_with_unchanged_fees() {
+        // Test both the per-sender lookup path (1 changed sender out of many) and the full
+        // sorted-merge path (all senders changed) when pending fees have not changed since the
+        // previous full update.
+        for use_full_merge in [false, true] {
+            // Case 1: base fee rises while txs are nonce-gapped, then update_accounts closes the
+            // gap at unchanged fees -> nonce 1 must move to BaseFee (not Pending), nonce 2 stays
+            // Queued parked behind nonce 1, and both have ENOUGH_FEE_CAP_BLOCK cleared.
+            let mut f = MockTransactionFactory::default();
+            let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+            pool.all_transactions.pending_fees.base_fee = 100;
+
+            let sender_addr = Address::with_last_byte(0x11);
+            let tx1 = f.validated(
+                MockTransaction::eip1559()
+                    .with_sender(sender_addr)
+                    .with_nonce(1)
+                    .set_gas_price(150)
+                    .inc_limit(),
+            );
+            let tx2 = f.validated(
+                MockTransaction::eip1559()
+                    .with_sender(sender_addr)
+                    .with_nonce(2)
+                    .set_gas_price(150)
+                    .inc_limit(),
+            );
+            let id1 = *tx1.id();
+            let id2 = *tx2.id();
+            let sender = tx1.sender_id();
+
+            pool.add_transaction(tx1, U256::MAX, 0, None).unwrap();
+            pool.add_transaction(tx2, U256::MAX, 0, None).unwrap();
+
+            // Add background senders so that a 1-sender update uses update_sender_txs when
+            // use_full_merge is false.
+            let mut extra_senders = Vec::new();
+            for i in 0..20u8 {
+                let bg = f.validated(
+                    MockTransaction::eip1559()
+                        .with_sender(Address::with_last_byte(0x40 + i))
+                        .with_nonce(0)
+                        .set_gas_price(500)
+                        .inc_limit(),
+                );
+                let bg_sender = bg.sender_id();
+                pool.add_transaction(bg, U256::MAX, 0, None).unwrap();
+                extra_senders.push(bg_sender);
+            }
+
+            // Sync fees at base_fee = 200 while sender's txs are still nonce-gapped.
+            pool.all_transactions.pending_fees.base_fee = 200;
+            pool.update_accounts(std::iter::empty());
+            assert_eq!(pool.all_transactions.last_full_update_fees.base_fee, 200);
+            assert!(pool
+                .all_transactions
+                .get(&id1)
+                .unwrap()
+                .state
+                .contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            // Close the nonce gap with unchanged fees.
+            let mut changed = vec![(sender, SenderInfo { state_nonce: 1, balance: U256::MAX })];
+            if use_full_merge {
+                for bg in &extra_senders {
+                    changed.push((*bg, SenderInfo { state_nonce: 0, balance: U256::MAX }));
+                }
+            }
+            let outcome = pool.update_accounts(changed);
+            assert!(outcome.promoted.is_empty(), "underpriced tx must not promote to Pending");
+
+            let meta1 = pool.all_transactions.get(&id1).unwrap();
+            let meta2 = pool.all_transactions.get(&id2).unwrap();
+            assert_eq!(meta1.subpool, SubPool::BaseFee);
+            assert!(!meta1.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+            assert_eq!(meta2.subpool, SubPool::Queued);
+            assert!(!meta2.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            // Case 2: base fee drops while a tx is nonce-gapped, then update_accounts closes the
+            // gap at unchanged fees -> tx must promote to Pending with ENOUGH_FEE_CAP_BLOCK set.
+            let sender2_addr = Address::with_last_byte(0x22);
+            let tx3 = f.validated(
+                MockTransaction::eip1559()
+                    .with_sender(sender2_addr)
+                    .with_nonce(1)
+                    .set_gas_price(150)
+                    .inc_limit(),
+            );
+            let id3 = *tx3.id();
+            let sender2 = tx3.sender_id();
+            pool.add_transaction(tx3, U256::MAX, 0, None).unwrap();
+            assert!(!pool
+                .all_transactions
+                .get(&id3)
+                .unwrap()
+                .state
+                .contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            pool.all_transactions.pending_fees.base_fee = 100;
+            pool.update_accounts(std::iter::empty());
+            assert_eq!(pool.all_transactions.last_full_update_fees.base_fee, 100);
+            assert!(!pool
+                .all_transactions
+                .get(&id3)
+                .unwrap()
+                .state
+                .contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+
+            let mut changed2 = vec![(sender2, SenderInfo { state_nonce: 1, balance: U256::MAX })];
+            if use_full_merge {
+                for bg in &extra_senders {
+                    changed2.push((*bg, SenderInfo { state_nonce: 0, balance: U256::MAX }));
+                }
+            }
+            let outcome2 = pool.update_accounts(changed2);
+            assert_eq!(outcome2.promoted.len(), 1);
+            let meta3 = pool.all_transactions.get(&id3).unwrap();
+            assert_eq!(meta3.subpool, SubPool::Pending);
+            assert!(meta3.state.contains(TxState::ENOUGH_FEE_CAP_BLOCK));
+        }
     }
 }
