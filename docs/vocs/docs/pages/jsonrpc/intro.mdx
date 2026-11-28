@@ -99,6 +99,12 @@ Alternatively, if you want to allow any domain, you can pass `*`:
 reth node --http --http.corsdomain "*"
 ```
 
+The HTTP server only accepts requests whose `Host` is `localhost` or an IP address. If clients or a reverse proxy reach the server under another name, such as a Docker service name or `host.docker.internal`, list it with `--http.vhosts`, or pass `*` to accept any host. The list replaces the default, so include `localhost` if clients still use it:
+
+```bash
+reth node --http --http.vhosts localhost,rpc.mycoolapp.rs
+```
+
 ### WebSockets
 
 WebSockets is a bidirectional transport protocol. Most modern browsers support WebSockets.

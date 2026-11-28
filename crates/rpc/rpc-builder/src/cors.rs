@@ -1,5 +1,13 @@
-use http::{header::ORIGIN, HeaderValue, Method, Request, Response, StatusCode};
+use http::{
+    header::{HOST, ORIGIN},
+    uri::Authority,
+    HeaderValue, Method, Request, Response, StatusCode,
+};
 use jsonrpsee::server::{ws, HttpBody};
+use std::{
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     validate_request::ValidateRequest,
@@ -82,6 +90,92 @@ impl<B> ValidateRequest<B> for WsOriginValidator {
     }
 }
 
+/// `Host` policy for ordinary HTTP requests.
+///
+/// Requests whose `Host` is not allowed are rejected before dispatch. IP literals are always
+/// accepted.
+#[derive(Clone, Debug)]
+pub(crate) enum HostValidator {
+    /// Accepts `localhost`.
+    Local,
+    /// Accepts only the listed names, case-insensitively. Shared because the server clones the
+    /// validator for every connection and request.
+    List(Arc<[String]>),
+}
+
+impl HostValidator {
+    /// Returns `None` when `hosts` contains `*`, which accepts any host.
+    pub(crate) fn new(hosts: Option<&str>) -> Option<Self> {
+        let Some(hosts) = hosts else { return Some(Self::Local) };
+        let hosts = hosts.split(',').map(str::trim);
+        if hosts.clone().any(|host| host == "*") {
+            return None
+        }
+        // Ports are ignored on both sides.
+        Some(Self::List(
+            hosts
+                .map(|host| {
+                    host.rsplit_once(':')
+                        .filter(|(_, port)| port.parse::<u16>().is_ok())
+                        .map_or(host, |(host, _)| host)
+                        .to_string()
+                })
+                .collect(),
+        ))
+    }
+
+    fn allows(&self, authority: &Authority) -> bool {
+        let host = authority.host();
+        // `host()` drops userinfo and anything after a bracketed literal, so require the value to
+        // be exactly the host and an optional port.
+        if !authority.as_str().strip_prefix(host).is_some_and(|rest| {
+            rest.is_empty() ||
+                rest.strip_prefix(':').is_some_and(|port| port.parse::<u16>().is_ok())
+        }) {
+            return false
+        }
+        // IPv6 addresses must be bracketed and IPv4 addresses must not.
+        let is_ip = match host.strip_prefix('[').and_then(|host| host.strip_suffix(']')) {
+            Some(ip) => ip.parse::<Ipv6Addr>().is_ok(),
+            None => host.parse::<Ipv4Addr>().is_ok(),
+        };
+        if is_ip {
+            return true
+        }
+        match self {
+            Self::Local => host.eq_ignore_ascii_case("localhost"),
+            Self::List(allowed) => allowed.iter().any(|allowed| allowed.eq_ignore_ascii_case(host)),
+        }
+    }
+}
+
+impl<B> ValidateRequest<B> for HostValidator {
+    type ResponseBody = HttpBody;
+
+    fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<HttpBody>> {
+        // `WsOriginValidator` owns the policy for upgrades, which are always `GET`.
+        if request.method() == Method::GET && ws::is_upgrade_request(request) {
+            return Ok(())
+        }
+        let mut hosts = request.headers().get_all(HOST).iter();
+        let host = hosts.next();
+        // HTTP/2 and absolute-form requests also carry the host in the URI authority.
+        let allowed = hosts.next().is_none() &&
+            host.is_none_or(|host| {
+                host.is_empty() ||
+                    Authority::try_from(host.as_bytes())
+                        .is_ok_and(|authority| self.allows(&authority))
+            }) &&
+            request.uri().authority().is_none_or(|authority| self.allows(authority));
+        if allowed {
+            return Ok(())
+        }
+        let mut response = Response::new(HttpBody::from("invalid host specified"));
+        *response.status_mut() = StatusCode::FORBIDDEN;
+        Err(response)
+    }
+}
+
 fn is_local_origin(origin: &HeaderValue) -> bool {
     let Ok(origin) = origin.to_str() else { return false };
     let Some(("http" | "https", authority)) = origin.split_once("://") else { return false };
@@ -117,5 +211,75 @@ mod tests {
         // Wildcard with leading space should still be rejected
         let result = create_cors_layer("http://example.com, *");
         assert!(matches!(result, Err(CorsDomainError::WildCardNotAllowed { .. })));
+    }
+
+    #[test]
+    fn test_host_validator() {
+        let mut local = HostValidator::new(None).unwrap();
+        let list =
+            HostValidator::new(Some("rpc.example.com:8545, other.example, x@userinfo.example"))
+                .unwrap();
+        for (hosts, local_allowed, list_allowed) in [
+            (vec![], true, true),
+            (vec![""], true, true),
+            (vec!["localhost:8545"], true, false),
+            (vec!["LOCALHOST"], true, false),
+            (vec!["reth:8545"], false, false),
+            (vec!["127.0.0.1:8545"], true, true),
+            (vec!["[::1]:8545"], true, true),
+            (vec!["10.0.0.1"], true, true),
+            (vec!["RPC.example.com:443"], false, true),
+            (vec!["unknown.example:8545"], false, false),
+            (vec!["userinfo.example"], false, false),
+            (vec!["localhost."], false, false),
+            (vec!["127.0.0.1.nip.io"], false, false),
+            (vec!["0x7f.1"], false, false),
+            (vec!["bad host"], false, false),
+            (vec!["[::1].unknown.example"], false, false),
+            (vec!["unknown.example@127.0.0.1"], false, false),
+            (vec!["[127.0.0.1]"], false, false),
+            (vec!["127.0.0.1:"], false, false),
+            (vec!["localhost", "localhost"], false, false),
+        ] {
+            for (validator, allowed) in [(&local, local_allowed), (&list, list_allowed)] {
+                let mut request = Request::new(());
+                for host in &hosts {
+                    request.headers_mut().append(HOST, HeaderValue::from_static(host));
+                }
+                let status = validator.clone().validate(&mut request).err().map(|r| r.status());
+                assert_eq!(
+                    status,
+                    (!allowed).then_some(StatusCode::FORBIDDEN),
+                    "{validator:?}, hosts={hosts:?}"
+                );
+            }
+        }
+
+        for (uri, host, allowed) in [
+            ("http://localhost:8545/", None, true),
+            ("http://unknown.example/", None, false),
+            ("http://unknown.example/", Some("localhost"), false),
+            ("http://unknown.example/", Some(""), false),
+        ] {
+            let mut request = Request::builder().uri(uri).body(()).unwrap();
+            if let Some(host) = host {
+                request.headers_mut().insert(HOST, HeaderValue::from_static(host));
+            }
+            assert_eq!(local.validate(&mut request).is_ok(), allowed, "{uri}, host={host:?}");
+        }
+
+        // Upgrades are left to `WsOriginValidator`.
+        for (method, allowed) in [(Method::GET, true), (Method::OPTIONS, false)] {
+            let mut request = Request::builder()
+                .method(&method)
+                .header(HOST, "unknown.example")
+                .header("connection", "Upgrade")
+                .header("upgrade", "websocket")
+                .body(())
+                .unwrap();
+            assert_eq!(local.validate(&mut request).is_ok(), allowed, "{method}");
+        }
+
+        assert!(HostValidator::new(Some("rpc.example.com, *")).is_none());
     }
 }

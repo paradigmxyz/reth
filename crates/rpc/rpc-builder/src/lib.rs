@@ -1093,6 +1093,10 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for http
     http_cors_domains: Option<String>,
+    /// Allowed `Host` names for http.
+    ///
+    /// If `None`, `localhost` and IP addresses are allowed.
+    http_vhosts: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
     /// Control whether http responses should be compressed
@@ -1133,6 +1137,7 @@ impl Default for RpcServerConfig<Identity> {
         Self {
             http_server_config: None,
             http_cors_domains: None,
+            http_vhosts: None,
             http_addr: None,
             http_disable_compression: false,
             http_compression_algorithms: None,
@@ -1201,6 +1206,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
+            http_vhosts: self.http_vhosts,
             http_addr: self.http_addr,
             http_disable_compression: self.http_disable_compression,
             http_compression_algorithms: self.http_compression_algorithms,
@@ -1237,6 +1243,16 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure the cors domains for HTTP
     pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
         self.http_cors_domains = cors_domain;
+        self
+    }
+
+    /// Configure the allowed `Host` names for HTTP requests, comma-separated. `*` allows any
+    /// host.
+    ///
+    /// IP addresses are always allowed. If `None`, `localhost` is allowed too. This does not apply
+    /// to `WebSocket` upgrades.
+    pub fn with_http_vhosts(mut self, vhosts: Option<String>) -> Self {
+        self.http_vhosts = vhosts;
         self
     }
 
@@ -1367,6 +1383,13 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         cors.as_deref().map(cors::create_cors_layer).transpose()
     }
 
+    /// Creates the `Host` validation layer unless `vhosts` allows any host.
+    fn maybe_host_layer(
+        vhosts: Option<&str>,
+    ) -> Option<ValidateRequestHeaderLayer<cors::HostValidator>> {
+        cors::HostValidator::new(vhosts).map(ValidateRequestHeaderLayer::custom)
+    }
+
     /// Creates the [`AuthLayer`] if any
     fn maybe_jwt_layer(jwt_secret: Option<JwtSecret>) -> Option<AuthLayer<JwtAuthValidator>> {
         jwt_secret.map(|secret| AuthLayer::new(JwtAuthValidator::new(secret)))
@@ -1478,6 +1501,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 let server = ServerBuilder::new()
                     .set_http_middleware(
                         tower::ServiceBuilder::new()
+                            .option_layer(Self::maybe_host_layer(self.http_vhosts.as_deref()))
                             .option_layer(Self::maybe_cors_layer(cors.clone())?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                             .option_layer(Self::maybe_decompression_layer(
@@ -1575,6 +1599,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_config(config.http_only().build())
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
+                        .option_layer(Self::maybe_host_layer(self.http_vhosts.as_deref()))
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                         .option_layer(Self::maybe_decompression_layer(

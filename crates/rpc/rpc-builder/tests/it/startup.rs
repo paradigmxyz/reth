@@ -296,3 +296,55 @@ async fn test_ws_upgrade_origin_allowlist() {
         }
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_http_host_allowlist() {
+    for same_port in [false, true] {
+        for vhosts in [None, Some("rpc.example.com"), Some("*")] {
+            let builder = test_rpc_builder();
+            let eth_api = builder.bootstrap_eth_api();
+            let modules = builder.build(
+                TransportRpcModuleConfig::set_http(vec![RethRpcModule::Web3])
+                    .with_ws(vec![RethRpcModule::Web3]),
+                eth_api,
+                EventSender::new(1),
+            );
+            let addr = test_address();
+            let mut config = RpcServerConfig::http(Default::default())
+                .with_http_address(addr)
+                .with_http_vhosts(vhosts.map(str::to_string));
+            if same_port {
+                config = config.with_ws(Default::default()).with_ws_address(addr);
+            }
+            let handle = config.start(&modules).await.unwrap();
+            let url = format!("http://{}", handle.http_local_addr().unwrap());
+            let client = reqwest::Client::new();
+            for (host, allowed_by_default, allowed_by_list) in [
+                ("localhost:8545", true, false),
+                ("127.0.0.1:8545", true, true),
+                ("rpc.example.com", false, true),
+                ("unknown.example:8545", false, false),
+            ] {
+                let response = client
+                    .post(&url)
+                    .header("host", host)
+                    .header("content-type", "application/json")
+                    .body(r#"{"jsonrpc":"2.0","id":1,"method":"web3_clientVersion","params":[]}"#)
+                    .send()
+                    .await
+                    .unwrap();
+                let allowed = match vhosts {
+                    None => allowed_by_default,
+                    Some("*") => true,
+                    Some(_) => allowed_by_list,
+                };
+                assert_eq!(
+                    response.status(),
+                    if allowed { http::StatusCode::OK } else { http::StatusCode::FORBIDDEN },
+                    "same_port={same_port}, vhosts={vhosts:?}, host={host}"
+                );
+            }
+            handle.stop().unwrap();
+        }
+    }
+}
