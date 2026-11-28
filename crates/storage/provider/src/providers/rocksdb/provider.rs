@@ -8,8 +8,8 @@ use alloy_primitives::{
 use itertools::Itertools;
 use metrics::Label;
 use parking_lot::Mutex;
-use rayon::prelude::*;
 use reth_chain_state::ExecutedBlock;
+use reth_concurrency::sync::rayon::prelude::*;
 use reth_db_api::{
     database_metrics::DatabaseMetrics,
     models::{
@@ -863,6 +863,12 @@ impl RocksDBProvider {
     /// when initializing a database.
     pub fn exists(path: impl AsRef<Path>) -> bool {
         path.as_ref().join("CURRENT").exists()
+    }
+
+    /// Returns `true` if this is the only handle to the database, so that dropping it closes the
+    /// database on the current thread.
+    pub fn is_last_handle(&self) -> bool {
+        Arc::strong_count(&self.0) == 1
     }
 
     /// Returns `true` if this provider is in read-only mode.

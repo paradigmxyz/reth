@@ -37,6 +37,11 @@ operating system:
 
 These are needed to build bindings for Reth's database.
 
+The optional `bn254-mcl` feature also needs CMake (`cmake` from the same package managers), plus
+`clang` on Linux hosts other than x86_64. On Windows, it also needs a Visual Studio installation with
+the MSVC and `clang-cl` components, because MCL's CMake build takes `ml64.exe` and `clang-cl.exe`
+from there. Windows builds with MCL are untested.
+
 The Minimum Supported Rust Version (MSRV) of this project is 1.88.0. If you already have a version of Rust installed,
 you can check your version by running `rustc --version`. To update your version of Rust, run `rustup update`.
 
@@ -115,6 +120,7 @@ The following performance features are enabled by default: `jemalloc` (except on
 Some additional optional features are available:
 
 -   `min-LEVEL-logs`, where `LEVEL` is one of `error`, `warn`, `info`, `debug`, `trace`: disables compilation of logs of lower level than the given one; `min-trace-logs` is enabled by default
+-   `bn254-mcl`: runs the BN254 precompiles (ecAdd, ecMul, ecPairing) on the [MCL](https://github.com/herumi/mcl) library instead of arkworks; see [Dependencies](#dependencies) for its build requirements. On x86-64 CPUs with BMI2 and ADX, MCL frees its JIT-compiled code in a static destructor when the process exits, so a BN254 call still running on another thread at that point can crash the process
 
 You can build with maximum performance optimizations using:
 

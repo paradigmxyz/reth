@@ -225,6 +225,10 @@ jobs:
           - sim: ethereum/eels/consume-wirex
             limit: .*tests/tangerine_whistle.*
 
+          # consume-reorg
+          - sim: ethereum/eels/consume-reorg
+            limit: .*tests/reorg.*
+
           # execute-blobs
           - sim: ethereum/eels/execute-blobs
             limit: .*tests/amsterdam.*

@@ -467,6 +467,9 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
 
     /// Creates [`AccessListResult`] for the [`RpcTxReq`] at the given
     /// [`BlockId`].
+    ///
+    /// Waits for a blocking IO permit, which the blocking task holds until both executions are
+    /// done, even if the returned future is dropped.
     fn create_access_list_with(
         &self,
         evm_env: EvmEnvFor<Self::Evm>,
@@ -477,54 +480,69 @@ pub trait EthCall: EstimateCall + LoadBlock + FullEthApiTypes {
     where
         Self: Trace,
     {
-        self.spawn_with_state_at_block(at, |this, mut db| {
-            let initial = request.as_ref().access_list().cloned().unwrap_or_default();
-            let tx_gas_limit_cap = evm_env.version().tx_gas_limit_cap;
-            let (mut evm_env, mut tx_env) = this.prepare_call_env(
-                evm_env,
-                request,
-                &mut db,
-                EvmOverrides::state(state_override),
-            )?;
-            // The access list is used to send a transaction, so under EIP-8037 keep the execution
-            // gas cap that the transaction will run with, like geth does. The total gas cap stays
-            // lifted, also like geth, so with an RPC gas cap above `2^32 - 1` this can return an
-            // access list for a gas limit no transaction can have.
-            if evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
-                evm_env.version_mut().tx_gas_limit_cap = tx_gas_limit_cap;
-            }
-            let chain_id = evm_env.chain_id();
+        async move {
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
 
-            let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
+            self.spawn_with_state_at_block(at, move |this, mut db| {
+                let _permit = permit;
+                let initial = request.as_ref().access_list().cloned().unwrap_or_default();
+                let tx_gas_limit_cap = evm_env.version().tx_gas_limit_cap;
+                let (mut evm_env, mut tx_env) = this.prepare_call_env(
+                    evm_env,
+                    request,
+                    &mut db,
+                    EvmOverrides::state(state_override),
+                )?;
+                // The access list is used to send a transaction, so under EIP-8037 keep the
+                // execution gas cap that the transaction will run with, like geth does. The total
+                // gas cap stays lifted, also like geth, so with an RPC gas cap above `2^32 - 1`
+                // this can return an access list for a gas limit no transaction can have.
+                if evm_env.version().feature(evm2::EvmFeatures::EIP8037) {
+                    evm_env.version_mut().tx_gas_limit_cap = tx_gas_limit_cap;
+                }
+                let chain_id = evm_env.chain_id();
 
-            // EIP-7702 authorities are warmed during authorization processing, so listing them
-            // would only add access list cost.
-            let inspector =
-                AccessListInspector::new(initial).with_excluded_from_tx(tx_env.inner(), chain_id);
-            let (inspector, result) = evm
-                .transact_with_inspector(&tx_env, inspector)
-                .map_err(Self::Error::from_evm_err)?;
-            let access_list = inspector.into_access_list();
-            let gas_used = result.result.tx_gas_used();
-            if let Err(err) = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result.result) {
-                return Ok(AccessListResult {
-                    access_list,
-                    gas_used: U256::from(gas_used),
-                    error: Some(err.to_string()),
-                });
-            }
+                let mut evm = this.evm_config().evm_with_env(&mut db, evm_env);
 
-            tx_env.inner_mut().set_access_list(access_list.clone());
+                // EIP-7702 authorities are warmed during authorization processing, so listing them
+                // would only add access list cost.
+                let inspector = AccessListInspector::new(initial)
+                    .with_excluded_from_tx(tx_env.inner(), chain_id);
+                let (inspector, result) = evm
+                    .transact_with_inspector(&tx_env, inspector)
+                    .map_err(Self::Error::from_evm_err)?;
+                let access_list = inspector.into_access_list();
+                let gas_used = result.result.tx_gas_used();
+                if let Err(err) =
+                    Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result.result)
+                {
+                    return Ok(AccessListResult {
+                        access_list,
+                        gas_used: U256::from(gas_used),
+                        error: Some(err.to_string()),
+                    });
+                }
 
-            // Transact again to get the exact gas used with the returned access list.
-            let result = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
-            let gas_used = result.tx_gas_used();
-            let error = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result)
-                .err()
-                .map(|e| e.to_string());
+                if is_cancelled() {
+                    return Err(EthApiError::InternalEthError.into())
+                }
 
-            Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
-        })
+                tx_env.inner_mut().set_access_list(access_list.clone());
+
+                // Transact again to get the exact gas used with the returned access list.
+                let result = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
+                let gas_used = result.tx_gas_used();
+                let error = Self::Error::ensure_success::<EvmTypesFor<Self::Evm>>(result)
+                    .err()
+                    .map(|e| e.to_string());
+
+                Ok(AccessListResult { access_list, gas_used: U256::from(gas_used), error })
+            })
+            .await
+        }
     }
 }
 
@@ -554,7 +572,7 @@ pub trait Call:
         self.eth_api_settings().compute_state_root_for_eth_simulate
     }
 
-    /// Returns the maximum memory the EVM can allocate per RPC request.
+    /// Returns the maximum memory the EVM can allocate per call frame in an RPC request.
     fn evm_memory_limit(&self) -> u64 {
         self.eth_api_settings().evm_memory_limit
     }
@@ -810,7 +828,6 @@ pub trait Call:
                 let changes = this
                     .evm_config()
                     .pre_block_state_changes(&mut db, evm_env.clone(), ctx)
-                    .map_err(|err| EthApiError::EvmCustom(err.to_string()))
                     .map_err(Self::Error::from_eth_err)?;
                 db.commit_source(&reth_execution_types::BundleSource(&changes));
 

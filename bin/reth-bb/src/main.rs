@@ -33,6 +33,7 @@ use reth_node_ethereum::{
 };
 use reth_primitives_traits::SealedBlock;
 use reth_provider::EthStorage;
+use std::sync::Arc;
 use tracing::info;
 
 #[derive(Debug, Clone, Default)]
@@ -78,7 +79,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
     fn convert_payload_to_block(
         &self,
         payload: BigBlockData<ExecutionData>,
-    ) -> Result<SealedBlock<Block>, NewPayloadError> {
+    ) -> Result<Arc<SealedBlock<Block>>, NewPayloadError> {
         if payload.env_switches.is_empty() {
             return Err(NewPayloadError::other(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -91,6 +92,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
             .into_iter()
             .map(|data| {
                 PayloadValidator::<EthPayloadTypes>::convert_payload_to_block(&self.inner, data)
+                    .map(Arc::unwrap_or_clone)
             })
             .collect::<Result<Vec<SealedBlock<Block>>, NewPayloadError>>()?;
 
@@ -118,7 +120,7 @@ impl PayloadValidator<BbPayloadTypes> for BbEngineValidator {
             .collect();
 
         // Use `new_unchecked` to preserve the hash
-        Ok(SealedBlock::new_unchecked(block, hash))
+        Ok(Arc::new(SealedBlock::new_unchecked(block, hash)))
     }
 }
 

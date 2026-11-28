@@ -1,8 +1,12 @@
 use super::{TrieCursor, TrieCursorFactory, TrieStorageCursor};
-use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
+use crate::{
+    cursor_position::CursorPosition, forward_cursor::ForwardInMemoryCursor,
+    updates::TrieUpdatesSorted,
+};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
+use std::ops::Bound;
 
 /// The trie cursor factory for the trie updates.
 #[derive(Debug, Clone)]
@@ -60,11 +64,8 @@ pub struct InMemoryTrieCursor<'a, C> {
     db_cursor_state: DbCursorState,
     /// Forward-only in-memory cursor over storage trie nodes.
     in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
-    /// The key most recently returned from the Cursor.
-    last_key: Option<Nibbles>,
-    #[cfg(debug_assertions)]
-    /// Whether an initial seek was called.
-    seeked: bool,
+    /// The latest logical result and the lower bound of reusable seek requests.
+    position: CursorPosition<Nibbles>,
     /// Reference to the full trie updates.
     trie_updates: &'a TrieUpdatesSorted,
 }
@@ -100,9 +101,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
             in_memory_cursor,
-            last_key: None,
-            #[cfg(debug_assertions)]
-            seeked: false,
+            position: CursorPosition::Unseeked,
             trie_updates,
         }
     }
@@ -119,9 +118,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             cursor,
             db_cursor_state: DbCursorState::NeedsPosition,
             in_memory_cursor,
-            last_key: None,
-            #[cfg(debug_assertions)]
-            seeked: false,
+            position: CursorPosition::Unseeked,
             trie_updates,
         }
     }
@@ -141,20 +138,8 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         &mut self.cursor
     }
 
-    /// Asserts that the next entry to be returned from the cursor is not previous to the last entry
-    /// returned.
-    fn set_last_key(&mut self, next_entry: &Option<(Nibbles, BranchNodeCompact)>) {
-        let next_key = next_entry.as_ref().map(|e| e.0);
-        debug_assert!(
-            self.last_key.is_none_or(|last| next_key.is_none_or(|next| next >= last)),
-            "Cannot return entry {:?} previous to the last returned entry at {:?}",
-            next_key,
-            self.last_key,
-        );
-        self.last_key = next_key;
-    }
-
     /// Positions the DB cursor state using the underlying cursor when needed.
+    /// Errors invalidate both cursor positions so a later seek can safely retry.
     fn cursor_seek(&mut self, key: Nibbles) -> Result<(), DatabaseError> {
         // Only seek if:
         // 1. We have a cursor entry and need to seek forward (entry.0 < key), OR
@@ -166,7 +151,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
         };
 
         if should_seek {
-            let entry = self.get_cursor_mut().seek(key)?;
+            let entry = self.get_cursor_mut().seek(key).inspect_err(|_| self.reset())?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -174,17 +159,15 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     }
 
     /// Advances the DB cursor state to the subsequent entry using the underlying cursor.
+    /// Errors invalidate both cursor positions so a later seek can safely retry.
     fn cursor_next(&mut self) -> Result<(), DatabaseError> {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(self.seeked);
-            debug_assert!(!matches!(self.db_cursor_state, DbCursorState::NeedsPosition));
-        }
+        debug_assert!(!matches!(self.position, CursorPosition::Unseeked));
+        debug_assert!(!matches!(self.db_cursor_state, DbCursorState::NeedsPosition));
 
         // The exhausted state is stable; only advance if the DB cursor currently points to an
         // entry.
         if matches!(self.db_cursor_state, DbCursorState::Positioned(_)) {
-            let entry = self.get_cursor_mut().next()?;
+            let entry = self.get_cursor_mut().next().inspect_err(|_| self.reset())?;
             self.db_cursor_state.set_entry(entry);
         }
 
@@ -231,6 +214,15 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
             }
         }
     }
+
+    /// Rewinds only when a request precedes the range covered by the current positions.
+    fn prepare_seek(&mut self, key: Nibbles) {
+        if self.position.must_rewind(key) {
+            self.reset();
+        }
+        // A returned successor may be ahead of the request after skipping deleted nodes.
+        self.position.set_lower_bound(Bound::Included(key));
+    }
 }
 
 impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
@@ -238,20 +230,12 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
-        if self.last_key.is_none_or(|last| key < last) {
-            self.reset();
-        }
+        self.prepare_seek(key);
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, entry_inner)) = mem_entry &&
             *mem_key == key
         {
-            #[cfg(debug_assertions)]
-            {
-                self.seeked = true;
-            }
-
             // An exact overlay hit can move the logical cursor ahead without touching the DB. If
             // the DB cursor was still behind this key, force a re-seek before the next DB-backed
             // operation so `next()` cannot return a stale earlier entry.
@@ -261,23 +245,18 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             }
 
             let entry = entry_inner.clone().map(|node| (key, node));
-            self.set_last_key(&entry);
+            self.position.set_key(entry.as_ref().map(|e| e.0));
             return Ok(entry)
         }
 
         self.cursor_seek(key)?;
-
-        #[cfg(debug_assertions)]
-        {
-            self.seeked = true;
-        }
 
         let entry = match self.db_cursor_state.entry() {
             Some((db_key, node)) if db_key == &key => Some((key, node.clone())),
             _ => None,
         };
 
-        self.set_last_key(&entry);
+        self.position.set_key(entry.as_ref().map(|e| e.0));
         Ok(entry)
     }
 
@@ -285,20 +264,12 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        // Forward scans can reuse cursor positions; backward seeks and exhausted cursors cannot.
-        if self.last_key.is_none_or(|last| key < last) {
-            self.reset();
-        }
+        self.prepare_seek(key);
         let mem_entry = self.in_memory_cursor.seek(&key);
 
         if let Some((mem_key, Some(node))) = mem_entry &&
             *mem_key == key
         {
-            #[cfg(debug_assertions)]
-            {
-                self.seeked = true;
-            }
-
             // An exact overlay hit is the first logical entry at or after `key`, so the DB cursor
             // can stay lazy until a later operation needs it.
             if matches!(&self.db_cursor_state, DbCursorState::Positioned((db_key, _)) if db_key < &key)
@@ -307,32 +278,29 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
             }
 
             let entry = Some((key, node.clone()));
-            self.set_last_key(&entry);
+            self.position.set_key(entry.as_ref().map(|e| e.0));
             return Ok(entry)
         }
 
         self.cursor_seek(key)?;
 
-        #[cfg(debug_assertions)]
-        {
-            self.seeked = true;
-        }
-
         let entry = self.choose_next_entry()?;
-        self.set_last_key(&entry);
+        self.position.set_key(entry.as_ref().map(|e| e.0));
         Ok(entry)
     }
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        #[cfg(debug_assertions)]
-        {
-            debug_assert!(self.seeked, "Cursor must be seek'd before next is called");
-        }
+        debug_assert!(
+            !matches!(self.position, CursorPosition::Unseeked),
+            "Cursor must be seek'd before next is called",
+        );
 
-        // A `last_key` of `None` indicates that the cursor is exhausted.
-        let Some(last_key) = self.last_key else {
+        // A missing logical result leaves the reusable request bound unchanged.
+        let Some(last_key) = self.position.key() else {
             return Ok(None);
         };
+
+        self.position.set_lower_bound(Bound::Excluded(last_key));
 
         // If either cursor is currently pointing to the last entry which was returned then consume
         // that entry so that `choose_next_entry` is looking at the subsequent one.
@@ -353,13 +321,13 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         }
 
         let entry = self.choose_next_entry()?;
-        self.set_last_key(&entry);
+        self.position.set_key(entry.as_ref().map(|e| e.0));
         Ok(entry)
     }
 
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        match &self.last_key {
-            Some(key) => Ok(Some(*key)),
+        match self.position.key() {
+            Some(key) => Ok(Some(key)),
             None => self.get_cursor_mut().current(),
         }
     }
@@ -369,11 +337,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
         self.in_memory_cursor.reset();
 
         self.db_cursor_state = DbCursorState::NeedsPosition;
-        self.last_key = None;
-        #[cfg(debug_assertions)]
-        {
-            self.seeked = false;
-        }
+        self.position = CursorPosition::Unseeked;
     }
 }
 
@@ -390,8 +354,10 @@ impl<C: TrieStorageCursor> TrieStorageCursor for InMemoryTrieCursor<'_, C> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::trie_cursor::mock::MockTrieCursor;
-    use parking_lot::Mutex;
+    use crate::trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory};
+    use assert_matches::assert_matches;
+    use reth_concurrency::sync::parking_lot::Mutex;
+    use reth_trie_common::updates::StorageTrieUpdatesSorted;
     use std::{collections::BTreeMap, sync::Arc};
     use tracing::debug;
 
@@ -433,7 +399,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_and_memory() {
         let test_case = InMemoryTrieCursorTestCase {
             db_nodes: vec![],
@@ -443,7 +409,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_db_nodes() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -459,7 +425,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_only_in_memory_nodes() {
         let in_memory_nodes = vec![
             (
@@ -486,7 +452,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_overwrites_db() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -514,7 +480,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_in_memory_deletes_db_nodes() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
@@ -533,7 +499,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_complex_interleaving() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -576,7 +542,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_exact() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -619,7 +585,7 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_does_not_touch_db_until_next() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x2]), BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
@@ -660,7 +626,7 @@ mod tests {
         assert!(!visited_keys.lock().is_empty(), "next should lazily position the DB cursor");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_seek_overlay_exact_hit_repositions_stale_db_on_next() {
         let db_nodes = vec![
             (Nibbles::from_nibbles([0x1]), BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
@@ -710,7 +676,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_multiple_consecutive_deletes() {
         let db_nodes: Vec<(Nibbles, BranchNodeCompact)> = (1..=10)
             .map(|i| {
@@ -741,7 +707,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_empty_db_with_in_memory_deletes() {
         let in_memory_nodes = vec![
             (Nibbles::from_nibbles([0x1]), None),
@@ -762,7 +728,7 @@ mod tests {
         execute_test(test_case);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_current_key_tracking() {
         let db_nodes = vec![(
             Nibbles::from_nibbles([0x2]),
@@ -800,7 +766,7 @@ mod tests {
         assert_eq!(cursor.current().unwrap(), Some(Nibbles::from_nibbles([0x3])));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn test_all_storage_nodes_deleted_exact_keys() {
         reth_tracing::init_test_tracing();
 
@@ -874,34 +840,232 @@ mod tests {
         assert_eq!(result, None, "Expected None from next() but got {:?}", result);
     }
 
+    #[reth_concurrency::test]
+    fn test_seek_exact_misses_and_deletions_reuse_positions() {
+        let node = BranchNodeCompact::new(1, 1, 0, vec![], None);
+        let db_nodes = [1, 4, 6, 8]
+            .into_iter()
+            .map(|key| (Nibbles::from_nibbles([key]), node.clone()))
+            .collect();
+        let visited = Arc::new(Mutex::new(Vec::new()));
+        let mock = MockTrieCursor::new(Arc::new(db_nodes), visited.clone());
+        let updates = TrieUpdatesSorted::new(
+            [4, 6].into_iter().map(|key| (Nibbles::from_nibbles([key]), None)).collect(),
+            Default::default(),
+        );
+        let mut cursor = InMemoryTrieCursor::new_account(mock, &updates);
+
+        assert_eq!(
+            cursor.seek(Nibbles::from_nibbles([1])).unwrap(),
+            Some((Nibbles::from_nibbles([1]), node.clone()))
+        );
+        for key in [2, 3, 4, 4] {
+            assert_eq!(cursor.seek_exact(Nibbles::from_nibbles([key])).unwrap(), None);
+            assert_eq!(cursor.next().unwrap(), None);
+            assert_eq!(visited.lock().len(), 2);
+        }
+        assert_eq!(
+            cursor.seek(Nibbles::from_nibbles([4])).unwrap(),
+            Some((Nibbles::from_nibbles([8]), node.clone()))
+        );
+        assert_eq!(visited.lock().len(), 4);
+        for key in [4, 5, 6, 7] {
+            assert_eq!(cursor.seek_exact(Nibbles::from_nibbles([key])).unwrap(), None);
+            assert_eq!(
+                cursor.seek(Nibbles::from_nibbles([key])).unwrap(),
+                Some((Nibbles::from_nibbles([8]), node.clone()))
+            );
+            assert_eq!(visited.lock().len(), 4);
+        }
+        assert_eq!(
+            cursor.seek_exact(Nibbles::from_nibbles([8])).unwrap(),
+            Some((Nibbles::from_nibbles([8]), node))
+        );
+        assert_eq!(visited.lock().len(), 4);
+    }
+
+    #[reth_concurrency::test]
+    fn test_next_preserves_exhaustion_until_consumed_key_is_requested() {
+        let node = BranchNodeCompact::new(1, 1, 0, vec![], None);
+        let first = Nibbles::from_nibbles([1]);
+        let db_nodes = (1..12).map(|key| (Nibbles::from_nibbles([key]), node.clone())).collect();
+        let visited = Arc::new(Mutex::new(Vec::new()));
+        let mock = MockTrieCursor::new(Arc::new(db_nodes), visited.clone());
+        let updates = TrieUpdatesSorted::new(
+            (2..12).map(|key| (Nibbles::from_nibbles([key]), None)).collect(),
+            Default::default(),
+        );
+        let mut cursor = InMemoryTrieCursor::new_account(mock, &updates);
+
+        assert_eq!(cursor.seek(first).unwrap(), Some((first, node.clone())));
+        assert_eq!(cursor.next().unwrap(), None);
+        assert_eq!(cursor.next().unwrap(), None);
+        for key in 2..16 {
+            assert_eq!(cursor.seek(Nibbles::from_nibbles([key])).unwrap(), None);
+            assert_eq!(visited.lock().len(), 12);
+        }
+        assert_eq!(cursor.seek_exact(first).unwrap(), Some((first, node)));
+        assert_eq!(visited.lock().len(), 13);
+    }
+
+    #[reth_concurrency::test]
+    fn test_backward_seek_after_next_restores_consumed_overlay() {
+        let node = BranchNodeCompact::new(1, 1, 0, vec![], None);
+        let first = Nibbles::from_nibbles([1]);
+        let overlay_key = Nibbles::from_nibbles([4]);
+        let successor = Nibbles::from_nibbles([8]);
+        let visited = Arc::new(Mutex::new(Vec::new()));
+        let mock = MockTrieCursor::new(
+            Arc::new([(first, node.clone()), (successor, node.clone())].into()),
+            visited.clone(),
+        );
+        let updates =
+            TrieUpdatesSorted::new(vec![(overlay_key, Some(node.clone()))], Default::default());
+        let mut cursor = InMemoryTrieCursor::new_account(mock, &updates);
+
+        assert_eq!(cursor.seek(first).unwrap(), Some((first, node.clone())));
+        assert_eq!(cursor.next().unwrap(), Some((overlay_key, node.clone())));
+        assert_eq!(
+            cursor.seek(Nibbles::from_nibbles([2])).unwrap(),
+            Some((overlay_key, node.clone()))
+        );
+        assert_eq!(visited.lock().len(), 2);
+        assert_eq!(cursor.next().unwrap(), Some((successor, node.clone())));
+        assert_eq!(cursor.seek_exact(overlay_key).unwrap(), Some((overlay_key, node.clone())));
+        assert_eq!(visited.lock().len(), 2);
+        assert_eq!(cursor.next().unwrap(), Some((successor, node.clone())));
+        assert_eq!(visited.lock().len(), 3);
+        assert_eq!(cursor.seek(first).unwrap(), Some((first, node)));
+        assert_eq!(visited.lock().len(), 4);
+    }
+
+    #[reth_concurrency::test]
+    fn test_address_switch_resets_seek_range_and_overlay() {
+        let first_address = B256::with_last_byte(1);
+        let second_address = B256::with_last_byte(2);
+        let key = Nibbles::from_nibbles([1]);
+        let node = BranchNodeCompact::new(1, 1, 0, vec![], None);
+        let factory = MockTrieCursorFactory::new(
+            Default::default(),
+            [
+                (first_address, [(key, node.clone())].into()),
+                (second_address, [(key, node.clone())].into()),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let updates = TrieUpdatesSorted::new(
+            vec![],
+            std::iter::once((
+                first_address,
+                StorageTrieUpdatesSorted { storage_nodes: vec![(key, None)] },
+            ))
+            .collect(),
+        );
+        let mock = factory.storage_trie_cursor(first_address).unwrap();
+        let mut cursor = InMemoryTrieCursor::new_storage(mock, &updates, first_address);
+
+        assert_eq!(cursor.seek(key).unwrap(), None);
+        assert_eq!(factory.visited_storage_keys(first_address).len(), 2);
+        cursor.set_hashed_address(second_address);
+        assert_eq!(cursor.seek_exact(key).unwrap(), Some((key, node.clone())));
+        assert_eq!(factory.visited_storage_keys(second_address).len(), 1);
+        assert_eq!(cursor.next().unwrap(), None);
+        cursor.set_hashed_address(first_address);
+        assert_eq!(cursor.seek(key).unwrap(), None);
+        assert_eq!(factory.visited_storage_keys(first_address).len(), 4);
+        cursor.set_hashed_address(second_address);
+        assert_eq!(cursor.seek(key).unwrap(), Some((key, node)));
+        assert_eq!(factory.visited_storage_keys(second_address).len(), 3);
+    }
+
+    #[derive(Debug)]
+    struct FailingTrieCursor {
+        cursor: MockTrieCursor,
+        fail_seek: bool,
+        fail_next: bool,
+    }
+
+    impl TrieCursor for FailingTrieCursor {
+        fn seek_exact(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            self.cursor.seek_exact(key)
+        }
+
+        fn seek(
+            &mut self,
+            key: Nibbles,
+        ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = self.cursor.seek(key)?;
+            if self.fail_seek {
+                self.fail_seek = false;
+                return Err(DatabaseError::Decode);
+            }
+            Ok(entry)
+        }
+
+        fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+            let entry = self.cursor.next()?;
+            if self.fail_next {
+                self.fail_next = false;
+                return Err(DatabaseError::Decode);
+            }
+            Ok(entry)
+        }
+
+        fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
+            self.cursor.current()
+        }
+
+        fn reset(&mut self) {
+            self.cursor.reset();
+        }
+    }
+
+    #[reth_concurrency::test]
+    fn test_cursor_errors_invalidate_reusable_positions() {
+        for operation in 0..3 {
+            let node = BranchNodeCompact::new(1, 1, 0, vec![], None);
+            let first = Nibbles::from_nibbles([1]);
+            let deleted = Nibbles::from_nibbles([2]);
+            let successor = Nibbles::from_nibbles([3]);
+            let mock = MockTrieCursor::new(
+                Arc::new(
+                    [(first, node.clone()), (deleted, node.clone()), (successor, node.clone())]
+                        .into(),
+                ),
+                Default::default(),
+            );
+            let updates = TrieUpdatesSorted::new(vec![(deleted, None)], Default::default());
+            let mut cursor = InMemoryTrieCursor::new_account(
+                FailingTrieCursor {
+                    cursor: mock,
+                    fail_seek: operation == 0,
+                    fail_next: operation != 0,
+                },
+                &updates,
+            );
+
+            let error = match operation {
+                0 => cursor.seek_exact(first),
+                1 => {
+                    assert_eq!(cursor.seek(first).unwrap(), Some((first, node.clone())));
+                    cursor.next()
+                }
+                _ => cursor.seek(deleted),
+            };
+            assert_matches!(error, Err(DatabaseError::Decode));
+            assert_eq!(cursor.seek(first).unwrap(), Some((first, node.clone())));
+            assert_eq!(cursor.next().unwrap(), Some((successor, node)));
+        }
+    }
+
     mod proptest_tests {
         use super::*;
-        use itertools::Itertools;
         use proptest::prelude::*;
-
-        /// Merge `db_nodes` with `in_memory_nodes`, applying the in-memory overlay.
-        /// This properly handles deletions (None values in `in_memory_nodes`).
-        fn merge_with_overlay(
-            db_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-            in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
-        ) -> Vec<(Nibbles, BranchNodeCompact)> {
-            db_nodes
-                .into_iter()
-                .merge_join_by(in_memory_nodes, |db_entry, mem_entry| db_entry.0.cmp(&mem_entry.0))
-                .filter_map(|entry| match entry {
-                    // Only in db: keep it
-                    itertools::EitherOrBoth::Left((key, node)) => Some((key, node)),
-                    // Only in memory: keep if not a deletion
-                    itertools::EitherOrBoth::Right((key, node_opt)) => {
-                        node_opt.map(|node| (key, node))
-                    }
-                    // In both: memory takes precedence (keep if not a deletion)
-                    itertools::EitherOrBoth::Both(_, (key, node_opt)) => {
-                        node_opt.map(|node| (key, node))
-                    }
-                })
-                .collect()
-        }
+        use tracing::debug;
 
         /// Generate a strategy for a `BranchNodeCompact` with simplified parameters.
         /// The constraints are:
@@ -924,7 +1088,7 @@ mod tests {
         /// Generate a sorted vector of (Nibbles, `BranchNodeCompact`) entries
         fn sorted_db_nodes_strategy() -> impl Strategy<Value = Vec<(Nibbles, BranchNodeCompact)>> {
             prop::collection::vec(
-                (prop::collection::vec(any::<u8>(), 0..2), branch_node_strategy()),
+                (prop::collection::vec(0u8..16, 0..3), branch_node_strategy()),
                 0..20,
             )
             .prop_map(|entries| {
@@ -943,10 +1107,7 @@ mod tests {
         fn sorted_in_memory_nodes_strategy(
         ) -> impl Strategy<Value = Vec<(Nibbles, Option<BranchNodeCompact>)>> {
             prop::collection::vec(
-                (
-                    prop::collection::vec(any::<u8>(), 0..2),
-                    prop::option::of(branch_node_strategy()),
-                ),
+                (prop::collection::vec(0u8..16, 0..3), prop::option::of(branch_node_strategy())),
                 0..20,
             )
             .prop_map(|entries| {
@@ -964,151 +1125,97 @@ mod tests {
         proptest! {
             #![proptest_config(ProptestConfig::with_cases(10000))]
 
-            #[test]
+            #[reth_concurrency::test]
             fn proptest_in_memory_trie_cursor(
                 db_nodes in sorted_db_nodes_strategy(),
                 in_memory_nodes in sorted_in_memory_nodes_strategy(),
-                op_choices in prop::collection::vec(any::<u8>(), 10..500),
+                operations in prop::collection::vec(
+                    (0u8..4, prop::collection::vec(0u8..16, 0..3)), 10..500,
+                ),
             ) {
                 reth_tracing::init_test_tracing();
-                use tracing::debug;
-
                 debug!(
                     db_paths=?db_nodes.iter().map(|(k, _)| k).collect::<Vec<_>>(),
                     in_mem_nodes=?in_memory_nodes.iter().map(|(k, v)| (k, v.is_some())).collect::<Vec<_>>(),
-                    num_op_choices=?op_choices.len(),
+                    num_operations=?operations.len(),
                     "Starting proptest!",
                 );
 
-                // Create the expected results by merging the two sorted vectors,
-                // properly handling deletions (None values in in_memory_nodes)
-                let expected_combined = merge_with_overlay(db_nodes.clone(), in_memory_nodes.clone());
-
-                // Collect all keys for operation generation
-                let all_keys: Vec<Nibbles> = expected_combined.iter().map(|(k, _)| *k).collect();
-
-                // Create a control cursor using the combined result with a mock cursor
-                let control_db_map: BTreeMap<Nibbles, BranchNodeCompact> =
-                    expected_combined.into_iter().collect();
-                let control_db_arc = Arc::new(control_db_map);
-                let control_visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mut control_cursor = MockTrieCursor::new(control_db_arc, control_visited_keys);
-
-                // Create the InMemoryTrieCursor being tested
-                let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> =
-                    db_nodes.into_iter().collect();
-                let db_nodes_arc = Arc::new(db_nodes_map);
-                let visited_keys = Arc::new(Mutex::new(Vec::new()));
-                let mock_cursor = MockTrieCursor::new(db_nodes_arc, visited_keys);
-                let trie_updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
-                let mut test_cursor = InMemoryTrieCursor::new_account(mock_cursor, &trie_updates);
-
-                // Test: seek to the beginning first
-                let control_first = control_cursor.seek(Nibbles::default()).unwrap();
-                let test_first = test_cursor.seek(Nibbles::default()).unwrap();
-                debug!(
-                    control=?control_first.as_ref().map(|(k, _)| k),
-                    test=?test_first.as_ref().map(|(k, _)| k),
-                    "Initial seek returned",
-                );
-                assert_eq!(control_first, test_first, "Initial seek mismatch");
-
-                // If both cursors returned None, nothing to test
-                if control_first.is_none() && test_first.is_none() {
-                    return Ok(());
+                let mut merged = db_nodes.iter().cloned().collect::<BTreeMap<_, _>>();
+                for (key, node) in &in_memory_nodes {
+                    if let Some(node) = node {
+                        merged.insert(*key, node.clone());
+                    } else {
+                        merged.remove(key);
+                    }
                 }
 
-                // Track the last key returned from the cursor
-                let mut last_returned_key = control_first.as_ref().map(|(k, _)| *k);
+                // Include deleted and absent keys, not just surviving entries.
+                let mut seek_keys = db_nodes.iter().map(|(key, _)| *key)
+                    .chain(in_memory_nodes.iter().map(|(key, _)| *key))
+                    .chain(operations.iter().map(|(_, key)| Nibbles::from_nibbles(key)))
+                    .collect::<Vec<_>>();
+                seek_keys.sort_unstable();
+                seek_keys.dedup();
 
-                // Execute a sequence of random operations
-                for choice in op_choices {
-                    let op_type = choice % 3;
+                let visited_keys = Arc::new(Mutex::new(Vec::new()));
+                let mock = MockTrieCursor::new(
+                    Arc::new(db_nodes.into_iter().collect()), visited_keys.clone(),
+                );
+                let updates = TrieUpdatesSorted::new(in_memory_nodes, Default::default());
+                let mut cursor = InMemoryTrieCursor::new_account(mock, &updates);
 
-                    match op_type {
-                        0 => {
-                            // Next operation
-                            let control_result = control_cursor.next().unwrap();
-                            let test_result = test_cursor.next().unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                "Next returned",
-                            );
-                            assert_eq!(control_result, test_result, "Next operation mismatch");
-
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
-                            }
-                        }
-                        1 => {
-                            // Seek operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
-                            }
-
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
-
-                            if valid_keys.is_empty() {
-                                continue;
-                            }
-
-                            let key = *valid_keys[choice as usize % valid_keys.len()];
-
-                            let control_result = control_cursor.seek(key).unwrap();
-                            let test_result = test_cursor.seek(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "Seek returned",
-                            );
-                            assert_eq!(control_result, test_result, "Seek operation mismatch for key {:?}", key);
-
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-
-                            // Stop if both cursors are exhausted
-                            if control_result.is_none() && test_result.is_none() {
-                                break;
-                            }
-                        }
-                        _ => {
-                            // SeekExact operation - choose a key >= last_returned_key
-                            if all_keys.is_empty() {
-                                continue;
-                            }
-
-                            let valid_keys: Vec<_> = all_keys
-                                .iter()
-                                .filter(|k| last_returned_key.is_none_or(|last| **k >= last))
-                                .collect();
-
-                            if valid_keys.is_empty() {
-                                continue;
-                            }
-
-                            let key = *valid_keys[choice as usize  % valid_keys.len()];
-
-                            let control_result = control_cursor.seek_exact(key).unwrap();
-                            let test_result = test_cursor.seek_exact(key).unwrap();
-                            debug!(
-                                control=?control_result.as_ref().map(|(k, _)| k),
-                                test=?test_result.as_ref().map(|(k, _)| k),
-                                ?key,
-                                "SeekExact returned",
-                            );
-                            assert_eq!(control_result, test_result, "SeekExact operation mismatch for key {:?}", key);
-
-                            // seek_exact updates the last_key internally but only if it found something
-                            last_returned_key = control_result.as_ref().map(|(k, _)| *k);
-                        }
+                // Increasing requests within a previously covered gap must not rescan the DB.
+                let mut previous = None::<Option<Nibbles>>;
+                for key in seek_keys {
+                    let visits_before = visited_keys.lock().len();
+                    let actual = cursor.seek(key).unwrap();
+                    let expected = merged.range(key..).next()
+                        .map(|(key, node)| (*key, node.clone()));
+                    prop_assert_eq!(&actual, &expected, "monotone seek, key {:?}", key);
+                    if let Some(successor) = previous &&
+                        successor.is_none_or(|successor| successor >= key)
+                    {
+                        prop_assert_eq!(
+                            visited_keys.lock().len(), visits_before,
+                            "monotone seek rescanned a covered gap at {:?}", key,
+                        );
                     }
+                    previous = Some(expected.map(|(key, _)| key));
+                }
+
+                cursor.reset();
+                let mut expected_current = None;
+                let mut seeked = false;
+                for (operation, key) in operations {
+                    let key = Nibbles::from_nibbles(key);
+                    let (actual, expected) = match operation {
+                        0 => (
+                            cursor.seek(key).unwrap(),
+                            merged.range(key..).next().map(|(key, node)| (*key, node.clone())),
+                        ),
+                        1 => (
+                            cursor.seek_exact(key).unwrap(),
+                            merged.get(&key).map(|node| (key, node.clone())),
+                        ),
+                        2 if seeked => (
+                            cursor.next().unwrap(),
+                            expected_current.and_then(|last| {
+                                merged.range((Bound::Excluded(last), Bound::Unbounded)).next()
+                                    .map(|(key, node)| (*key, node.clone()))
+                            }),
+                        ),
+                        2 => continue,
+                        _ => {
+                            cursor.reset();
+                            expected_current = None;
+                            seeked = false;
+                            continue;
+                        }
+                    };
+                    prop_assert_eq!(&actual, &expected, "operation {}, key {:?}", operation, key);
+                    expected_current = expected.map(|(key, _)| key);
+                    seeked = true;
                 }
             }
         }

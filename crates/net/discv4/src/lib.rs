@@ -1126,6 +1126,17 @@ impl Discv4Service {
         };
     }
 
+    // Announces a full-bucket node once its endpoint is proven, pinging it first unless it is
+    // already bonded at the record's IP.
+    fn on_discovered_at_capacity(&mut self, record: NodeRecord) {
+        if self.has_bond(record.id, record.address) {
+            trace!(target: "discv4", ?record, "discovered proven record but bucket is full");
+            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
+        } else {
+            self.try_ping(record, PingReason::AtCapacity);
+        }
+    }
+
     /// Adds all nodes
     ///
     /// See [`Self::add_node`]
@@ -1216,6 +1227,7 @@ impl Discv4Service {
         // > ping should be sent in addition to pong in order to receive an endpoint proof.
         //
         let mut is_new_insert = false;
+        let mut is_at_capacity = false;
         let mut needs_bond = !self.has_bond(record.id, record.address);
         let mut is_proven = false;
 
@@ -1260,8 +1272,7 @@ impl Discv4Service {
                         // we received a ping but the corresponding bucket for the peer is already
                         // full, we can't add any additional peers to that bucket, but we still want
                         // to emit an event that we discovered the node
-                        trace!(target: "discv4", ?record, "discovered new record but bucket is full");
-                        self.notify(DiscoveryUpdate::DiscoveredAtCapacity(record));
+                        is_at_capacity = true;
                         needs_bond = true;
                     }
                     BucketInsertResult::TooManyIncoming | BucketInsertResult::NodeExists => {
@@ -1276,8 +1287,8 @@ impl Discv4Service {
             kbucket::Entry::SelfEntry => return,
         };
 
-        // send the pong first, but the PONG and optionally PING don't need to be send in a
-        // particular order
+        // Send the pong before any ping: a peer that pinged us for a lookup sends its FindNode
+        // on our ping, but only once it has our pong.
         let pong = Message::Pong(Pong {
             // we use the actual address of the peer
             to: record.into(),
@@ -1286,6 +1297,10 @@ impl Discv4Service {
             enr_sq: self.enr_seq(),
         });
         self.send_packet(pong, remote_addr);
+
+        if is_at_capacity {
+            self.on_discovered_at_capacity(record);
+        }
 
         // if node was absent also send a ping to establish the endpoint proof from our end
         if is_new_insert {
@@ -1449,6 +1464,19 @@ impl Discv4Service {
                 // timer than the ping_request timer.
                 self.pending_lookup.insert(node.id, (Instant::now(), ctx));
             }
+            PingReason::AtCapacity => match self.on_entry(node.id, |entry| entry.record) {
+                // Inserted while the ping was pending, so this pong is its endpoint proof.
+                // The stored record carries the TCP port the node advertised itself.
+                Some(stored) if stored.udp_addr() == node.udp_addr() => {
+                    self.update_on_pong(stored, pong.enr_sq)
+                }
+                // Inserted at another endpoint, whose own proof ping this ping displaced.
+                Some(stored) => self.try_ping(stored, PingReason::InitialInsert),
+                None => {
+                    trace!(target: "discv4", ?node, "discovered proven record but bucket is full");
+                    self.notify(DiscoveryUpdate::DiscoveredAtCapacity(node));
+                }
+            },
         }
     }
 
@@ -1623,7 +1651,7 @@ impl Discv4Service {
                         }
                         BucketInsertResult::Full => {
                             // new node but the node's bucket is already full
-                            self.notify(DiscoveryUpdate::DiscoveredAtCapacity(closest))
+                            self.on_discovered_at_capacity(closest)
                         }
                         _ => {}
                     }
@@ -1713,7 +1741,10 @@ impl Discv4Service {
         let mut failed_pings = Vec::new();
         self.pending_pings.retain(|node_id, ping_request| {
             if now.duration_since(ping_request.sent_at) > self.config.ping_expiration {
-                failed_pings.push((*node_id, ping_request.node.udp_addr()));
+                // An at-capacity ping was sent before the node had an entry, so it evicts nothing.
+                if !matches!(ping_request.reason, PingReason::AtCapacity) {
+                    failed_pings.push((*node_id, ping_request.node.udp_addr()));
+                }
                 return false
             }
             true
@@ -2692,6 +2723,9 @@ enum PingReason {
     RePing,
     /// Part of a lookup to ensure endpoint is proven before we can send a `FindNode` request.
     Lookup(NodeRecord, LookupContext),
+    /// Ping to a new peer whose bucket is full, announced as
+    /// [`DiscoveryUpdate::DiscoveredAtCapacity`] once the pong proves its endpoint.
+    AtCapacity,
 }
 
 /// Represents node related updates state changes in the underlying node table
@@ -2699,7 +2733,8 @@ enum PingReason {
 pub enum DiscoveryUpdate {
     /// A new node was discovered _and_ added to the table.
     Added(NodeRecord),
-    /// A new node was discovered but _not_ added to the table because it is currently full.
+    /// A new node with a proven endpoint was discovered but _not_ added to the table because it
+    /// is currently full.
     DiscoveredAtCapacity(NodeRecord),
     /// Received a [`ForkId`] via EIP-868 for the given [`NodeRecord`].
     EnrForkId(NodeRecord, ForkId),
@@ -2719,6 +2754,32 @@ mod tests {
     use reth_ethereum_forks::{EnrForkIdEntry, ForkHash};
     use reth_network_peers::mainnet_nodes;
     use std::{future::poll_fn, net::Ipv6Addr};
+
+    /// Fills the farthest bucket, which half of all ids map to, and returns a new id in it.
+    fn full_bucket_peer(service: &mut Discv4Service) -> PeerId {
+        loop {
+            let id = PeerId::random();
+            let key = kad_key(id);
+            if service.kbuckets.get_index(&key) != Some(u8::MAX as usize) {
+                continue
+            }
+            if service.kbuckets.get_bucket(&key).unwrap().num_entries() == MAX_NODES_PER_BUCKET {
+                return id
+            }
+            insert_proven_node(service, NodeRecord::new("10.2.0.1:30303".parse().unwrap(), id));
+        }
+    }
+
+    /// Removes a node from the farthest bucket, so that bucket has room for one more.
+    fn free_farthest_bucket_slot(service: &mut Discv4Service) {
+        let id = service
+            .kbuckets
+            .iter_ref()
+            .map(|entry| entry.node.value.record.id)
+            .find(|id| service.kbuckets.get_index(&kad_key(*id)) == Some(u8::MAX as usize))
+            .unwrap();
+        assert!(service.remove_node(id));
+    }
 
     #[tokio::test]
     async fn test_duplicate_packet_rejected_without_decoding() {
@@ -3749,6 +3810,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ping_at_capacity_announced_after_pong() {
+        let (_discv4, mut service) = create_discv4().await;
+        let (egress, mut packets) = mpsc::channel(16);
+        service.egress = egress;
+        let mut updates = service.update_stream().into_inner();
+        let record =
+            NodeRecord::new("10.1.0.1:30303".parse().unwrap(), full_bucket_peer(&mut service));
+        let ping = Ping {
+            from: record.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: Some(1),
+        };
+
+        service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
+        assert!(updates.try_recv().is_err());
+        let (packet, _) = packets.try_recv().unwrap();
+        assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Pong(_)));
+        let (packet, _) = packets.try_recv().unwrap();
+        assert!(matches!(Message::decode(&packet).unwrap().msg, Message::Ping(_)));
+        assert!(!service.pending_enr_requests.contains_key(&record.id));
+        let request = &service.pending_pings[&record.id];
+        assert!(matches!(request.reason, PingReason::AtCapacity));
+        let echo_hash = request.echo_hash;
+
+        service.on_pong(make_pong(&service, echo_hash), record.udp_addr(), record.id);
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
+        ));
+
+        // Once bonded, the node is announced right away.
+        service.on_ping(ping, record.udp_addr(), record.id, B256::random());
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == record
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_at_capacity_pong_proves_node_inserted_meanwhile() {
+        let (_discv4, mut service) = create_discv4().await;
+        let record =
+            NodeRecord::new("10.1.0.1:30303".parse().unwrap(), full_bucket_peer(&mut service));
+        let ping = Ping {
+            from: record.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping.clone(), record.udp_addr(), record.id, B256::random());
+        let echo_hash = service.pending_pings[&record.id].echo_hash;
+
+        // The next ping inserts the node, and the pending ping stands in for its initial ping.
+        free_farthest_bucket_slot(&mut service);
+        service.on_ping(ping, record.udp_addr(), record.id, B256::random());
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(false));
+
+        service.on_pong(make_pong(&service, echo_hash), record.udp_addr(), record.id);
+        assert_eq!(service.on_entry(record.id, |entry| entry.has_endpoint_proof), Some(true));
+    }
+
+    #[tokio::test]
     async fn test_failed_ping_to_other_endpoint_revalidates_proven_node() {
         let (_discv4, mut service) = create_discv4().await;
         let expired = Instant::now() + service.config.ping_expiration * 2;
@@ -3999,6 +4123,127 @@ mod tests {
         assert!(request.answered);
         assert_eq!(request.response_count, 1);
         assert_eq!(ctx.inner.closest_nodes.borrow().len(), lookup_nodes + 1);
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_at_capacity_announced_after_pong() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let mut updates = service.update_stream().into_inner();
+        let discovered = NodeRecord::new(
+            SocketAddr::from(([10, 0, 0, 9], 30303)),
+            full_bucket_peer(&mut service),
+        );
+
+        let msg =
+            Neighbours { nodes: vec![discovered], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        assert!(updates.try_recv().is_err());
+        let request = &service.pending_pings[&discovered.id];
+        assert!(matches!(request.reason, PingReason::AtCapacity));
+
+        service.on_pong(
+            make_pong(&service, request.echo_hash),
+            discovered.udp_addr(),
+            discovered.id,
+        );
+        assert!(matches!(
+            updates.try_recv(),
+            Ok(DiscoveryUpdate::DiscoveredAtCapacity(announced)) if announced == discovered
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_neighbours_at_capacity_ping_timeout_keeps_node() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let id = full_bucket_peer(&mut service);
+        let referral = NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), id);
+        let msg =
+            Neighbours { nodes: vec![referral], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        assert!(matches!(service.pending_pings[&id].reason, PingReason::AtCapacity));
+
+        // The node itself is inserted from another endpoint while the referral ping is pending.
+        free_farthest_bucket_slot(&mut service);
+        let node = NodeRecord::new(SocketAddr::from(([10, 0, 0, 50], 30303)), id);
+        let ping = Ping {
+            from: node.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, node.udp_addr(), id, B256::random());
+        assert!(service.on_entry(id, |_| ()).is_some());
+
+        service.evict_expired_requests(Instant::now() + service.config.ping_expiration * 2);
+        assert!(!service.pending_pings.contains_key(&id));
+        assert!(service.on_entry(id, |_| ()).is_some());
+    }
+
+    #[tokio::test]
+    async fn test_at_capacity_pong_does_not_prove_node_at_other_endpoint() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let pinged = NodeRecord::new(
+            SocketAddr::from(([10, 0, 0, 50], 30303)),
+            full_bucket_peer(&mut service),
+        );
+        let ping = Ping {
+            from: pinged.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, pinged.udp_addr(), pinged.id, B256::random());
+        let echo_hash = service.pending_pings[&pinged.id].echo_hash;
+
+        // A referral inserts the node at another endpoint while the ping is pending.
+        free_farthest_bucket_slot(&mut service);
+        let referral = NodeRecord::new(SocketAddr::from(([10, 0, 0, 9], 30303)), pinged.id);
+        let msg =
+            Neighbours { nodes: vec![referral], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        assert_eq!(service.pending_pings[&pinged.id].node, pinged);
+
+        service.on_pong(make_pong(&service, echo_hash), pinged.udp_addr(), pinged.id);
+        assert_eq!(service.on_entry(pinged.id, |entry| entry.has_endpoint_proof), Some(false));
+        let request = &service.pending_pings[&pinged.id];
+        assert_eq!(request.node, referral);
+        assert!(matches!(request.reason, PingReason::InitialInsert));
+    }
+
+    #[tokio::test]
+    async fn test_at_capacity_pong_announces_stored_record() {
+        let node_addr = SocketAddr::from(([10, 0, 0, 1], 30303));
+        let (mut service, record) = pending_find_node_service(node_addr).await;
+        let endpoint = SocketAddr::from(([10, 0, 0, 9], 30303));
+        let referral =
+            NodeRecord { tcp_port: 0, ..NodeRecord::new(endpoint, full_bucket_peer(&mut service)) };
+        let msg =
+            Neighbours { nodes: vec![referral], expire: service.find_node_expiration() + 1000 };
+        service.on_neighbours(msg, node_addr, record.id);
+        let echo_hash = service.pending_pings[&referral.id].echo_hash;
+
+        // The node pings from the referral's endpoint and is inserted with its own TCP port.
+        free_farthest_bucket_slot(&mut service);
+        let node = NodeRecord::new(endpoint, referral.id);
+        let ping = Ping {
+            from: node.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, endpoint, node.id, B256::random());
+
+        let mut updates = service.update_stream().into_inner();
+        service.on_pong(make_pong(&service, echo_hash), endpoint, node.id);
+        let added =
+            std::iter::from_fn(|| updates.try_recv().ok()).find_map(|update| match update {
+                DiscoveryUpdate::Added(record) => Some(record),
+                _ => None,
+            });
+        assert_eq!(added, Some(node));
     }
 
     #[tokio::test]

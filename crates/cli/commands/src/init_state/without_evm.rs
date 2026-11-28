@@ -3,6 +3,7 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rlp::Decodable;
 use eyre::WrapErr;
 use reth_codecs::Compact;
+use reth_concurrency::sync::channel::mpsc;
 use reth_fs_util::FsPathError;
 use reth_node_builder::NodePrimitives;
 use reth_primitives_traits::{SealedBlock, SealedHeader, SealedHeaderFor};
@@ -119,7 +120,7 @@ where
     N: NodePrimitives,
     F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
 {
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = mpsc::channel();
 
     let mut handles = Vec::new();
 
@@ -140,7 +141,7 @@ where
             StaticFileSegment::TransactionSenders => "init-state-senders",
             _ => "init-state-segment",
         };
-        let handle = reth_tasks::spawn_os_thread(thread_name, move || {
+        let handle = reth_tasks::spawn_thread(thread_name, move || {
             let result = provider.latest_writer(segment).and_then(|mut writer| {
                 for block_num in 1..=target_height {
                     writer.increment_block(block_num)?;
@@ -156,7 +157,7 @@ where
 
     // Spawn job for appending empty headers
     let provider = sf_provider.clone();
-    let handle = reth_tasks::spawn_os_thread("init-state-headers", move || {
+    let handle = reth_tasks::spawn_thread("init-state-headers", move || {
         let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
             for block_num in 1..=target_height {
                 // TODO: should we fill with real parent_hash?
@@ -213,15 +214,10 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_primitives::{address, b256};
+    use reth_concurrency::sync::atomic::{AtomicU64, Ordering};
     use reth_db_common::init::init_genesis;
     use reth_provider::{test_utils::create_test_provider_factory, DatabaseProviderFactory};
-    use std::{
-        io::Write,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            Arc,
-        },
-    };
+    use std::{io::Write, sync::Arc};
     use tempfile::NamedTempFile;
 
     #[test]
@@ -300,7 +296,7 @@ mod tests {
     /// u64. The guard `if header.number() > 0` skips the dummy-chain step
     /// when there is no pre-genesis range to backfill, so `header_factory`
     /// is never invoked.
-    #[test]
+    #[reth_concurrency::test]
     fn test_setup_without_evm_skips_dummy_chain_for_genesis_header() {
         let header = Header { number: 0, ..Default::default() };
         let header_hash = header.hash_slow();

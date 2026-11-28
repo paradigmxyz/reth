@@ -12,6 +12,7 @@ use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::cancellation::CancellationToken;
+use reth_concurrency::sync::thread;
 use reth_consensus::FullConsensus;
 use reth_evm::{database::StateProviderDatabase, execute::Executor, ConfigureEvm};
 use reth_node_core::args::JitArgs;
@@ -113,7 +114,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         }
 
         let num_tasks = self.num_tasks.unwrap_or_else(|| {
-            std::thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
+            thread::available_parallelism().map(|n| n.get() as u64).unwrap_or(10)
         });
 
         let total_gas = calculate_gas_used_from_headers(
@@ -150,16 +151,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                 let db_at = {
                     |block_number: u64| {
-                        let provider = provider_factory
-                            .database_provider_ro()?
-                            .disable_long_read_transaction_safety();
+                        let provider = state_provider_factory.long_read_consistent_provider()?;
                         let hash = provider.block_hash(block_number)?.ok_or_else(|| {
                             eyre::eyre!("hash for block {block_number} not found in the database")
                         })?;
                         eyre::Ok(StateProviderDatabase(
-                            state_provider_factory
-                                .state_provider_from_database(provider, hash)
-                                .into_evm_state_provider(),
+                            provider.state_by_hash(hash, false)?.into_evm_state_provider(),
                         ))
                     }
                 };

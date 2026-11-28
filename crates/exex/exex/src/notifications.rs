@@ -323,7 +323,8 @@ where
     evm_config: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
     wal_handle: WalHandle<E::Primitives>,
-    /// The exex head at launch
+    /// The exex head at launch, moved to the fork block when a notification yielded to the ExEx
+    /// reverts it.
     initial_exex_head: ExExHead,
 
     /// If true, then we need to check if the ExEx head is on the canonical chain and if not,
@@ -471,6 +472,28 @@ where
 
         Ok(())
     }
+
+    /// Moves the ExEx head to the fork block if the notification yielded to the ExEx reverts it,
+    /// so that commits of the new branch at or below the old head are not skipped.
+    fn revert_exex_head(&mut self, notification: &ExExNotification<E::Primitives>) {
+        if let Some(reverted) = notification.reverted_chain() {
+            rewind_to_fork_block(&mut self.initial_exex_head.block, &reverted);
+        }
+    }
+}
+
+/// Moves `block` to the fork block of `reverted` if `reverted` contains it.
+///
+/// A reverted block no longer proves that the ExEx processed the blocks at its height, so it is
+/// replaced by the fork block, which is on both branches. Otherwise, commits of the new branch at
+/// or below the old block would be skipped.
+pub(crate) fn rewind_to_fork_block<N: NodePrimitives>(
+    block: &mut BlockNumHash,
+    reverted: &Chain<N>,
+) {
+    if reverted.block_number(block.hash) == Some(block.number) {
+        *block = reverted.fork_block();
+    }
 }
 
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
@@ -543,6 +566,7 @@ where
 
         // 4. Deliver any notifications that were buffered during backfill
         if let Some(notification) = this.pending_notifications.pop_front() {
+            this.revert_exex_head(&notification);
             return Poll::Ready(Some(Ok(notification)))
         }
 
@@ -552,13 +576,22 @@ where
                 return Poll::Ready(None)
             };
 
-            // 6. In case the exex is ahead of the new tip, we must skip it
+            // 6. Skip notifications the ExEx already has.
             if let Some(committed) = notification.committed_chain() {
-                // inclusive check because we should start with `exex.head + 1`
-                if this.initial_exex_head.block.number >= committed.tip().number() {
+                let exex_head = this.initial_exex_head.block;
+                let processed = if notification.reverted_chain().is_some() {
+                    // A reorg may unwind blocks the ExEx processed, so skip it only if its new
+                    // chain ends at the ExEx head.
+                    committed.tip().num_hash() == exex_head
+                } else {
+                    // Inclusive check because we should start with `exex.head + 1`.
+                    exex_head.number >= committed.tip().number()
+                };
+                if processed {
                     continue
                 }
             }
+            this.revert_exex_head(&notification);
 
             return Poll::Ready(Some(Ok(notification)))
         }
@@ -573,13 +606,19 @@ mod tests {
     use alloy_eips::BlockNumHash;
     use eyre::OptionExt;
     use futures::StreamExt;
+    use reth_chain_state::CanonicalInMemoryStateWriter;
+    use reth_chainspec::MAINNET;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::Block as _;
+    use reth_primitives_traits::{Block as _, RecoveredBlock};
     use reth_provider::{
-        providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
-        Chain, DBProvider, DatabaseProviderFactory,
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_in_memory_state_writer,
+            MockNodeTypesWithDB,
+        },
+        BlockWriter, Chain, DBProvider, DatabaseProviderFactory,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use std::collections::BTreeMap;
@@ -668,12 +707,20 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let wal = Wal::new(temp_dir.path()).unwrap();
 
-        let provider_factory = create_test_provider_factory();
+        let (provider_factory, in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let genesis_hash = init_genesis(&provider_factory)?;
         let genesis_block = provider_factory
             .block(genesis_hash.into())?
             .ok_or_else(|| eyre::eyre!("genesis block not found"))?;
-        let provider = BlockchainProvider::new(provider_factory.clone())?;
+        let mut canonical_in_memory_state_writer = CanonicalInMemoryStateWriter::new(
+            provider_factory.chain_info_headers()?,
+            in_memory_state_writer,
+        );
+        let provider = BlockchainProvider::with_canonical_in_memory_state(
+            provider_factory.clone(),
+            canonical_in_memory_state_writer.canonical_in_memory_state().clone(),
+        );
 
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
@@ -713,9 +760,7 @@ mod tests {
         let provider_rw = provider_factory.provider_rw()?;
         provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
-        provider
-            .canonical_in_memory_state()
-            .set_canonical_head(node_head_block.clone_sealed_header());
+        canonical_in_memory_state_writer.set_canonical_head(node_head_block.clone_sealed_header());
 
         // The ExEx recovers still at genesis and catches up, it needs block 1 again, but that
         // notification is long gone from the channel.
@@ -801,6 +846,230 @@ mod tests {
 
         let new_notification = notifications.next().await.transpose()?;
         assert_eq!(new_notification, Some(notification));
+
+        Ok(())
+    }
+
+    /// A reorg replacing the ExEx head block at the same height must be delivered, even though
+    /// its new tip is not above the ExEx head.
+    #[tokio::test]
+    async fn exex_notifications_same_head_reorg_at_head() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (provider, node_head_block, new_block) = same_head_setup()?;
+        let node_head = node_head_block.num_hash();
+        let exex_head = ExExHead { block: node_head };
+
+        let notification = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(vec![node_head_block], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(vec![new_block], Default::default(), BTreeMap::new())),
+        };
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+
+        notifications_tx.send(notification.clone()).await?;
+        drop(notifications_tx);
+
+        let mut notifications = ExExNotificationsWithoutHead::new(
+            node_head,
+            provider,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(exex_head);
+
+        assert_eq!(notifications.next().await.transpose()?, Some(notification));
+
+        Ok(())
+    }
+
+    /// A revert of the ExEx head buffered during backfill must move the ExEx head, so that a later
+    /// commit of the new branch at the height of the old head is delivered.
+    #[tokio::test]
+    async fn exex_notifications_commit_after_revert_buffered_during_backfill() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (provider, a1, b1) = same_head_setup()?;
+        let a2 = random_block(
+            &mut generators::rng(),
+            2,
+            BlockParams { parent: Some(a1.hash()), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let provider_rw = provider.database_provider_rw()?;
+        provider_rw.insert_block(&a2)?;
+        provider_rw.commit()?;
+
+        let revert = ExExNotification::ChainReverted {
+            old: Arc::new(Chain::new(
+                vec![a1.clone(), a2.clone()],
+                Default::default(),
+                BTreeMap::new(),
+            )),
+        };
+        let commit = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![b1], Default::default(), BTreeMap::new())),
+        };
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+        notifications_tx.send(revert.clone()).await?;
+
+        let mut notifications = ExExNotificationsWithoutHead::new(
+            a2.num_hash(),
+            provider,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(ExExHead { block: a1.num_hash() });
+
+        // The backfill of A2 comes first, and the revert is buffered meanwhile.
+        let Some(ExExNotification::ChainCommitted { new }) =
+            notifications.next().await.transpose()?
+        else {
+            panic!("expected the backfill of A2")
+        };
+        assert_eq!(new.tip().num_hash(), a2.num_hash());
+        assert_eq!(notifications.next().await.transpose()?, Some(revert));
+
+        notifications_tx.send(commit.clone()).await?;
+        drop(notifications_tx);
+        assert_eq!(notifications.next().await.transpose()?, Some(commit));
+        assert_eq!(notifications.next().await.transpose()?, None);
+
+        Ok(())
+    }
+
+    /// Inserts a block at height 1 as the node and ExEx head, and returns the head block with a
+    /// sibling block at the same height.
+    fn same_head_setup() -> eyre::Result<(
+        BlockchainProvider<MockNodeTypesWithDB>,
+        RecoveredBlock<Block>,
+        RecoveredBlock<Block>,
+    )> {
+        let mut rng = generators::rng();
+        let provider_factory = create_test_provider_factory();
+        let genesis_hash = init_genesis(&provider_factory)?;
+        let provider = BlockchainProvider::new(provider_factory)?;
+
+        let mut block = || {
+            let block_params =
+                BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() };
+            random_block(&mut rng, 1, block_params).try_recover()
+        };
+        let head_block = block()?;
+        let sibling_block = block()?;
+        let provider_rw = provider.database_provider_rw()?;
+        provider_rw.insert_block(&head_block)?;
+        provider_rw.commit()?;
+
+        Ok((provider, head_block, sibling_block))
+    }
+
+    /// A queued reorg whose new chain ends at the ExEx head was already applied by the ExEx.
+    #[tokio::test]
+    async fn exex_notifications_same_head_skips_reorg_to_head() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (provider, head_block, sibling_block) = same_head_setup()?;
+        let head = head_block.num_hash();
+
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+        notifications_tx
+            .send(ExExNotification::ChainReorged {
+                old: Arc::new(Chain::new(vec![sibling_block], Default::default(), BTreeMap::new())),
+                new: Arc::new(Chain::new(vec![head_block], Default::default(), BTreeMap::new())),
+            })
+            .await?;
+        drop(notifications_tx);
+
+        let mut notifications = ExExNotificationsWithoutHead::new(
+            head,
+            provider,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(ExExHead { block: head });
+
+        assert_eq!(notifications.next().await.transpose()?, None);
+
+        Ok(())
+    }
+
+    /// A reorg whose new chain extends past the ExEx head must be delivered, because the ExEx
+    /// does not have the blocks above its head.
+    #[tokio::test]
+    async fn exex_notifications_same_head_reorg_above_head() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (provider, head_block, sibling_block) = same_head_setup()?;
+        let head = head_block.num_hash();
+
+        let child_block = random_block(
+            &mut generators::rng(),
+            2,
+            BlockParams { parent: Some(head.hash), tx_count: Some(0), ..Default::default() },
+        )
+        .try_recover()?;
+        let reorg = ExExNotification::ChainReorged {
+            old: Arc::new(Chain::new(vec![sibling_block], Default::default(), BTreeMap::new())),
+            new: Arc::new(Chain::new(
+                vec![head_block, child_block],
+                Default::default(),
+                BTreeMap::new(),
+            )),
+        };
+        let (notifications_tx, notifications_rx) = mpsc::channel(1);
+        notifications_tx.send(reorg.clone()).await?;
+        drop(notifications_tx);
+
+        let mut notifications = ExExNotificationsWithoutHead::new(
+            head,
+            provider,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(ExExHead { block: head });
+
+        assert_eq!(notifications.next().await.transpose()?, Some(reorg));
+
+        Ok(())
+    }
+
+    /// After a revert of the ExEx head is forwarded, a commit of the new branch at the height of
+    /// the ExEx head must be delivered.
+    #[tokio::test]
+    async fn exex_notifications_same_head_commit_after_revert() -> eyre::Result<()> {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let wal = Wal::new(temp_dir.path()).unwrap();
+        let (provider, head_block, sibling_block) = same_head_setup()?;
+        let head = head_block.num_hash();
+
+        let revert = ExExNotification::ChainReverted {
+            old: Arc::new(Chain::new(vec![head_block], Default::default(), BTreeMap::new())),
+        };
+        let commit = ExExNotification::ChainCommitted {
+            new: Arc::new(Chain::new(vec![sibling_block], Default::default(), BTreeMap::new())),
+        };
+        let (notifications_tx, notifications_rx) = mpsc::channel(2);
+        notifications_tx.send(revert.clone()).await?;
+        notifications_tx.send(commit.clone()).await?;
+        drop(notifications_tx);
+
+        let mut notifications = ExExNotificationsWithoutHead::new(
+            head,
+            provider,
+            EthEvmConfig::mainnet(),
+            notifications_rx,
+            wal.handle(),
+        )
+        .with_head(ExExHead { block: head });
+
+        assert_eq!(notifications.next().await.transpose()?, Some(revert));
+        assert_eq!(notifications.next().await.transpose()?, Some(commit));
+        assert_eq!(notifications.next().await.transpose()?, None);
 
         Ok(())
     }

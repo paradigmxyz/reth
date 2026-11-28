@@ -26,7 +26,7 @@ pub use user::{
 /// This is a generic helper function used by both receipts and bodies pruning
 /// when data is stored in static files.
 ///
-/// The checkpoint block number is set to the highest block in the actually deleted files,
+/// The checkpoint advances to the highest block in the actually deleted files,
 /// not `input.to_block`, since `to_block` might refer to a block in the middle of an
 /// undeleted file.
 pub(crate) fn prune_static_files<Provider>(
@@ -54,7 +54,7 @@ where
 
     let pruned = tx_ranges.clone().map(|range| range.len()).sum::<u64>() as usize;
 
-    // The highest block number in the deleted files is the actual checkpoint.
+    // Deleting disconnected jars below a restored suffix must preserve prior pruning progress.
     let checkpoint_block = deleted_headers
         .iter()
         .filter_map(|header| header.block_range())
@@ -65,8 +65,12 @@ where
         progress: PruneProgress::Finished,
         pruned,
         checkpoint: Some(SegmentOutputCheckpoint {
-            block_number: checkpoint_block,
-            tx_number: tx_ranges.map(|range| range.end()).max(),
+            block_number: checkpoint_block
+                .max(input.previous_checkpoint.and_then(|cp| cp.block_number)),
+            tx_number: tx_ranges
+                .map(|range| range.end())
+                .max()
+                .max(input.previous_checkpoint.and_then(|cp| cp.tx_number)),
         }),
     })
 }
@@ -145,8 +149,7 @@ pub trait Segment<Provider>: Debug + Send + Sync {
 }
 
 /// Segment pruning input, see [`Segment::prune`].
-#[derive(Debug)]
-#[cfg_attr(test, derive(Clone))]
+#[derive(Debug, Clone)]
 pub struct PruneInput {
     pub(crate) previous_checkpoint: Option<PruneCheckpoint>,
     /// Target block up to which the pruning needs to be done, inclusive.

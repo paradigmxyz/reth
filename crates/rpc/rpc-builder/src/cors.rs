@@ -41,15 +41,21 @@ pub(crate) fn create_cors_layer(http_cors_domains: &str) -> Result<CorsLayer, Co
     Ok(cors)
 }
 
-/// Rejects `WebSocket` upgrades from origins outside the configured allowlist.
+/// Origin policy for `WebSocket` upgrades.
 #[derive(Clone, Debug)]
-pub(crate) struct WsOriginValidator {
-    origins: Option<Vec<HeaderValue>>,
+pub(crate) enum WsOriginValidator {
+    Local,
+    Any,
+    List(Vec<HeaderValue>),
 }
 
 impl WsOriginValidator {
     pub(crate) fn new(domains: Option<&str>) -> Result<Self, CorsDomainError> {
-        Ok(Self { origins: domains.map(parse_origins).transpose()?.flatten() })
+        let Some(domains) = domains else { return Ok(Self::Local) };
+        Ok(match parse_origins(domains)? {
+            Some(origins) => Self::List(origins),
+            None => Self::Any,
+        })
     }
 }
 
@@ -57,14 +63,16 @@ impl<B> ValidateRequest<B> for WsOriginValidator {
     type ResponseBody = HttpBody;
 
     fn validate(&mut self, request: &mut Request<B>) -> Result<(), Response<HttpBody>> {
-        if let Some(allowed) = &self.origins &&
-            ws::is_upgrade_request(request)
-        {
+        if ws::is_upgrade_request(request) {
             let mut origins = request.headers().get_all(ORIGIN).iter();
-            // Originless clients are allowed; an explicit Origin must match exactly once.
-            if let Some(origin) = origins.next() &&
-                (origins.next().is_some() || !allowed.contains(origin))
-            {
+            // Native clients can omit Origin.
+            let Some(origin) = origins.next() else { return Ok(()) };
+            let allowed = match self {
+                Self::Any => return Ok(()),
+                Self::Local => is_local_origin(origin),
+                Self::List(allowed) => allowed.contains(origin),
+            };
+            if !allowed || origins.next().is_some() {
                 let mut response = Response::new(HttpBody::empty());
                 *response.status_mut() = StatusCode::FORBIDDEN;
                 return Err(response)
@@ -72,6 +80,17 @@ impl<B> ValidateRequest<B> for WsOriginValidator {
         }
         Ok(())
     }
+}
+
+fn is_local_origin(origin: &HeaderValue) -> bool {
+    let Ok(origin) = origin.to_str() else { return false };
+    let Some(("http" | "https", authority)) = origin.split_once("://") else { return false };
+    // Browser origins contain only a scheme, host and optional port.
+    let host = match authority.rsplit_once(':') {
+        Some((host, port)) if !port.starts_with('+') && port.parse::<u16>().is_ok() => host,
+        _ => authority,
+    };
+    matches!(host, "localhost" | "127.0.0.1" | "[::1]")
 }
 
 fn parse_origins(domains: &str) -> Result<Option<Vec<HeaderValue>>, CorsDomainError> {

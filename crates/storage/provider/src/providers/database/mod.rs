@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use core::fmt;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
-use reth_chain_state::InMemoryState;
+use reth_chain_state::{ChainInfoHeaders, InMemoryState};
 use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
@@ -116,8 +116,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
     ///
     /// `overlay_manager` carries the in-memory state that [`Self::in_memory_state`] returns. A
-    /// default manager has an empty in-memory state of its own, which fits storage whose blocks
-    /// are all on disk.
+    /// default manager has a read-only in-memory state, which never has blocks: that fits storage
+    /// whose blocks are all on disk.
     ///
     /// The storage backends used by the produced factory MAY be inconsistent.
     /// It is recommended to call [`Self::check_consistency`] after
@@ -249,7 +249,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     {
         let factory = self.clone();
         let db_path = self.db.path();
-        reth_tasks::spawn_os_thread("ro-sync", move || {
+        reth_tasks::spawn_thread("ro-sync", move || {
             let (tx, rx) = std::sync::mpsc::channel();
             let mut watcher = RecommendedWatcher::new(
                 move |res| {
@@ -590,6 +590,41 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         self.sync_providers_if_needed()?;
         Ok(self.static_file_provider.clone())
     }
+
+    /// Returns the latest, safe and finalized headers stored in the database. The safe header is
+    /// the finalized one if no safe block is stored.
+    ///
+    /// These are the headers a canonical in-memory state over this factory starts from.
+    ///
+    /// Returns [`ProviderError::HeaderNotFound`] if the header of the latest block is not stored,
+    /// which is the case for a database without a genesis block.
+    pub fn chain_info_headers(&self) -> ProviderResult<ChainInfoHeaders<HeaderTy<N>>> {
+        let provider = self.provider()?;
+        let best = provider.chain_info()?;
+        let latest = provider
+            .header_by_number(best.best_number)?
+            .ok_or_else(|| ProviderError::HeaderNotFound(best.best_number.into()))?;
+        let finalized_header = provider
+            .last_finalized_block_number()?
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        let safe_header = provider
+            .last_safe_block_number()?
+            .or_else(|| {
+                // for the purpose of this we can also use the finalized block if we don't have the
+                // safe block
+                provider.last_finalized_block_number().ok().flatten()
+            })
+            .map(|num| provider.sealed_header(num))
+            .transpose()?
+            .flatten();
+        Ok(ChainInfoHeaders {
+            canonical_head: SealedHeader::new(latest, best.best_hash),
+            safe: safe_header,
+            finalized: finalized_header,
+        })
+    }
 }
 
 impl<N: NodeTypesWithDB> NodePrimitivesProvider for ProviderFactory<N> {
@@ -710,9 +745,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
     }
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
-        // earliest history height tracks the lowest block number that has __not__ been expired, in
-        // other words, the first/earliest available block.
-        Ok(self.caught_up_static_file_provider()?.earliest_history_height())
+        self.provider()?.earliest_block_number()
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1058,7 +1091,7 @@ mod tests {
     use reth_ethereum_primitives::Receipt;
     use reth_primitives_traits::SignerRecoverable;
     use reth_prune_types::{PruneMode, PruneModes};
-    use reth_storage_api::MetadataWriter;
+    use reth_storage_api::{metadata::keys, MetadataWriter};
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
@@ -1578,5 +1611,122 @@ mod tests {
             writer.commit().unwrap();
         }
         factory
+    }
+
+    #[test]
+    fn legacy_and_verified_bodies_checkpoints_after_reopen() -> eyre::Result<()> {
+        let mut factory = create_test_provider_factory();
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("files"))
+                .with_blocks_per_file(2)
+                .build()?;
+        let provider = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        for number in 0..=5 {
+            let tx_count = Some(u8::from(matches!(number, 1 | 3)));
+            let block =
+                random_block(&mut rng, number, BlockParams { tx_count, ..Default::default() });
+            provider.insert_block(&block.try_recover()?)?;
+        }
+        // The fixture imports blocks without executing transactions or writing receipts.
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
+        let legacy = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(3),
+        };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
+        provider.commit()?;
+
+        let segment = StaticFileSegment::Transactions;
+        let files = factory.static_file_provider();
+        files.initialize_index()?;
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
+        let checkpoints = || factory.get_prune_checkpoints_for_availability();
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..legacy };
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
+        assert_eq!(factory.get_prune_checkpoint(PruneSegment::Bodies)?, Some(legacy));
+
+        let provider = factory.provider_rw()?;
+        for ambiguous in [
+            PruneCheckpoint { tx_number: Some(0), ..legacy },
+            PruneCheckpoint { prune_mode: PruneMode::Before(6), ..legacy },
+            PruneCheckpoint { block_number: Some(3), ..legacy },
+        ] {
+            assert_eq!(
+                files.snapshot_bodies_checkpoint(provider.tx_ref(), ambiguous, 0, 5)?,
+                ambiguous
+            );
+        }
+        // A verified source boundary inside a physically retained jar still expires its bodies.
+        provider.write_metadata(keys::VERIFIED_SNAPSHOT_BODIES, Vec::new())?;
+        assert_eq!(files.snapshot_bodies_checkpoint(provider.tx_ref(), legacy, 0, 5)?, legacy);
+        let pruned = PruneCheckpoint { tx_number: Some(1), ..PruneCheckpoint::pruned_through(3) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, pruned)?;
+        provider.commit()?;
+        assert_eq!(factory.earliest_block_number()?, 4);
+        assert!(factory.block(factory.earliest_block_number()?.into())?.is_some());
+        assert_matches!(
+            factory.block(3.into()),
+            Err(ProviderError::BlockExpired { requested: 3, earliest_available: 4 })
+        );
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pruned)]);
+
+        // The older jar contains transaction zero; the entire suffix after the gap is empty.
+        files.delete_jar(segment, 2)?;
+        assert_eq!(files.get_highest_static_file_tx(segment), Some(0));
+        assert_eq!(files.check_consistency(&factory.provider()?)?, None);
+        assert_eq!(factory.block(5.into())?.unwrap().body.transactions.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn unverified_bodies_checkpoint_follows_the_transaction_files() -> eyre::Result<()> {
+        let mut factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(StorageSettings::v2());
+        factory.static_file_provider =
+            StaticFileProviderBuilder::read_write(factory.db.path().join("files"))
+                .with_blocks_per_file(2)
+                .build()?;
+        let provider = factory.provider_rw()?;
+        let mut rng = generators::rng();
+        for number in 0..=6 {
+            let tx_count = Some(u8::from(matches!(number, 1 | 3 | 6)));
+            let block =
+                random_block(&mut rng, number, BlockParams { tx_count, ..Default::default() });
+            provider.insert_block(&block.try_recover()?)?;
+        }
+        provider.save_stage_checkpoint(StageId::Execution, StageCheckpoint::default())?;
+        // An older download recorded its tip 5 as pruned, and the chain has since advanced.
+        let legacy = PruneCheckpoint {
+            block_number: Some(5),
+            tx_number: Some(1),
+            prune_mode: PruneMode::Before(3),
+        };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, legacy)?;
+        provider.commit()?;
+
+        let files = factory.static_file_provider();
+        files.initialize_index()?;
+        let checkpoints = || factory.get_prune_checkpoints_for_availability();
+        let available = PruneCheckpoint { block_number: None, tx_number: None, ..legacy };
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, available)]);
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(3.into())?.unwrap().body.transactions.len(), 1);
+
+        // A file before a gap stays readable.
+        files.delete_jar(StaticFileSegment::Transactions, 2)?;
+        assert_eq!(factory.earliest_block_number()?, 0);
+        assert_eq!(factory.block(1.into())?.unwrap().body.transactions.len(), 1);
+
+        // Snap sync stores no body indices at its pivot, which stays unavailable.
+        let provider = factory.provider_rw()?;
+        provider.tx_ref().delete::<tables::BlockBodyIndices>(6, None)?;
+        let pivot = PruneCheckpoint { tx_number: Some(2), ..PruneCheckpoint::pruned_through(6) };
+        provider.save_prune_checkpoint(PruneSegment::Bodies, pivot)?;
+        provider.commit()?;
+        assert_eq!(checkpoints()?, [(PruneSegment::Bodies, pivot)]);
+        Ok(())
     }
 }

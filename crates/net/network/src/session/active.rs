@@ -49,7 +49,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 /// The recommended interval at which to check if a new range update should be sent to the remote
 /// peer.
@@ -394,6 +394,20 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetBlockAccessLists)
             }
             EthMessage::Cells(resp) => {
+                if let Some(req) = self.inflight_requests.get(&resp.request_id) &&
+                    let RequestState::Waiting(PeerRequest::GetCells { request, .. }) =
+                        &req.request &&
+                    let Err(err) = resp.message.validate_response(request)
+                {
+                    debug!(target: "net::session", request_id=?resp.request_id, %err, remote_peer_id=?self.remote_peer_id, "received invalid cells response");
+                    if let Some(req) = self.inflight_requests.remove(&resp.request_id) &&
+                        let RequestState::Waiting(request) = req.request
+                    {
+                        request.send_bad_response();
+                    }
+                    self.on_bad_message();
+                    return OnIncomingMessageOutcome::Ok
+                }
                 on_response!(resp, GetCells)
             }
             EthMessage::BlockRangeUpdate(msg) => {
@@ -519,6 +533,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         if matches!(request, PeerRequest::GetSnap { .. }) && !self.conn.supports_snap() {
             request.send_err_response(RequestError::UnsupportedCapability);
             return;
+        }
+
+        if let PeerRequest::GetCells { request: cells, .. } = &request &&
+            let Err(err) = cells.cell_mask.validate(&cells.hashes, false)
+        {
+            error!(target: "net", peer_id=?self.remote_peer_id, %err, "Rejected invalid local cell request");
+            request.send_err_response(RequestError::InvalidRequest);
+            return
         }
 
         let request_id = self.next_id();
@@ -1344,7 +1366,7 @@ mod tests {
             AccountRangeMessage, BlockAccessListsMessage, GetAccountRangeMessage,
             GetBlockAccessListsMessage,
         },
-        BlockAccessLists, EthMessageID, NewPooledTransactionHashes72,
+        BlockAccessLists, CellMasks, Cells, EthMessageID, GetCells, NewPooledTransactionHashes72,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_p2p::error::RequestResult;
@@ -1978,6 +2000,106 @@ mod tests {
             futures::FutureExt::now_or_never(builder.active_session_rx.next()).flatten(),
             Some(ActiveSessionMessage::BadMessage { .. })
         ));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn invalid_local_cells_requests_do_not_affect_session() {
+        tokio::time::timeout(Duration::from_secs(15), async {
+            let mut builder = SessionBuilder::default();
+            builder.hello = HelloMessageWithProtocols::builder(builder.local_peer_id)
+                .protocols(vec![EthVersion::Eth73.into()])
+                .build();
+            builder.status.set_eth_version(EthVersion::Eth73);
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let valid = GetCells::from_masks(
+                vec![B256::ZERO, B256::repeat_byte(1)],
+                vec![B128::repeat_byte(1), B128::repeat_byte(2)],
+            )
+            .unwrap();
+            let expected = valid.clone();
+            let reply = Cells {
+                cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Default::default() },
+                ..Default::default()
+            };
+            let client_reply = reply.clone();
+            let client = tokio::spawn(builder.with_client_stream(
+                listener.local_addr().unwrap(),
+                async move |mut stream| {
+                    let EthMessage::GetCells(request) = stream.next().await.unwrap().unwrap()
+                    else {
+                        panic!("expected the valid cell request")
+                    };
+                    assert_eq!(request.message, expected);
+                    stream
+                        .send(EthMessage::Cells(RequestPair {
+                            request_id: request.request_id,
+                            message: client_reply,
+                        }))
+                        .await
+                        .unwrap();
+                },
+            ));
+            let (incoming, _) = listener.accept().await.unwrap();
+            let mut session = builder.connect_incoming(incoming).await;
+            assert_eq!(session.conn.version(), EthVersion::Eth73);
+            let mut invalid = Vec::new();
+            for ids in [vec![0], vec![0, 2], vec![1, 0], vec![0, 0]] {
+                invalid.push(GetCells {
+                    hashes: valid.hashes.clone(),
+                    cell_mask: CellMasks::Indexed {
+                        masks: vec![B128::repeat_byte(1), B128::repeat_byte(2)],
+                        mask_ids: ids.into(),
+                    },
+                });
+            }
+            invalid
+                .push(GetCells { hashes: vec![B256::ZERO; 2], cell_mask: valid.cell_mask.clone() });
+            invalid.push(GetCells {
+                hashes: valid.hashes.clone(),
+                cell_mask: CellMasks::Indexed {
+                    masks: vec![B128::ZERO; 2],
+                    mask_ids: vec![0, 1].into(),
+                },
+            });
+            invalid.push(GetCells {
+                hashes: vec![],
+                cell_mask: CellMasks::Indexed { masks: vec![], mask_ids: Default::default() },
+            });
+            invalid.push(GetCells {
+                hashes: valid.hashes.clone(),
+                cell_mask: CellMasks::Indexed {
+                    masks: vec![B128::ZERO],
+                    mask_ids: vec![0, 0].into(),
+                },
+            });
+            for request in invalid {
+                let (response, rx) = oneshot::channel();
+                let deadline = session.request_deadline();
+                session.on_internal_peer_request(
+                    PeerRequest::GetCells { request, response },
+                    deadline,
+                );
+                assert_eq!(rx.await.unwrap(), Err(RequestError::InvalidRequest));
+                assert!(session.inflight_requests.is_empty());
+                assert!(session.queued_outgoing.is_empty());
+                assert_eq!(session.next_id, 0);
+                assert!(!session.is_disconnecting());
+            }
+            assert!(futures::FutureExt::now_or_never(builder.active_session_rx.next()).is_none());
+            let (response, rx) = oneshot::channel();
+            let deadline = session.request_deadline();
+            session.on_internal_peer_request(
+                PeerRequest::GetCells { request: valid, response },
+                deadline,
+            );
+            assert_eq!(session.next_id, 1);
+            let session_task = tokio::spawn(session);
+            assert_eq!(rx.await.unwrap(), Ok(reply));
+            client.await.unwrap();
+            session_task.await.unwrap();
+        })
+        .await
+        .expect("cell request rejection and subsequent round trip timed out");
     }
 
     #[tokio::test(flavor = "multi_thread")]

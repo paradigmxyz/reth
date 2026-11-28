@@ -37,9 +37,9 @@ use alloy_primitives::{
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
-use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_concurrency::sync::rayon::prelude::ParallelSliceMut;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::{Database, ReaderTxnTracker},
@@ -68,8 +68,8 @@ use reth_prune_types::{
 use reth_stages_types::{FinishCheckpoint, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader, MetadataProvider,
-    MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
+    metadata::keys, BlockBodyIndicesProvider, BlockBodyReader, HistoryInfo, HistoryReader,
+    MetadataProvider, MetadataWriter, NodePrimitivesProvider, StateProvider, StateWriteConfig,
     StorageChangeSetReader, StoragePath, StorageSettingsCache, WriteStateInput,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
@@ -270,31 +270,28 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
         self.reader_txn_tracker = Some(Arc::new(reader_txn_tracker));
         self
     }
-
-    /// Returns the manager of the in-memory blocks the engine tree holds.
-    pub(crate) const fn overlay_manager(&self) -> &OverlayManager<N::Primitives> {
-        &self.overlay_manager
-    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Commits unwind writes in MDBX -> `RocksDB` -> static-file order.
     ///
     /// This keeps MDBX as the first durable step so an interrupted unwind can be recovered by
-    /// truncating static files from checkpoints on the next startup.
+    /// truncating static files from checkpoints on the next startup. The MDBX commit is synced in
+    /// every sync mode, so power loss can't roll it back above the truncated static files.
     ///
     /// This waits after the MDBX commit so readers holding older MDBX-visible views cannot overlap
-    /// later cross-store unwind steps.
+    /// later cross-store unwind steps. If the wait fails because MDBX stopped answering queries,
+    /// the later steps are skipped and the same startup recovery applies.
     ///
     /// Historical `storage_v2` reads ignore `RocksDB` history entries above their MDBX-visible tip,
     /// so no additional post-`RocksDB` wait is needed before static-file commit.
     fn commit_unwind(self) -> ProviderResult<()> {
         let storage_v2 = self.cached_storage_settings().storage_v2;
         let reader_txn_tracker = self.reader_txn_tracker.clone();
-        self.tx.commit()?;
+        self.tx.commit_durable()?;
 
         if let Some(reader_txn_tracker) = reader_txn_tracker.as_ref() {
-            reader_txn_tracker.wait_for_pre_commit_readers();
+            reader_txn_tracker.wait_for_pre_commit_readers()?;
         }
 
         if storage_v2 {
@@ -1086,10 +1083,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         BF: FnOnce(H, BodyTy<N>, Vec<Address>) -> ProviderResult<Option<B>>,
     {
         let Some(block_number) = self.convert_hash_or_number(id)? else { return Ok(None) };
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if block_number < earliest_available {
-            return Err(ProviderError::BlockExpired { requested: block_number, earliest_available })
-        }
+        self.ensure_body_available(block_number)?;
         let Some(header) = header_by_number(block_number)? else { return Ok(None) };
 
         // Get the block body
@@ -1161,15 +1155,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             return Ok(Vec::new())
         }
 
-        // like the single block lookups, reject ranges that reach into expired history instead
-        // of assembling blocks whose bodies are no longer available
-        let earliest_available = self.static_file_provider.earliest_history_height();
-        if *range.start() < earliest_available {
-            return Err(ProviderError::BlockExpired {
-                requested: *range.start(),
-                earliest_available,
-            })
-        }
+        self.ensure_body_available(*range.start())?;
 
         let len = range.end().saturating_sub(*range.start()) as usize + 1;
         let mut blocks = Vec::with_capacity(len);
@@ -1375,6 +1361,24 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
                     .map(|s| s.value))
             },
         )
+    }
+
+    /// The snapshot Bodies checkpoint can expire a block whose state and receipts still exist.
+    fn ensure_body_available(&self, requested: BlockNumber) -> ProviderResult<()> {
+        let checkpoint = self.get_prune_checkpoint(PruneSegment::Bodies)?;
+        // Reconciling an older download's checkpoint only lowers it, so later blocks skip that.
+        if requested >= self.static_file_provider.earliest_history_height() &&
+            checkpoint
+                .and_then(|checkpoint| checkpoint.block_number)
+                .is_none_or(|pruned| pruned < requested)
+        {
+            return Ok(())
+        }
+        let earliest_available = self.earliest_body_block(checkpoint)?;
+        if requested < earliest_available {
+            return Err(ProviderError::BlockExpired { requested, earliest_available })
+        }
+        Ok(())
     }
 }
 
@@ -1664,17 +1668,27 @@ impl<TX: DbTx, N: NodeTypes> StorageChangeSetReader for DatabaseProvider<TX, N> 
         &self,
         range: impl RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumberAddress, StorageEntry)>> {
+        let mut changesets = Vec::new();
+        self.for_each_storage_changeset(range, |block_address, entry| {
+            changesets.push((block_address, entry))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_storage_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumberAddress, StorageEntry),
+    ) -> ProviderResult<()> {
         if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.storage_changesets_range(range)
+            self.static_file_provider.for_each_storage_changeset(range, f)
         } else {
-            self.tx
-                .cursor_dup_read::<tables::StorageChangeSets>()?
-                .walk_range(BlockNumberAddressRange::from(range))?
-                .map(|r| {
-                    let (bna, entry) = r?;
-                    Ok((bna, entry))
-                })
-                .collect()
+            let mut cursor = self.tx.cursor_dup_read::<tables::StorageChangeSets>()?;
+            for entry in cursor.walk_range(BlockNumberAddressRange::from(range))? {
+                let (block_address, storage_entry) = entry?;
+                f(block_address, storage_entry);
+            }
+            Ok(())
         }
     }
 
@@ -1733,18 +1747,31 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         range: impl core::ops::RangeBounds<BlockNumber>,
     ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        let mut changesets = Vec::new();
+        self.for_each_account_changeset(range, |block_number, changeset| {
+            changesets.push((block_number, changeset))
+        })?;
+        Ok(changesets)
+    }
+
+    fn for_each_account_changeset(
+        &self,
+        range: impl RangeBounds<BlockNumber>,
+        mut f: impl FnMut(BlockNumber, AccountBeforeTx),
+    ) -> ProviderResult<()> {
         if self.cached_storage_settings().storage_v2 {
-            self.static_file_provider.account_changesets_range(range)
+            self.static_file_provider.for_each_account_changeset(range, f)
         } else {
             let range = changeset_block_range(range, BlockNumber::MAX);
             if range.is_empty() {
-                return Ok(Vec::new())
+                return Ok(())
             }
-            self.tx
-                .cursor_read::<tables::AccountChangeSets>()?
-                .walk_range(range)?
-                .map(|r| r.map_err(Into::into))
-                .collect()
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(range)? {
+                let (block_number, changeset) = entry?;
+                f(block_number, changeset);
+            }
+            Ok(())
         }
     }
 
@@ -1922,6 +1949,52 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockHashReader for DatabaseProvider<TX, 
     }
 }
 
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Only a checkpoint the downloader verified against the restored files bounds reads. Older
+    /// downloads could record their tip as pruned with its bodies retained, so without that
+    /// marker a checkpoint inside the transaction files is reported where the files start.
+    /// The original pruning progress is kept for writes.
+    fn bodies_checkpoint_for_reads(
+        &self,
+        mut checkpoint: PruneCheckpoint,
+    ) -> ProviderResult<PruneCheckpoint> {
+        let first = self.static_file_provider.earliest_history_height();
+        // Snap sync has no body indices at its pivot, which stays unavailable.
+        if let Some(block) = checkpoint.block_number &&
+            block >= first &&
+            self.tx.get::<tables::Metadata>(keys::VERIFIED_SNAPSHOT_BODIES.to_owned())?.is_none() &&
+            self.tx.get::<tables::BlockBodyIndices>(block)?.is_some()
+        {
+            checkpoint.block_number = first.checked_sub(1);
+            checkpoint.tx_number = self
+                .tx
+                .get::<tables::BlockBodyIndices>(first)?
+                .and_then(|indices| indices.first_tx_num().checked_sub(1));
+        }
+        Ok(checkpoint)
+    }
+
+    /// Returns the first block with an available body, given the stored Bodies checkpoint.
+    fn earliest_body_block(
+        &self,
+        checkpoint: Option<PruneCheckpoint>,
+    ) -> ProviderResult<BlockNumber> {
+        let first_file_block = self.static_file_provider.earliest_history_height();
+        // A download keeps body indices at the pruned tip and anchors its transaction file
+        // there for the next append. Snap sync has no body indices at its pivot.
+        let earliest = if let Some(checkpoint) = checkpoint &&
+            let Some(pruned) = self.bodies_checkpoint_for_reads(checkpoint)?.block_number &&
+            pruned >= first_file_block &&
+            self.tx.get::<tables::BlockBodyIndices>(pruned)?.is_some()
+        {
+            pruned.saturating_add(1)
+        } else {
+            first_file_block
+        };
+        Ok(earliest)
+    }
+}
+
 impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N> {
     fn chain_info(&self) -> ProviderResult<ChainInfo> {
         let best_number = self.best_block_number()?;
@@ -1940,6 +2013,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
 
     fn last_block_number(&self) -> ProviderResult<BlockNumber> {
         self.static_file_provider.last_block_number()
+    }
+
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.earliest_body_block(self.get_prune_checkpoint(PruneSegment::Bodies)?)
     }
 
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
@@ -1971,10 +2048,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// Returns an error if the requested block is below the earliest available history.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         if let Some(number) = self.convert_hash_or_number(id)? {
-            let earliest_available = self.static_file_provider.earliest_history_height();
-            if number < earliest_available {
-                return Err(ProviderError::BlockExpired { requested: number, earliest_available })
-            }
+            self.ensure_body_available(number)?;
 
             let Some(header) = self.header_by_number(number)? else { return Ok(None) };
 
@@ -4003,6 +4077,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
         &self,
     ) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
         let mut checkpoints = self.get_prune_checkpoints()?;
+        if let Some((_, bodies)) =
+            checkpoints.iter_mut().find(|(segment, _)| *segment == PruneSegment::Bodies)
+        {
+            *bodies = self.bodies_checkpoint_for_reads(*bodies)?;
+        }
         if !EitherWriter::receipts_destination(self).is_static_file() ||
             !checkpoints.iter().any(|(segment, checkpoint)| {
                 matches!(segment, PruneSegment::Receipts | PruneSegment::ContractLogs) &&
@@ -4213,9 +4292,11 @@ mod tests {
     use super::*;
     use crate::{
         test_utils::{
-            blocks::BlockchainTestData, create_test_provider_factory, MockNodeTypesWithDB,
+            blocks::BlockchainTestData, create_test_provider_factory,
+            create_test_provider_factory_with_chain_spec_and_db_args,
+            create_test_provider_factory_with_in_memory_state_writer,
         },
-        BlockWriter, ProviderFactory,
+        BlockWriter,
     };
     use alloy_consensus::Header;
     use alloy_eips::BlockNumHash;
@@ -4224,9 +4305,9 @@ mod tests {
         U256,
     };
     use evm2::evm::AccountInfo;
-    use reth_chain_state::{
-        test_utils::TestBlockBuilder, CanonicalInMemoryState, ChainInfoHeaders, ExecutedBlock,
-    };
+    use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock};
+    use reth_chainspec::MAINNET;
+    use reth_db::mdbx::{DatabaseArguments, SyncMode};
     use reth_db_api::models::{SnapAttempt, StorageSettings};
     use reth_ethereum_primitives::Receipt;
     use reth_execution_types::{AccountRevertInit, BlockExecutionOutput, BlockExecutionResult};
@@ -4256,20 +4337,6 @@ mod tests {
             &[],
             None,
             SaveBlocksMode::Full,
-        )
-    }
-
-    /// Creates the canonical state that updates the in-memory blocks of `factory`.
-    fn canonical_state_for(
-        factory: &ProviderFactory<MockNodeTypesWithDB>,
-    ) -> CanonicalInMemoryState {
-        CanonicalInMemoryState::with_head(
-            ChainInfoHeaders {
-                canonical_head: SealedHeader::default(),
-                safe: None,
-                finalized: None,
-            },
-            factory.in_memory_state().clone(),
         )
     }
 
@@ -4451,6 +4518,32 @@ mod tests {
 
         done_rx.recv_timeout(Duration::from_secs(1)).unwrap().unwrap();
         handle.join().unwrap();
+    }
+
+    #[test]
+    fn unwind_commit_syncs_non_durable_db() {
+        let factory = create_test_provider_factory_with_chain_spec_and_db_args(
+            MAINNET.clone(),
+            DatabaseArguments::test().with_sync_mode(Some(SyncMode::SafeNoSync)),
+        );
+        let info = || factory.db_ref().db().info().unwrap();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![1]).unwrap();
+        provider_rw.commit().unwrap();
+        assert!(
+            info().last_steady_txnid() < Some(info().last_txnid() as u64),
+            "safe-no-sync commits must not be steady"
+        );
+
+        let provider_rw = factory.unwind_provider_rw().unwrap();
+        provider_rw.write_metadata("unwind-sync-test", vec![2]).unwrap();
+        provider_rw.commit().unwrap();
+        assert_eq!(
+            info().last_steady_txnid(),
+            Some(info().last_txnid() as u64),
+            "the unwind commit must be steady"
+        );
     }
 
     #[test]
@@ -5158,15 +5251,15 @@ mod tests {
 
     #[test]
     fn unwind_restores_trie_nodes_masked_above_the_frontier() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let blocks = TestBlockBuilder::eth().get_executed_blocks(0..11).collect::<Vec<_>>();
         let provider = factory.provider_rw().unwrap();
         for block in &blocks {
             provider.insert_block(block.recovered_block()).unwrap();
         }
-        let canonical_state = canonical_state_for(&factory);
         for block in &blocks[6..] {
-            canonical_state.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
         provider
             .save_stage_checkpoint(
@@ -5203,7 +5296,8 @@ mod tests {
 
     #[test]
     fn remove_block_and_execution_above_returns_persistence_frontiers() {
-        let factory = create_test_provider_factory();
+        let (factory, mut in_memory_state_writer) =
+            create_test_provider_factory_with_in_memory_state_writer(MAINNET.clone());
         let mut test_block_builder = TestBlockBuilder::eth().with_state();
 
         let genesis = test_block_builder.get_executed_blocks(0..1).next().unwrap();
@@ -5213,9 +5307,8 @@ mod tests {
         save_genesis(&provider_rw, &genesis).unwrap();
         provider_rw.commit().unwrap();
 
-        let canonical_state = canonical_state_for(&factory);
         for block in &blocks[2..] {
-            canonical_state.insert_executed(block.clone());
+            in_memory_state_writer.insert_executed(block.clone());
         }
 
         let provider_rw = factory.provider_rw().unwrap();

@@ -501,11 +501,16 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 target: "net::session",
                 "gracefully disconnecting incoming connection"
             );
-            if let Ok(stream) = get_ecies_stream(stream, secret_key, Direction::Incoming).await {
-                let mut unauth = UnauthedP2PStream::new(stream);
-                let _ = unauth.send_disconnect(reason).await;
-                drop(guard);
-            }
+            let _ = tokio::time::timeout(HANDSHAKE_TIMEOUT, async move {
+                if let Ok(stream) = get_ecies_stream(stream, secret_key, Direction::Incoming).await
+                {
+                    let mut unauth = UnauthedP2PStream::new(stream);
+                    let _ = unauth.send_disconnect(reason).await;
+                }
+            })
+            .await;
+            // Holds the slot until the handshake and disconnect finish or time out.
+            drop(guard);
         });
     }
 

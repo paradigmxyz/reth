@@ -17,13 +17,14 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash, NumHash};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
+use reth_concurrency::sync::time::FastInstant as Instant;
 use reth_consensus::Consensus;
 use reth_engine_primitives::{ConsensusEngineEvent, ExecutionPayload, SlowBlockInfo};
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::full_block::SealedBlockWithAccessList;
 use reth_payload_primitives::{BuiltPayload, NewPayloadError, PayloadTypes};
-use reth_primitives_traits::{FastInstant as Instant, NodePrimitives, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 use reth_provider::{
     BalProvider, BlockReader, ChangeSetReader, DatabaseProviderFactory, PruneCheckpointReader,
     StageCheckpointReader, StateProviderFactory, StateReader, StorageChangeSetReader,
@@ -605,15 +606,18 @@ where
         error!(target: "engine::tree", payload=?payload_num_hash, %error, "Invalid payload");
         // we need to convert the error to a payload status (response to the CL)
 
-        let latest_valid_hash =
-            if error.is_block_hash_mismatch() || error.is_invalid_versioned_hashes() {
-                // Engine-API rules:
-                // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
-                // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
-                None
-            } else {
-                self.latest_valid_hash_for_invalid_payload(parent_hash)?
-            };
+        let latest_valid_hash = if error.is_block_hash_mismatch() ||
+            error.is_invalid_versioned_hashes() ||
+            error.is_decode_error()
+        {
+            // Engine-API rules:
+            // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
+            // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
+            // > `latestValidHash: null` if `transactions` contains zero length or invalid entries (<https://github.com/ethereum/execution-apis/blob/981aa66d79364be8322a9c358aaf0a571cca0873/src/engine/paris.md?plain=1#L175>)
+            None
+        } else {
+            self.latest_valid_hash_for_invalid_payload(parent_hash)?
+        };
 
         let status = PayloadStatusEnum::from(error);
         Ok(PayloadStatus::new(status, latest_valid_hash))

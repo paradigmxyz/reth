@@ -18,6 +18,7 @@ use evm2::{
     evm::{AccountInfo, Database, InMemoryDB},
 };
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
+use reth_concurrency::sync::channel;
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
     execute::{BasicBlockExecutor, Executor},
@@ -27,7 +28,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::{BlockExecutionResult, BundleSource, StateUpdate};
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_testing_utils::generators::{self, sign_tx_with_key_pair};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
 fn create_database_with_beacon_root_contract() -> InMemoryDB {
     let mut db = InMemoryDB::default();
@@ -700,7 +701,7 @@ fn block_gas_limit_error() {
     }
 }
 
-#[test]
+#[reth_concurrency::test]
 fn test_balance_increment_not_duplicated() {
     let chain_spec = Arc::new(
         ChainSpecBuilder::from(&*MAINNET)
@@ -745,7 +746,7 @@ fn test_balance_increment_not_duplicated() {
     let provider = EthEvmConfig::new(chain_spec);
     let executor = provider.batch_executor(db);
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = channel::unbounded();
     let tx_clone = tx.clone();
 
     let _output = executor
@@ -814,7 +815,7 @@ fn prepared_block_access_list_keeps_legacy_ef01_code() {
 
     let alloy_bal = BlockAccessList::from(&bal.unwrap());
     let created = alloy_bal.iter().find(|account| account.address == sender_address.create(0));
-    assert_eq!(created.unwrap().code_changes[0].new_code, runtime);
+    assert_eq!(created.unwrap().code_changes[0].new_code(), &runtime);
     // Reparsing the canonical BAL into evm2's representation rejects the same code.
     assert!(evm2::evm::Bal::try_from(alloy_bal).is_err());
 }

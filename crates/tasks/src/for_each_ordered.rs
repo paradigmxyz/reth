@@ -1,10 +1,13 @@
+use reth_concurrency::sync::rayon;
+
 use crossbeam_utils::CachePadded;
-use parking_lot::{Condvar, Mutex};
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{
-    panic::{catch_unwind, AssertUnwindSafe},
-    sync::atomic::{AtomicBool, Ordering},
-};
+#[cfg(all(feature = "fuzz", dst))]
+use reth_concurrency::sync::channel;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+
+#[cfg(not(all(feature = "fuzz", dst)))]
+use reth_concurrency::sync::parking_lot;
 
 /// Extension trait for [`IndexedParallelIterator`]
 /// that streams results to a sequential consumer in index order.
@@ -20,10 +23,13 @@ pub trait ForEachOrdered: IndexedParallelIterator {
     ///
     /// # Blocking
     ///
-    /// The calling thread blocks (via [`Condvar`]) while waiting for the next item to become
-    /// ready. It does **not** participate in rayon's work-stealing while blocked. Callers
-    /// should invoke this from a dedicated blocking thread (e.g. via
-    /// [`tokio::task::spawn_blocking`]) rather than from within the rayon thread pool.
+    /// The calling thread blocks (via a condvar, or a scheduled channel under `fuzz` plus `--cfg
+    /// dst`) while waiting for the next item to become ready. It does **not** participate in
+    /// rayon's work-stealing while blocked. With the native backend, invoke this from a dedicated
+    /// blocking thread (e.g. via [`tokio::task::spawn_blocking`]) rather than the rayon thread
+    /// pool. With `fuzz` plus `--cfg dst`, invoke this inside
+    /// [`reth_concurrency::sync::Runtime::run`] or one of its selected threads, not directly from a
+    /// Tokio blocking worker.
     fn for_each_ordered<F>(self, f: F)
     where
         Self::Item: Send,
@@ -55,59 +61,88 @@ impl<I: IndexedParallelIterator> ForEachOrdered for I {
     }
 }
 
-/// A slot holding an optional value and a condvar for notification.
+/// A slot with a native condvar or scheduler-aware channel for notification.
 struct Slot<T> {
-    value: Mutex<Option<T>>,
-    notify: Condvar,
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    value: parking_lot::Mutex<Option<T>>,
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    notify: parking_lot::Condvar,
+    #[cfg(all(feature = "fuzz", dst))]
+    tx: channel::Sender<Result<T, ()>>,
+    #[cfg(all(feature = "fuzz", dst))]
+    rx: channel::Receiver<Result<T, ()>>,
 }
 
 impl<T> Slot<T> {
+    #[cfg(not(all(feature = "fuzz", dst)))]
     const fn new() -> Self {
-        Self { value: Mutex::new(None), notify: Condvar::new() }
+        Self { value: parking_lot::Mutex::new(None), notify: parking_lot::Condvar::new() }
+    }
+
+    #[cfg(all(feature = "fuzz", dst))]
+    fn new() -> Self {
+        let (tx, rx) = channel::unbounded();
+        Self { tx, rx }
     }
 }
 
 struct Shared<T> {
     slots: Box<[CachePadded<Slot<T>>]>,
-    panicked: AtomicBool,
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    panicked: std::sync::atomic::AtomicBool,
 }
 
 impl<T> Shared<T> {
     fn new(n: usize) -> Self {
         let slots =
             (0..n).map(|_| CachePadded::new(Slot::new())).collect::<Vec<_>>().into_boxed_slice();
-        Self { slots, panicked: AtomicBool::new(false) }
+        Self {
+            slots,
+            #[cfg(not(all(feature = "fuzz", dst)))]
+            panicked: std::sync::atomic::AtomicBool::new(false),
+        }
     }
 
     /// Writes a value into slot `i`. Must only be called once per index.
     #[inline]
     fn write(&self, i: usize, val: T) {
         let slot = &self.slots[i];
-        *slot.value.lock() = Some(val);
-        slot.notify.notify_one();
+        #[cfg(not(all(feature = "fuzz", dst)))]
+        {
+            *slot.value.lock() = Some(val);
+            slot.notify.notify_one();
+        }
+        #[cfg(all(feature = "fuzz", dst))]
+        slot.tx.send(Ok(val)).unwrap_or_else(|_| unreachable!("slot retains its receiver"));
     }
 
     /// Blocks until slot `i` is ready and takes the value.
     /// Returns `None` if the producer panicked.
     fn take(&self, i: usize) -> Option<T> {
         let slot = &self.slots[i];
-        let mut guard = slot.value.lock();
-        loop {
-            if let Some(val) = guard.take() {
-                return Some(val);
+        #[cfg(all(feature = "fuzz", dst))]
+        {
+            slot.rx.recv().expect("slot retains its sender").ok()
+        }
+        #[cfg(not(all(feature = "fuzz", dst)))]
+        {
+            let mut guard = slot.value.lock();
+            loop {
+                if let Some(val) = guard.take() {
+                    return Some(val);
+                }
+                if self.panicked.load(std::sync::atomic::Ordering::Acquire) {
+                    return None;
+                }
+                slot.notify.wait(&mut guard);
             }
-            if self.panicked.load(Ordering::Acquire) {
-                return None;
-            }
-            slot.notify.wait(&mut guard);
         }
     }
 }
 
 /// Executes a parallel iterator and delivers results to a sequential callback in index order.
 ///
-/// Each slot has its own [`Condvar`], so the consumer blocks precisely on the slot it needs
-/// with zero spurious wakeups.
+/// Each slot has its own notification, so the consumer blocks on the slot it needs.
 fn ordered_impl<I, F>(iter: I, pool: Option<&rayon::ThreadPool>, mut f: F)
 where
     I: IndexedParallelIterator,
@@ -130,12 +165,20 @@ where
                 });
             }));
             if let Err(payload) = res {
-                shared.panicked.store(true, Ordering::Release);
+                #[cfg(not(all(feature = "fuzz", dst)))]
+                shared.panicked.store(true, std::sync::atomic::Ordering::Release);
                 // Wake all slots so the consumer doesn't hang. Lock each slot's mutex
                 // first to serialize with the consumer's panicked check → wait sequence.
                 for slot in &*shared.slots {
-                    let _guard = slot.value.lock();
-                    slot.notify.notify_one();
+                    #[cfg(not(all(feature = "fuzz", dst)))]
+                    {
+                        let _guard = slot.value.lock();
+                        slot.notify.notify_one();
+                    }
+                    #[cfg(all(feature = "fuzz", dst))]
+                    slot.tx
+                        .send(Err(()))
+                        .unwrap_or_else(|_| unreachable!("slot retains its receiver"));
                 }
                 std::panic::resume_unwind(payload);
             }
@@ -165,16 +208,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rayon::prelude::*;
-    use std::{
-        rc::Rc,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Barrier,
-        },
+    use reth_concurrency::sync::{
+        atomic::{AtomicUsize, Ordering},
+        rayon::prelude::*,
+        thread,
     };
+    use std::{cell::Cell, rc::Rc};
 
-    #[test]
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    use std::sync::Barrier;
+
+    #[reth_concurrency::test]
     fn preserves_order() {
         let input: Vec<u64> = (0..1000).collect();
         let mut output = Vec::with_capacity(input.len());
@@ -183,7 +227,7 @@ mod tests {
         assert_eq!(output, expected);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn empty_iterator() {
         let input: Vec<u64> = vec![];
         let mut output = Vec::new();
@@ -191,14 +235,16 @@ mod tests {
         assert!(output.is_empty());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn single_element() {
         let mut output = Vec::new();
         vec![42u64].par_iter().map(|x| *x).for_each_ordered(|x| output.push(x));
         assert_eq!(output, vec![42]);
     }
 
-    #[test]
+    // The fuzz iterator shim computes serially; two iterator items cannot rendezvous.
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    #[reth_concurrency::test]
     fn slow_early_items_still_delivered_in_order() {
         let barrier = Barrier::new(2);
         let n = 64usize;
@@ -218,7 +264,7 @@ mod tests {
         assert_eq!(output, input);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn drops_unconsumed_slots_on_panic() {
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -233,7 +279,7 @@ mod tests {
         DROP_COUNT.store(0, Ordering::Relaxed);
 
         let input: Vec<u64> = (0..100).collect();
-        let result = std::panic::catch_unwind(|| {
+        let result = catch_unwind(|| {
             input
                 .par_iter()
                 .map(|&i| {
@@ -243,12 +289,12 @@ mod tests {
                 .for_each_ordered(|_item| {});
         });
 
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"intentional"));
         let drops = DROP_COUNT.load(Ordering::Relaxed);
         assert!(drops > 0, "some items should have been dropped");
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn no_double_drop() {
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -267,9 +313,9 @@ mod tests {
         assert_eq!(DROP_COUNT.load(Ordering::Relaxed), n as usize);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn callback_is_not_send() {
-        let counter = Rc::new(std::cell::Cell::new(0u64));
+        let counter = Rc::new(Cell::new(0u64));
         let input: Vec<u64> = (0..100).collect();
         input.par_iter().map(|&x| x).for_each_ordered(|x| {
             counter.set(counter.get() + x);
@@ -277,13 +323,13 @@ mod tests {
         assert_eq!(counter.get(), (0..100u64).sum::<u64>());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn panic_does_not_deadlock_consumer() {
         // Regression test: producer panics while consumer is waiting on a condvar.
         // Without the lock-before-notify fix, the consumer could miss the wakeup
         // and deadlock.
         for _ in 0..100 {
-            let result = std::panic::catch_unwind(|| {
+            let result = catch_unwind(|| {
                 let input: Vec<usize> = (0..256).collect();
                 input
                     .par_iter()
@@ -291,20 +337,20 @@ mod tests {
                         if i == 128 {
                             // Yield to increase the chance of the consumer being
                             // between the panicked check and condvar wait.
-                            std::thread::yield_now();
+                            thread::yield_now();
                             panic!("intentional");
                         }
                         i
                     })
                     .for_each_ordered(|_| {});
             });
-            assert!(result.is_err());
+            assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"intentional"));
         }
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn early_panic_at_item_zero() {
-        let result = std::panic::catch_unwind(|| {
+        let result = catch_unwind(|| {
             let input: Vec<u64> = (0..10).collect();
             input
                 .par_iter()
@@ -314,13 +360,13 @@ mod tests {
                 })
                 .for_each_ordered(|_| {});
         });
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"boom at zero"));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn late_panic_at_last_item() {
         let n = 100usize;
-        let result = std::panic::catch_unwind(|| {
+        let result = catch_unwind(|| {
             let input: Vec<usize> = (0..n).collect();
             input
                 .par_iter()
@@ -330,10 +376,10 @@ mod tests {
                 })
                 .for_each_ordered(|_| {});
         });
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"boom at last"));
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn large_items() {
         let n = 500usize;
         let input: Vec<usize> = (0..n).collect();
@@ -348,7 +394,7 @@ mod tests {
         assert_eq!(output, input);
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn consumer_slower_than_producer() {
         // Producer is fast, consumer is slow. All items should still arrive in order.
         let n = 64usize;
@@ -356,14 +402,16 @@ mod tests {
         let mut output = Vec::with_capacity(n);
         input.par_iter().map(|&i| i).for_each_ordered(|x| {
             if x % 8 == 0 {
-                std::thread::yield_now();
+                thread::yield_now();
             }
             output.push(x);
         });
         assert_eq!(output, input);
     }
 
-    #[test]
+    // The fuzz iterator shim computes serially; two iterator items cannot rendezvous.
+    #[cfg(not(all(feature = "fuzz", dst)))]
+    #[reth_concurrency::test]
     fn concurrent_panic_and_drop_no_leak() {
         // Ensure items produced before a panic are all dropped.
         static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -380,7 +428,7 @@ mod tests {
         PRODUCED.store(0, Ordering::Relaxed);
 
         let barrier = Barrier::new(2);
-        let result = std::panic::catch_unwind(|| {
+        let result = catch_unwind(|| {
             let input: Vec<usize> = (0..64).collect();
             input
                 .par_iter()
@@ -398,7 +446,7 @@ mod tests {
                 .for_each_ordered(|_| {});
         });
 
-        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().downcast_ref::<&str>(), Some(&"intentional"));
         let produced = PRODUCED.load(Ordering::Relaxed);
         let dropped = DROP_COUNT.load(Ordering::Relaxed);
         assert_eq!(dropped, produced, "all produced items must be dropped");

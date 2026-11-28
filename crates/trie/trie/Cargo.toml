@@ -12,6 +12,7 @@ description = "Merkle trie implementation"
 workspace = true
 
 [dependencies]
+reth-concurrency = { workspace = true, features = ["std"] }
 # reth
 reth-execution-errors.workspace = true
 reth-primitives-traits = { workspace = true, features = ["std"] }
@@ -44,13 +45,13 @@ triehash = { workspace = true, optional = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 reth-tasks = { workspace = true, features = ["rayon"] }
-crossbeam-channel.workspace = true
 
 [dev-dependencies]
 # reth
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-tracing.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-concurrency = { workspace = true, features = ["std"] }
 
 # trie
 triehash.workspace = true
@@ -64,7 +65,7 @@ proptest.workspace = true
 rand.workspace = true
 
 [features]
-fuzz = ["reth-trie-sparse/fuzz"]
+fuzz = ["reth-trie-sparse/fuzz", "reth-trie-common/fuzz", "reth-tasks/fuzz", "reth-concurrency/fuzz"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",
@@ -80,6 +81,7 @@ serde = [
 test-utils = [
     "triehash",
     "reth-tasks/test-utils",
+    "reth-concurrency/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-trie-sparse/test-utils",

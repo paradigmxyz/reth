@@ -36,6 +36,9 @@ use std::mem;
 /// hint provides a value.
 const SIMULATE_FALLBACK_TIMESTAMP_INCREMENT: u64 = 12;
 
+/// Maximum length of a block's withdrawals override in the execution-apis withdrawals schema.
+const MAX_WITHDRAWALS_PER_PAYLOAD: usize = 16;
+
 /// Error code for execution reverted in `eth_simulateV1`.
 ///
 /// Consistent with `eth_call` revert error code.
@@ -157,6 +160,7 @@ impl ToRpcError for EthSimulateError {
 /// Walks the provided block-state calls in order and:
 /// - validates that each block number and timestamp strictly increases relative to the parent and
 ///   prior simulated block;
+/// - rejects withdrawals overrides longer than the per-block limit;
 /// - inserts empty filler blocks for every gap in block numbers, so a request like `[block at
 ///   number N + k]` over a parent at `N` expands to `k - 1` empty blocks followed by the requested
 ///   one (per the execution-apis spec: "If the block number is increased more than `1` compared to
@@ -190,6 +194,15 @@ where
 
     for mut block in blocks {
         let overrides = block.block_overrides.get_or_insert_with(BlockOverrides::default);
+
+        if let Some(withdrawals) = &overrides.withdrawals &&
+            withdrawals.len() > MAX_WITHDRAWALS_PER_PAYLOAD
+        {
+            return Err(EthApiError::InvalidParams(format!(
+                "withdrawals count {} exceeds limit {MAX_WITHDRAWALS_PER_PAYLOAD}",
+                withdrawals.len()
+            )))
+        }
 
         // Default block number to prev + 1 if not specified.
         let target_number = if let Some(n) = overrides.number {
@@ -273,12 +286,15 @@ pub fn apply_precompile_overrides(
     state_overrides: &StateOverride,
     evm: &mut impl RethEvm,
 ) -> Result<(), EthSimulateError> {
-    let moves: Vec<_> = state_overrides
+    let mut moves: Vec<_> = state_overrides
         .iter()
         .filter_map(|(source, account_override)| {
             account_override.move_precompile_to.map(|dest| (*source, dest))
         })
         .collect();
+    // `StateOverride` iterates in a randomly seeded order. Apply moves in ascending source order so
+    // the result is deterministic and the higher source wins at a shared destination.
+    moves.sort_unstable_by_key(|(source, _)| *source);
     if moves.is_empty() {
         return Ok(())
     }
@@ -515,6 +531,10 @@ where
     T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
     F: FnMut(&Address) -> Result<Option<evm2::evm::AccountInfo>, EthApiError>,
 {
+    if tx.as_ref().has_conflicting_fee_fields() {
+        return Err(EthApiError::ConflictingFeeFieldsInRequest)
+    }
+
     if tx.as_ref().authorization_list.is_some() && tx.as_ref().blob_versioned_hashes.is_some() {
         return Err(EthApiError::InvalidParams(
             "authorizationList conflicts with blobVersionedHashes".into(),
@@ -751,16 +771,15 @@ mod tests {
     use evm2::{
         ethereum::ethereum_tx_registry,
         evm::{AccountInfo, CacheDB, EmptyDB, InMemoryDB},
+        precompiles::PrecompileId,
         BaseEvmTypes, Evm, Precompiles, SpecId,
     };
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_evm::BundleState;
     use reth_primitives_traits::SealedHeader;
     use reth_storage_api::HashedPostStateProvider;
     use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-    use std::{
-        collections::BTreeMap,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::collections::BTreeMap;
 
     fn test_evm() -> Evm<'static, BaseEvmTypes> {
         Evm::new(
@@ -893,6 +912,28 @@ mod tests {
         let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
         assert!(!precompiles.contains(&source));
         assert!(precompiles.contains(&dest));
+    }
+
+    #[test]
+    fn precompiles_moved_to_same_destination_resolve_to_higher_source() {
+        let dest = address!("0000000000000000000000000000000000001111");
+
+        // Every `StateOverride` gets a new random hasher seed, so repeat to cover both orders.
+        for _ in 0..64 {
+            let mut state_overrides = StateOverride::default();
+            for source in [Address::with_last_byte(2), Address::with_last_byte(4)] {
+                state_overrides.insert(
+                    source,
+                    AccountOverride { move_precompile_to: Some(dest), ..Default::default() },
+                );
+            }
+            let mut evm = test_evm();
+
+            apply_precompile_overrides(&state_overrides, &mut evm).unwrap();
+
+            let precompiles = evm.precompiles_as::<Precompiles>().unwrap().as_map();
+            assert_eq!(precompiles.get(&dest).unwrap().id(), &PrecompileId::Identity);
+        }
     }
 
     #[test]
@@ -1033,7 +1074,7 @@ mod tests {
 
     /// Hashing each block's changes once gives the same state as hashing the cumulative bundle
     /// again after every block, without reading the parent storage of destroyed accounts again.
-    #[test]
+    #[reth_concurrency::test]
     fn simulated_state_reads_parent_storage_once() {
         let wiped = Address::with_last_byte(1);
         let emptied = Address::with_last_byte(2);

@@ -5,9 +5,9 @@
 
 use std::{io, num::NonZeroUsize};
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use shuttle::{sync::atomic::AtomicBool, thread};
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 use std::{
     convert::identity,
     marker::PhantomData,
@@ -20,20 +20,20 @@ use std::{
 };
 
 pub use crate::sync::time::sleep;
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub use shuttle::thread::{current, panicking, park, yield_now, Result, Thread, ThreadId};
-#[cfg(not(feature = "fuzz"))]
+#[cfg(not(all(feature = "fuzz", dst)))]
 pub use std::thread::{
     current, panicking, park, scope, spawn, yield_now, Builder, JoinHandle, Result, Scope,
     ScopedJoinHandle, Thread, ThreadId,
 };
 
 /// A logical thread builder; scoped tasks inherit their scope's stack settings.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Debug, Default)]
 pub struct Builder(thread::Builder);
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl Builder {
     /// Creates a thread builder with default settings.
     pub fn new() -> Self {
@@ -83,14 +83,14 @@ impl Builder {
 }
 
 /// Permission to join a logical thread and inspect whether its workload has finished.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Debug)]
 pub struct JoinHandle<T> {
     handle: thread::JoinHandle<Result<T>>,
     finished: Arc<AtomicBool>,
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl<T> JoinHandle<T> {
     /// Waits for termination, including thread-local cleanup, and returns the workload's result.
     pub fn join(self) -> Result<T> {
@@ -109,7 +109,7 @@ impl<T> JoinHandle<T> {
 }
 
 /// A borrowing scope that drains its children before propagating a panic.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Debug)]
 pub struct Scope<'scope, 'env> {
     // Published before children can access it and unchanged until every child has drained.
@@ -127,7 +127,7 @@ pub struct Scope<'scope, 'env> {
     lifetimes: PhantomData<&'scope mut &'scope &'env mut &'env ()>,
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl<'scope, 'env> Scope<'scope, 'env> {
     /// Spawns a borrowing thread; an unjoined panic propagates after the scope drains.
     #[allow(
@@ -160,7 +160,7 @@ impl<'scope, 'env> Scope<'scope, 'env> {
 }
 
 /// Permission to join a borrowing logical thread and recover its workload's panic.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[derive(Debug)]
 pub struct ScopedJoinHandle<'scope, T> {
     handle: thread::ScopedJoinHandle<'scope, Result<T>>,
@@ -169,7 +169,7 @@ pub struct ScopedJoinHandle<'scope, T> {
     lifetime: PhantomData<&'scope mut &'scope ()>,
 }
 
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 impl<T> ScopedJoinHandle<'_, T> {
     /// Waits for termination and returns `Err` if the workload panicked.
     ///
@@ -193,31 +193,31 @@ impl<T> ScopedJoinHandle<'_, T> {
 
 // SAFETY: Shuttle's handle synchronizes result access internally. Its `PhantomData<&T>` is not
 // an actual shared borrow, so the panic payload need not be Sync to move or share the handle.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 unsafe impl<T: Send> Send for ScopedJoinHandle<'_, T> {}
 
 // SAFETY: Shared access only exposes thread metadata and atomic flags; joining consumes the handle.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 unsafe impl<T: Send> Sync for ScopedJoinHandle<'_, T> {}
 
 /// Returns available native parallelism, or one logical execution thread in simulation.
 #[cfg_attr(
-    feature = "fuzz",
+    all(feature = "fuzz", dst),
     expect(clippy::missing_const_for_fn, reason = "The native implementation queries the OS.")
 )]
 pub fn available_parallelism() -> io::Result<NonZeroUsize> {
-    #[cfg(not(feature = "fuzz"))]
+    #[cfg(not(all(feature = "fuzz", dst)))]
     {
         std::thread::available_parallelism()
     }
-    #[cfg(feature = "fuzz")]
+    #[cfg(all(feature = "fuzz", dst))]
     {
         Ok(NonZeroUsize::MIN)
     }
 }
 
 /// Spawns a logical thread in the current deterministic execution.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 pub fn spawn<F, T>(work: F) -> JoinHandle<T>
 where
     F: FnOnce() -> T + Send + 'static,
@@ -229,7 +229,7 @@ where
 /// Runs a borrowing scope, waiting for all children even when the callback panics.
 ///
 /// Unjoined child panics propagate after draining. A callback panic takes precedence.
-#[cfg(feature = "fuzz")]
+#[cfg(all(feature = "fuzz", dst))]
 #[allow(
     clippy::disallowed_types,
     clippy::disallowed_methods,

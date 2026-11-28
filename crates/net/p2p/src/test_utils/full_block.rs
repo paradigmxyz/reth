@@ -15,7 +15,13 @@ use reth_eth_wire_types::{BlockAccessLists, HeadersDirection};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
-use std::{ops::RangeInclusive, sync::Arc};
+use std::{
+    ops::RangeInclusive,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 
 /// A headers+bodies client that stores the headers and bodies in memory, with an artificial soft
 /// bodies response limit that is set to 20 by default.
@@ -28,6 +34,8 @@ pub struct TestFullBlockClient {
     access_lists: Arc<Mutex<B256Map<Bytes>>>,
     // soft response limit, max number of bodies to respond with
     soft_limit: usize,
+    // number of reported bad messages
+    bad_messages: Arc<AtomicUsize>,
 }
 
 impl Default for TestFullBlockClient {
@@ -37,6 +45,7 @@ impl Default for TestFullBlockClient {
             bodies: Arc::new(Mutex::new(B256Map::default())),
             access_lists: Arc::new(Mutex::new(B256Map::default())),
             soft_limit: 20,
+            bad_messages: Arc::default(),
         }
     }
 }
@@ -69,11 +78,18 @@ impl TestFullBlockClient {
             },
         )
     }
+
+    /// Returns the number of bad messages reported so far.
+    pub fn bad_messages(&self) -> usize {
+        self.bad_messages.load(Ordering::Relaxed)
+    }
 }
 
 impl DownloadClient for TestFullBlockClient {
-    /// Reports a bad message from a specific peer.
-    fn report_bad_message(&self, _peer_id: PeerId) {}
+    /// Counts a bad message from a specific peer.
+    fn report_bad_message(&self, _peer_id: PeerId) {
+        self.bad_messages.fetch_add(1, Ordering::Relaxed);
+    }
 
     /// Retrieves the number of connected peers.
     ///

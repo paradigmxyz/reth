@@ -305,7 +305,7 @@ pub use crate::{
 use crate::{identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
-    eip7594::{BlobCellMask, BlobTransactionSidecarVariant},
+    eip7594::{BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarVariant},
 };
 use alloy_primitives::{map::AddressSet, Address, TxHash, B256, U256};
 use aquamarine as _;
@@ -574,7 +574,7 @@ where
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
     ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
-        self.pool.get_pooled_transaction_elements(tx_hashes, limit)
+        self.pool.get_pooled_transaction_elements(tx_hashes, limit, BlobSidecarEncoding::WithBlobs)
     }
 
     fn append_pooled_transaction_elements(
@@ -583,7 +583,24 @@ where
         limit: GetPooledTransactionLimit,
         out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
     ) {
-        self.pool.append_pooled_transaction_elements(tx_hashes, limit, out)
+        self.pool.append_pooled_transaction_elements(
+            tx_hashes,
+            limit,
+            BlobSidecarEncoding::WithBlobs,
+            out,
+        )
+    }
+
+    fn get_pooled_transaction_elements_without_blobs(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+    ) -> Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled> {
+        self.pool.get_pooled_transaction_elements(
+            tx_hashes,
+            limit,
+            BlobSidecarEncoding::WithoutBlobs,
+        )
     }
 
     fn get_pooled_transaction_element(

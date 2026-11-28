@@ -256,6 +256,7 @@ mod tests {
     use assert_matches::assert_matches;
     use futures::poll;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
+    use reth_concurrency::sync::atomic::{AtomicUsize, Ordering};
     use reth_ethereum_primitives::EthPrimitives;
     use reth_network_p2p::test_utils::TestFullBlockClient;
     use reth_primitives_traits::{NodePrimitives, SealedHeader};
@@ -263,15 +264,7 @@ mod tests {
     use reth_stages::ExecOutput;
     use reth_stages_api::StageCheckpoint;
     use reth_tasks::Runtime;
-    use std::{
-        collections::VecDeque,
-        future::poll_fn,
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-        task::Waker,
-    };
+    use std::{collections::VecDeque, future::poll_fn, sync::Arc, task::Waker};
 
     type TestBlock = <EthPrimitives as NodePrimitives>::Block;
 
@@ -389,7 +382,7 @@ mod tests {
         assert!(pipeline_sync.is_pipeline_idle());
     }
 
-    #[test]
+    #[reth_concurrency::test]
     fn only_a_new_backfill_run_clears_downloads() {
         let head = B256::repeat_byte(1);
         let actions = VecDeque::from([
