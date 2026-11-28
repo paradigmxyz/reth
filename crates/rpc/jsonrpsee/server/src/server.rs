@@ -226,8 +226,8 @@ pub struct ServerConfig {
     pub(crate) message_buffer_capacity: u32,
     /// ID provider.
     pub(crate) id_provider: Arc<dyn IdProvider>,
-    /// Timeout for receiving the first request of a connection, and the next request head of an
-    /// HTTP/1 keep-alive connection.
+    /// Timeout for receiving the first request of a connection, the next request head of an
+    /// HTTP/1 keep-alive connection, and the body of each HTTP request.
     pub(crate) first_request_timeout: Option<Duration>,
     /// Timeout for writing a single message to a WebSocket connection and for a stalled HTTP
     /// response write.
@@ -435,7 +435,8 @@ impl ServerConfigBuilder {
 
     /// Configure how long a connection may take to send its first request, e.g. the WebSocket
     /// upgrade request, before it is closed. An HTTP/1 keep-alive connection is closed as well
-    /// when it takes longer to send the head of its next request. `None` disables the timeout.
+    /// when it takes longer to send the head of its next request, and an HTTP request whose body
+    /// takes longer to arrive is answered with `408 Request Timeout`. `None` disables the timeout.
     ///
     /// Default is 30 seconds.
     pub fn set_first_request_timeout(mut self, first_request_timeout: Option<Duration>) -> Self {
@@ -822,6 +823,7 @@ where
             let max_response_size = this.server_cfg.max_response_body_size;
             let max_request_size = this.server_cfg.max_request_body_size;
             let batch_config = this.server_cfg.batch_requests_config;
+            let body_timeout = this.server_cfg.first_request_timeout;
 
             let rpc_service = this
                 .http_rpc_service
@@ -835,9 +837,14 @@ where
                 .clone();
 
             Box::pin(async move {
-                let rp =
-                    http::call_with_service(request, batch_config, max_request_size, &*rpc_service)
-                        .await;
+                let rp = http::call_with_service(
+                    request,
+                    batch_config,
+                    max_request_size,
+                    body_timeout,
+                    &*rpc_service,
+                )
+                .await;
                 // NOTE: The `conn guard` must be held until the response body is written (or
                 // dropped) to respect the `max_connections` limit, because hyper writes the body
                 // after this future completes.
