@@ -451,6 +451,7 @@ fn limit_exceeded() -> io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonrpsee_types::{error::TOO_BIG_BATCH_RESPONSE_CODE, ResponseSuccess};
 
     #[test]
     fn batch_with_single_works() {
@@ -641,5 +642,63 @@ mod tests {
         let rp = sized_response(success(&"a"), &hint);
         // Most of the buffer is unused, but too little to be worth reallocating.
         assert!(rp.json.capacity() >= reserved);
+    }
+
+    #[ephyra::test]
+    fn response_preserves_id_and_payload(
+        id: Option<Result<u64, String>>,
+        result: Option<String>,
+        error: Option<i32>,
+    ) {
+        let id = match id {
+            Some(Ok(n)) => Id::Number(n),
+            Some(Err(s)) => Id::Str(s.into()),
+            None => Id::Null,
+        };
+        let payload = match error {
+            Some(code) => ResponsePayload::error(ErrorObject::owned(code, "error", result)),
+            None => ResponsePayload::success(result),
+        };
+        let len = serde_json::to_vec(&Response::new(payload.clone(), id.clone())).unwrap().len();
+        let response = MethodResponse::response(id.clone(), payload.clone(), len);
+        let decoded: Response<'_, Option<String>> =
+            serde_json::from_str(response.as_ref()).unwrap();
+
+        assert_eq!(decoded.id, id);
+        assert_eq!(decoded.payload, payload);
+        assert_eq!(response.as_error_code(), error);
+
+        let oversized = MethodResponse::response(id.clone(), payload, len - 1);
+        let decoded: Response<'_, ()> = serde_json::from_str(oversized.as_ref()).unwrap();
+        assert_eq!(decoded.id, id);
+        assert_eq!(ResponseSuccess::try_from(decoded).unwrap_err().code(), OVERSIZED_RESPONSE_CODE);
+        assert_eq!(oversized.as_error_code(), Some(OVERSIZED_RESPONSE_CODE));
+    }
+
+    #[ephyra::test]
+    fn batch_limit_counts_encoded_bytes(first: String, rest: Vec<String>) {
+        let responses: Vec<_> = (0..)
+            .zip(std::iter::once(&first).chain(&rest))
+            .map(|(i, s)| Response::new(ResponsePayload::success_borrowed(s), Id::Number(i)))
+            .collect();
+        let expected = serde_json::to_string(&responses).unwrap();
+        let mut exact = BatchResponseBuilder::new_with_limit(expected.len());
+        let mut short = BatchResponseBuilder::new_with_limit(expected.len() - 1);
+
+        for (i, response) in responses.iter().enumerate() {
+            let method = || {
+                MethodResponse::response(response.id.clone(), response.payload.clone(), usize::MAX)
+            };
+            exact.append(method()).unwrap();
+            if i + 1 == responses.len() {
+                assert_eq!(
+                    short.append(method()).unwrap_err().as_error_code(),
+                    Some(TOO_BIG_BATCH_RESPONSE_CODE)
+                );
+            } else {
+                short.append(method()).unwrap();
+            }
+        }
+        assert_eq!(exact.finish().as_ref(), expected);
     }
 }
