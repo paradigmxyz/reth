@@ -1,6 +1,7 @@
 use crate::utils::{advance_with_random_transactions, EngineSszRequestExt, EngineSszResponseExt};
-use alloy_eips::eip7685::RequestsOrHash;
+use alloy_eips::{eip7685::RequestsOrHash, BlockNumberOrTag};
 use alloy_primitives::{Bytes, B256};
+use alloy_provider::Provider;
 use alloy_rpc_types_engine::{
     ssz_engine_types::{
         BlobsV1Request, BlobsV1Response, BlobsV2Response, BlobsV3Response, BlobsV4Request,
@@ -9,11 +10,13 @@ use alloy_rpc_types_engine::{
         ForkchoiceUpdateCancun, ForkchoiceUpdateResponse as SszForkchoiceUpdateResponse, Optional,
         PayloadAttributesCancun, PayloadStatus as SszPayloadStatus, PayloadStatusKind,
     },
-    ClientVersionV1, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
+    ClientVersionV1, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatus,
+    PayloadStatusEnum,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardfork};
 use reth_e2e_test_utils::{
     eth_payload_attributes, test_chain_spec, transaction::TransactionTestContext, E2ETestSetupExt,
+    NodeHelperType,
 };
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{
@@ -782,4 +785,93 @@ async fn test_engine_ssz_proxy_returns_built_payload_with_witness() -> eyre::Res
     assert_eq!(response.headers()[reqwest::header::CACHE_CONTROL], "no-store");
     assert_eq!(response.problem_type().await?, "/engine-api/errors/unknown-payload");
     Ok(())
+}
+
+#[tokio::test]
+async fn can_update_forkchoice_without_finalized_block() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+    let chain_spec = test_chain_spec(EthereumHardfork::Cancun);
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Cancun)
+        .with_initial_forkchoice(false)
+        .with_rpc_modifier(|rpc| {
+            rpc.with_http_api(RpcModuleSelection::from([
+                RethRpcModule::Eth,
+                RethRpcModule::Testing,
+            ]))
+        })
+        .build_single()
+        .await?;
+    let attributes = |timestamp| eth_payload_attributes(&chain_spec, timestamp);
+    let engine = node.auth_server_handle().http_client();
+    let rpc = node.rpc_provider();
+    let canonical = node.inner.provider.canonical_in_memory_state();
+    assert!(canonical.get_finalized_num_hash().is_none());
+
+    let mut parent = node.block_hash(0);
+    for timestamp in 1..=4 {
+        let hash = submit_cancun_block(&node, parent, attributes(timestamp)).await?;
+
+        // Exercise both request shapes when advancing and when revisiting the current head.
+        let with_attributes = Some(attributes(timestamp + 1));
+        let cases =
+            if timestamp % 2 == 0 { [with_attributes, None] } else { [None, with_attributes] };
+        for attrs in cases {
+            let build_requested = attrs.is_some();
+            let response = engine
+                .request::<_, ForkchoiceUpdated>(
+                    "engine_forkchoiceUpdatedV3",
+                    (
+                        ForkchoiceState {
+                            head_block_hash: hash,
+                            safe_block_hash: parent,
+                            finalized_block_hash: B256::ZERO,
+                        },
+                        attrs,
+                    ),
+                )
+                .await?;
+            assert_eq!(response.payload_status.status, PayloadStatusEnum::Valid);
+            assert_eq!(response.payload_status.latest_valid_hash, Some(hash));
+            assert_eq!(response.payload_id.is_some(), build_requested);
+            assert_eq!(
+                rpc.get_block_by_number(BlockNumberOrTag::Latest).await?.unwrap().header.hash,
+                hash
+            );
+            assert_eq!(canonical.get_safe_num_hash().unwrap().hash, parent);
+            assert!(canonical.get_finalized_num_hash().is_none());
+        }
+        parent = hash;
+    }
+
+    Ok(())
+}
+
+async fn submit_cancun_block(
+    node: &NodeHelperType<EthereumNode>,
+    parent: B256,
+    attributes: PayloadAttributes,
+) -> eyre::Result<B256> {
+    let TestingBuildBlockResponseV1::V5(envelope) = node
+        .testing_build_block_v1(TestingBuildBlockRequestV1 {
+            parent_block_hash: parent,
+            payload_attributes: attributes,
+            transactions: vec![],
+            extra_data: None,
+        })
+        .await?
+    else {
+        panic!("expected a V5 envelope")
+    };
+    let payload = envelope.execution_payload;
+    let hash = payload.payload_inner.payload_inner.block_hash;
+    let status = node
+        .auth_server_handle()
+        .http_client()
+        .request::<_, PayloadStatus>(
+            "engine_newPayloadV3",
+            (payload, Vec::<B256>::new(), B256::ZERO),
+        )
+        .await?;
+    assert_eq!(status.status, PayloadStatusEnum::Valid);
+    Ok(hash)
 }
