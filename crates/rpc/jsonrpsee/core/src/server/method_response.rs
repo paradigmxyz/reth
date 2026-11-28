@@ -180,7 +180,9 @@ impl MethodResponse {
         rp
     }
 
-    fn response_with_capacity<T>(
+    /// Same as [`MethodResponse::response`], but starts the serialization buffer at `capacity`
+    /// bytes, for a caller that knows the size of the response in advance.
+    pub fn response_with_capacity<T>(
         id: Id,
         rp: ResponsePayload<T>,
         max_response_size: usize,
