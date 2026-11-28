@@ -56,7 +56,8 @@ use tracing::{span, Instrument, Level};
 /// - are connected to each other.
 ///
 /// Once launched, each node receives a forkchoice update that makes genesis the head, safe and
-/// finalized block, unless [dev mining](Self::with_dev_mining) is enabled.
+/// finalized block, unless [dev mining](Self::with_dev_mining) is enabled or
+/// [`Self::with_initial_forkchoice`] disables the update.
 ///
 /// Configuration and tree configuration modifiers are applied in the order they are added. Like
 /// for a node launched from the command line, the tree configuration of a node is derived from its
@@ -88,6 +89,7 @@ pub struct E2ETestSetupBuilder<N: NodeBuilderHelper> {
     node_factory: NodeFactory<N>,
     node_builder_modifiers: Vec<NodeBuilderModifier<N>>,
     restartable: bool,
+    initial_forkchoice: bool,
 }
 
 impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
@@ -135,6 +137,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
             node_factory: Arc::new(|_| N::default()),
             node_builder_modifiers: Vec::new(),
             restartable: false,
+            initial_forkchoice: true,
         }
     }
 
@@ -343,6 +346,15 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
         self
     }
 
+    /// Sets whether startup makes genesis the head, safe, and finalized block (default: true).
+    ///
+    /// Set to false to test forkchoice before any finalized block has been recorded. The caller
+    /// must then send the initial forkchoice update. Dev mining always skips this update.
+    pub const fn with_initial_forkchoice(mut self, enabled: bool) -> Self {
+        self.initial_forkchoice = enabled;
+        self
+    }
+
     /// Builds and launches the test nodes.
     pub async fn build(self) -> eyre::Result<(Vec<NodeHelperType<N>>, Wallet)> {
         ensure!(
@@ -396,7 +408,7 @@ impl<N: NodeBuilderHelper> E2ETestSetupBuilder<N> {
                     .instrument(span!(Level::INFO, "node", idx))
                     .await?;
 
-                if !mines {
+                if !mines && self.initial_forkchoice {
                     let genesis = node.block_hash(self.chain_spec.genesis_header().number());
                     node.update_forkchoice(genesis, genesis).await?;
                 }

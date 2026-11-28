@@ -82,8 +82,8 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
 
 /// A notification that is sent when a new block is imported, or an old block is reverted.
 ///
-/// A commit carries the imported segment, a reorg carries both segments, and a revert carries the
-/// removed segment and the retained tip.
+/// The notification contains at least one [`Chain`] with the imported segment. If some blocks were
+/// reverted (e.g. during a reorg), the old chain is also returned.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(bound = ""))]
@@ -93,19 +93,20 @@ pub enum CanonStateNotification<N: NodePrimitives = reth_ethereum_primitives::Et
         /// The newly added chain segment.
         new: Arc<Chain<N>>,
     },
-    /// A canonical suffix was replaced by another branch.
+    /// A chain segment was reverted or reorged.
+    ///
+    /// - In the case of a reorg, the reverted blocks are present in `old`, and the new blocks are
+    ///   present in `new`.
+    /// - In the case of a revert, the reverted blocks are present in `old`, and `new` is an empty
+    ///   chain segment.
     Reorg {
         /// The chain segment that was reverted.
         old: Arc<Chain<N>>,
-        /// The chain segment that replaced it.
+        /// The chain segment that was added on top of the canonical chain, minus the reverted
+        /// blocks.
+        ///
+        /// In the case of a revert, not a reorg, this chain segment is empty.
         new: Arc<Chain<N>>,
-    },
-    /// The canonical chain was rewound to an existing ancestor.
-    Revert {
-        /// The removed suffix in ascending block order.
-        old: Arc<Chain<N>>,
-        /// The canonical tip after the rewind, attached when the notification is emitted.
-        tip: Arc<RecoveredBlock<N::Block>>,
     },
 }
 
@@ -114,7 +115,7 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     pub fn reverted(&self) -> Option<Arc<Chain<N>>> {
         match self {
             Self::Commit { .. } => None,
-            Self::Reorg { old, .. } | Self::Revert { old, .. } => Some(old.clone()),
+            Self::Reorg { old, .. } => Some(old.clone()),
         }
     }
 
@@ -122,25 +123,27 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
     pub fn committed(&self) -> Arc<Chain<N>> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.clone(),
-            Self::Revert { .. } => Arc::new(Chain::default()),
         }
     }
 
-    /// Gets the canonical tip after this notification.
+    /// Gets the new tip of the chain.
+    ///
+    /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
+    /// 1 new block.
     ///
     /// # Panics
     ///
-    /// If a commit or reorg notification has an empty new chain.
+    /// If chain doesn't have any blocks.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
-            Self::Revert { tip, .. } => tip,
         }
     }
 
-    /// Gets the canonical tip after this notification, if available.
+    /// Gets the new tip of the chain.
     ///
-    /// Returns `None` for a commit or reorg with an empty new chain.
+    /// If the chain has no blocks, it returns `None`. Otherwise, it returns the new tip for
+    /// [`Self::Reorg`] and [`Self::Commit`] variants.
     pub fn tip_checked(&self) -> Option<&RecoveredBlock<N::Block>> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => {
@@ -150,7 +153,6 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
                     Some(new.tip())
                 }
             }
-            Self::Revert { tip, .. } => Some(tip),
         }
     }
 

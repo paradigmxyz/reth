@@ -469,11 +469,6 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.last_forkchoice_update_received_at()
     }
 
-    /// Returns the first reverted block while its suffix may still be on disk.
-    pub fn first_block_in_pending_rewind(&self) -> Option<BlockNumHash> {
-        self.inner.chain_info_tracker.first_block_in_pending_rewind()
-    }
-
     /// Canonical head getter.
     pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
         self.inner.chain_info_tracker.get_canonical_head()
@@ -669,20 +664,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     /// No notification is sent.
     pub fn update_chain(&mut self, new_chain: NewCanonicalChain<N>) {
         let canonical_head = new_chain.tip().clone_sealed_header();
-        if let NewCanonicalChain::Revert { old, .. } = &new_chain &&
-            let Some(first_reverted) =
-                old.first().map(|block| block.recovered_block().num_hash())
-        {
-            let chain_info_tracker = &self.canonical_in_memory_state.inner.chain_info_tracker;
-            self.in_memory_state_writer.update(|blocks| {
-                blocks.update_chain(new_chain);
-                chain_info_tracker.set_canonical_head_after_rewind(canonical_head, first_reverted);
-            });
-        } else {
-            self.update_with_canonical_head(canonical_head, |blocks| {
-                blocks.update_chain(new_chain)
-            });
-        }
+        self.update_with_canonical_head(canonical_head, |blocks| blocks.update_chain(new_chain));
     }
 
     /// Applies a backfill sync that finished at `backfill_head` without unwinding, in one
@@ -752,26 +734,6 @@ impl<N: NodePrimitives> CanonicalInMemoryStateWriter<N> {
     /// change the canonical blocks, set the canonical head themselves. No notification is sent.
     pub fn set_canonical_head(&mut self, header: SealedHeader<N::BlockHeader>) {
         self.inner().chain_info_tracker.set_canonical_head(header);
-    }
-
-    /// Publishes a rewound head and records the start of the suffix that persistence must remove.
-    pub fn set_canonical_head_after_rewind(
-        &mut self,
-        header: SealedHeader<N::BlockHeader>,
-        first_reverted: BlockNumHash,
-    ) {
-        let chain_info_tracker = &self.canonical_in_memory_state.inner.chain_info_tracker;
-        self.in_memory_state_writer.update(|_| {
-            chain_info_tracker.set_canonical_head_after_rewind(header, first_reverted);
-        });
-    }
-
-    /// Clears the rewind marker when the persisted tip is on the current canonical chain.
-    pub fn clear_pending_rewind(&mut self) {
-        if self.canonical_in_memory_state.first_block_in_pending_rewind().is_some() {
-            let chain_info_tracker = &self.canonical_in_memory_state.inner.chain_info_tracker;
-            self.in_memory_state_writer.update(|_| chain_info_tracker.clear_pending_rewind());
-        }
     }
 
     /// Sets the safe block of the chain info, and notifies its subscribers if the block changed.

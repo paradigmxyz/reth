@@ -102,12 +102,8 @@ where
         if !self.persistence_state.in_progress() {
             let payload_build_active = self.payload_builds.is_active();
             if let Some(new_tip_num) = self.find_disk_reorg()? {
-                self.remove_blocks(new_tip_num);
-                return Ok(())
-            }
-            self.canonical_in_memory_state_writer.clear_pending_rewind();
-
-            if self.backfill_sync_state.is_pending_revalidation() &&
+                self.remove_blocks(new_tip_num)
+            } else if self.backfill_sync_state.is_pending_revalidation() &&
                 !payload_build_active &&
                 self.persistence_state.last_state_trie_persisted_block !=
                     self.persistence_state.last_persisted_block
@@ -387,7 +383,6 @@ where
             return Ok(())
         }
 
-        self.canonical_in_memory_state_writer.clear_pending_rewind();
         // First fetch the finalized block number.
         let finalized = self
             .state

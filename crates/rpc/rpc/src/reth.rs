@@ -356,8 +356,7 @@ async fn finalized_chain_notifications<N>(
                     CanonStateNotification::Commit { .. } => {
                         buffered.push(notification);
                     }
-                    CanonStateNotification::Reorg { old, .. }
-                    | CanonStateNotification::Revert { old, .. } => {
+                    CanonStateNotification::Reorg { old, new } => {
                         let first_reverted = old.first().number();
                         buffered.retain_mut(|notification| {
                             let chain = notification.committed();
@@ -379,9 +378,7 @@ async fn finalized_chain_notifications<N>(
                             }
                             true
                         });
-                        if let CanonStateNotification::Reorg { new, .. } = &notification &&
-                            !new.is_empty()
-                        {
+                        if !new.is_empty() {
                             buffered.push(CanonStateNotification::Commit { new: new.clone() });
                         }
                     }
