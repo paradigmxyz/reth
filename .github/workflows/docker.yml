@@ -109,7 +109,7 @@ jobs:
             {
               echo "ethereum_set<<EOF"
               echo "ethereum.tags=${REGISTRY}/reth:nightly"
-              echo "ethereum.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
+              echo "*.args.RETH_ENGINE_TXPOOL_PREWARMING=true"
               echo "*.args.RETH_ENGINE_PREWARM_REUSE=true"
               echo "*.args.RETH_DB_SYNC_MODE=safe-no-sync"
               echo "EOF"
