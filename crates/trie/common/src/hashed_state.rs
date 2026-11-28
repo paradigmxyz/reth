@@ -14,8 +14,12 @@ use itertools::Itertools;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use reth_concurrency::sync::rayon::prelude::{
-    FromParallelIterator, IntoParallelIterator, ParallelIterator,
+use reth_concurrency::sync::rayon::{
+    self,
+    prelude::{
+        FromParallelIterator, IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+        ParallelSliceMut,
+    },
 };
 
 /// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
@@ -45,25 +49,113 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        state
-            .into_iter()
-            .map(|(address, account)| {
-                let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
-                let hashed_storage = HashedStorage::from_iter(
-                    account
-                        .storage
-                        .iter()
-                        .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value)),
-                );
+        #[cfg(feature = "rayon")]
+        {
+            const PAR_HASH_THRESHOLD: usize = 2048;
+            const PAR_STORAGE_THRESHOLD: usize = 2048;
 
-                (
-                    hashed_address,
-                    hashed_account,
-                    (!hashed_storage.is_empty()).then_some(hashed_storage),
-                )
-            })
-            .collect()
+            let entries: Vec<(&'a Address, &'a BundleAccount)> = state.into_iter().collect();
+            let mut total_hashes = entries.len();
+            let mut non_empty_storages = 0usize;
+            for (_, account) in &entries {
+                let slen = account.storage.len();
+                if slen > 0 {
+                    total_hashes += slen;
+                    non_empty_storages += 1;
+                }
+            }
+
+            if total_hashes >= PAR_HASH_THRESHOLD {
+                let hashed: Vec<_> = entries
+                    .par_iter()
+                    .map(|&(address, account)| {
+                        let hashed_address = KH::hash_key(address);
+                        let hashed_account = account.info.as_ref().map(Into::into);
+                        let hashed_storage = if account.storage.is_empty() {
+                            None
+                        } else if account.storage.len() >= PAR_STORAGE_THRESHOLD {
+                            let slots: Vec<_> = account.storage.iter().collect();
+                            let hashed_slots: Vec<(B256, U256)> = slots
+                                .par_iter()
+                                .map(|&(slot, value)| {
+                                    (keccak256(B256::from(*slot)), value.present_value)
+                                })
+                                .collect();
+                            let mut map = B256Map::with_capacity_and_hasher(
+                                hashed_slots.len(),
+                                Default::default(),
+                            );
+                            map.extend(hashed_slots);
+                            Some(HashedStorage { storage: map })
+                        } else {
+                            let mut map = B256Map::with_capacity_and_hasher(
+                                account.storage.len(),
+                                Default::default(),
+                            );
+                            for (slot, value) in &account.storage {
+                                map.insert(keccak256(B256::from(*slot)), value.present_value);
+                            }
+                            Some(HashedStorage { storage: map })
+                        };
+                        (hashed_address, hashed_account, hashed_storage)
+                    })
+                    .collect();
+
+                let mut accounts =
+                    B256Map::with_capacity_and_hasher(hashed.len(), Default::default());
+                let mut storages =
+                    B256Map::with_capacity_and_hasher(non_empty_storages, Default::default());
+                for (hashed_address, info, hashed_storage) in hashed {
+                    accounts.insert(hashed_address, info);
+                    if let Some(storage) = hashed_storage {
+                        storages.insert(hashed_address, storage);
+                    }
+                }
+                return Self { accounts, storages };
+            }
+
+            let mut accounts = B256Map::with_capacity_and_hasher(entries.len(), Default::default());
+            let mut storages =
+                B256Map::with_capacity_and_hasher(non_empty_storages, Default::default());
+            for (address, account) in entries {
+                let hashed_address = KH::hash_key(address);
+                accounts.insert(hashed_address, account.info.as_ref().map(Into::into));
+                if !account.storage.is_empty() {
+                    let mut map = B256Map::with_capacity_and_hasher(
+                        account.storage.len(),
+                        Default::default(),
+                    );
+                    for (slot, value) in &account.storage {
+                        map.insert(keccak256(B256::from(*slot)), value.present_value);
+                    }
+                    storages.insert(hashed_address, HashedStorage { storage: map });
+                }
+            }
+            Self { accounts, storages }
+        }
+
+        #[cfg(not(feature = "rayon"))]
+        {
+            let iter = state.into_iter();
+            let (lower, _) = iter.size_hint();
+            let mut accounts = B256Map::with_capacity_and_hasher(lower, Default::default());
+            let mut storages = B256Map::default();
+            for (address, account) in iter {
+                let hashed_address = KH::hash_key(address);
+                accounts.insert(hashed_address, account.info.as_ref().map(Into::into));
+                if !account.storage.is_empty() {
+                    let mut map = B256Map::with_capacity_and_hasher(
+                        account.storage.len(),
+                        Default::default(),
+                    );
+                    for (slot, value) in &account.storage {
+                        map.insert(keccak256(B256::from(*slot)), value.present_value);
+                    }
+                    storages.insert(hashed_address, HashedStorage { storage: map });
+                }
+            }
+            Self { accounts, storages }
+        }
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -116,7 +208,9 @@ impl HashedPostState {
         let mut storage_prefix_sets =
             HashMap::with_capacity_and_hasher(self.storages.len(), Default::default());
         for (hashed_address, hashed_storage) in &self.storages {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if !self.accounts.contains_key(hashed_address) {
+                account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            }
             storage_prefix_sets.insert(*hashed_address, hashed_storage.construct_prefix_set());
         }
 
@@ -260,6 +354,39 @@ impl HashedPostState {
 
     /// Converts hashed post state into [`HashedPostStateSorted`].
     pub fn into_sorted(self) -> HashedPostStateSorted {
+        #[cfg(feature = "rayon")]
+        {
+            const PAR_SORT_THRESHOLD: usize = 8192;
+            let total_slots: usize = self.storages.values().map(|s| s.storage.len()).sum();
+            if self.accounts.len() + total_slots >= PAR_SORT_THRESHOLD {
+                let raw_accounts = self.accounts;
+                let raw_storages: Vec<_> = self.storages.into_iter().collect();
+                let (accounts, sorted_storages) = rayon::join(
+                    || {
+                        let mut accounts: Vec<_> = raw_accounts.into_iter().collect();
+                        if accounts.len() >= PAR_SORT_THRESHOLD {
+                            accounts.par_sort_unstable_by_key(|(address, _)| *address);
+                        } else {
+                            accounts.sort_unstable_by_key(|(address, _)| *address);
+                        }
+                        accounts
+                    },
+                    || {
+                        raw_storages
+                            .into_par_iter()
+                            .map(|(hashed_address, storage)| {
+                                (hashed_address, storage.into_sorted())
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                );
+                let mut storages =
+                    B256Map::with_capacity_and_hasher(sorted_storages.len(), Default::default());
+                storages.extend(sorted_storages);
+                return HashedPostStateSorted { accounts, storages };
+            }
+        }
+
         let mut accounts: Vec<_> = self.accounts.into_iter().collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
@@ -276,6 +403,39 @@ impl HashedPostState {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     #[allow(clippy::clone_on_copy)]
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
+        #[cfg(feature = "rayon")]
+        {
+            const PAR_SORT_THRESHOLD: usize = 8192;
+            let total_slots: usize = self.storages.values().map(|s| s.storage.len()).sum();
+            if self.accounts.len() + total_slots >= PAR_SORT_THRESHOLD {
+                let raw_storages: Vec<_> = self.storages.iter().collect();
+                let (accounts, sorted_storages) = rayon::join(
+                    || {
+                        let mut accounts: Vec<_> =
+                            self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
+                        if accounts.len() >= PAR_SORT_THRESHOLD {
+                            accounts.par_sort_unstable_by_key(|(address, _)| *address);
+                        } else {
+                            accounts.sort_unstable_by_key(|(address, _)| *address);
+                        }
+                        accounts
+                    },
+                    || {
+                        raw_storages
+                            .into_par_iter()
+                            .map(|(&hashed_address, storage)| {
+                                (hashed_address, storage.clone_into_sorted())
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                );
+                let mut storages =
+                    B256Map::with_capacity_and_hasher(sorted_storages.len(), Default::default());
+                storages.extend(sorted_storages);
+                return HashedPostStateSorted { accounts, storages };
+            }
+        }
+
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, v)| (k, v.clone())).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
 
@@ -409,6 +569,11 @@ impl HashedStorage {
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
+        #[cfg(feature = "rayon")]
+        if storage_slots.len() >= 2048 {
+            storage_slots.par_sort_unstable_by_key(|(key, _)| *key);
+            return HashedStorageSorted { storage_slots };
+        }
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
         HashedStorageSorted { storage_slots }
@@ -418,6 +583,11 @@ impl HashedStorage {
     /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
+        #[cfg(feature = "rayon")]
+        if storage_slots.len() >= 2048 {
+            storage_slots.par_sort_unstable_by_key(|(key, _)| *key);
+            return HashedStorageSorted { storage_slots };
+        }
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
         HashedStorageSorted { storage_slots }
@@ -708,7 +878,8 @@ impl HashedStorageSorted {
 
 impl From<HashedStorageSorted> for HashedStorage {
     fn from(sorted: HashedStorageSorted) -> Self {
-        let mut storage = B256Map::default();
+        let mut storage =
+            B256Map::with_capacity_and_hasher(sorted.storage_slots.len(), Default::default());
 
         // Add all storage slots (including zero-valued ones which indicate deletion)
         for (slot, value) in sorted.storage_slots {
@@ -845,6 +1016,79 @@ mod tests {
 
     fn changed_storage(original: U256, present: U256) -> StorageWithOriginalValues {
         core::iter::once((U256::ONE, StorageSlot::new_changed(original, present))).collect()
+    }
+
+    #[test]
+    fn test_hashed_post_state_from_bundle_state_large_and_sorted() {
+        let mut bundle = Vec::new();
+        for i in 1u64..=300 {
+            let mut bytes = [0u8; 20];
+            bytes[12..].copy_from_slice(&i.to_be_bytes());
+            bundle.push((
+                Address::from(bytes),
+                BundleAccount::new(
+                    None,
+                    Some(AccountInfo { nonce: i, balance: U256::from(i), ..Default::default() }),
+                    StorageWithOriginalValues::default(),
+                    AccountStatus::Changed,
+                ),
+            ));
+        }
+        for c in 0u64..2 {
+            let mut bytes = [0u8; 20];
+            bytes[12..].copy_from_slice(&(10_000 + c).to_be_bytes());
+            let mut storage = StorageWithOriginalValues::default();
+            for slot in 0u64..2100 {
+                storage.insert(
+                    U256::from(c * 10_000 + slot),
+                    StorageSlot::new_changed(U256::ZERO, U256::from(slot + 1)),
+                );
+            }
+            bundle.push((
+                Address::from(bytes),
+                BundleAccount::new(
+                    None,
+                    Some(AccountInfo { nonce: 1, balance: U256::ZERO, ..Default::default() }),
+                    storage,
+                    AccountStatus::Changed,
+                ),
+            ));
+        }
+
+        let hashed = HashedPostState::from_bundle_state::<KeccakKeyHasher>(
+            bundle.iter().map(|(a, b)| (a, b)),
+        );
+        assert_eq!(hashed.accounts.len(), 302);
+        assert_eq!(hashed.storages.len(), 2);
+        for (addr, acc) in &bundle {
+            let h_addr = keccak256(addr);
+            assert_eq!(
+                hashed.accounts.get(&h_addr).unwrap().as_ref().unwrap().nonce,
+                acc.info.as_ref().unwrap().nonce
+            );
+            if acc.storage.is_empty() {
+                assert!(!hashed.storages.contains_key(&h_addr));
+            } else {
+                let hs = hashed.storages.get(&h_addr).unwrap();
+                assert_eq!(hs.storage.len(), acc.storage.len());
+                for (slot, val) in &acc.storage {
+                    assert_eq!(
+                        hs.storage.get(&keccak256(B256::from(*slot))),
+                        Some(&val.present_value)
+                    );
+                }
+            }
+        }
+
+        let sorted_cloned = hashed.clone_into_sorted();
+        let sorted_owned = hashed.into_sorted();
+        assert_eq!(sorted_cloned, sorted_owned);
+        assert_eq!(sorted_owned.accounts.len(), 302);
+        assert!(sorted_owned.accounts.windows(2).all(|w| w[0].0 < w[1].0));
+        for storage in sorted_owned.storages.values() {
+            assert_eq!(storage.storage_slots.len(), 2100);
+            assert!(storage.storage_slots.windows(2).all(|w| w[0].0 < w[1].0));
+        }
     }
 
     #[test]
