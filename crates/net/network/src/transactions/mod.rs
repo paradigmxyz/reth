@@ -6,6 +6,7 @@ use smallvec::SmallVec;
 
 /// Normalized transaction announcements.
 pub mod announcement;
+mod blob;
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -23,6 +24,7 @@ pub use self::constants::{
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use announcement::TransactionAnnouncement;
+use blob::BlobFetcher;
 use config::AnnouncementAcceptance;
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionIngressPolicy,
@@ -343,7 +345,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 /// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
-pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct TransactionsManager<Pool: TransactionPool, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Access to the transaction pool.
     pool: Pool,
     /// Cache of recovered transaction senders shared with payload execution, if enabled.
@@ -356,6 +358,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     network_events: EventStream<NetworkEvent<PeerRequest<N>>>,
     /// Transaction fetcher to handle inflight and missing transaction requests.
     transaction_fetcher: TransactionFetcher<N>,
+    /// Fetches the cells of blob transactions whose bodies eth/72 peers send without blobs.
+    blob_fetcher: BlobFetcher<Pool::Transaction>,
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
@@ -473,6 +477,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             network,
             network_events,
             transaction_fetcher,
+            blob_fetcher: BlobFetcher::new(),
             transactions_by_peers: Default::default(),
             announcement_hashes: B256Set::default(),
             pool_imports: Default::default(),
@@ -573,6 +578,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             self.policies.propagation_policy_mut().on_session_closed(&mut peer);
         }
         self.transaction_fetcher.on_peer_disconnected(peer_id);
+        self.blob_fetcher.drop_peer(peer_id);
     }
 
     /// Clear the transaction
@@ -829,6 +835,16 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         if announcement.is_empty() {
             // nothing to request
             return
+        }
+
+        // eth/72 peers announce the cells they keep of each blob transaction.
+        if let Some(mask) = announcement.cell_mask() {
+            let mask = BlobCellMask::new(mask);
+            for tx in announcement.iter() {
+                if tx.metadata.is_some_and(|metadata| metadata.tx_type == EIP4844_TX_TYPE_ID) {
+                    self.blob_fetcher.announce(tx.hash, peer_id, mask);
+                }
+            }
         }
 
         trace!(target: "net::tx::propagation",
@@ -1450,23 +1466,6 @@ where
             }
         }
 
-        // Eth/72 and later `PooledTransactions` responses elide blob payloads from type 3
-        // transactions per EIP-8070, so their sidecars can never validate. Drop them before
-        // touching the pool; geth equivalently diverts these bodies into a buffer that is
-        // completed with cells fetched via `GetCells`, which is not implemented yet.
-        if version >= EthVersion::Eth72 {
-            let len_before = transactions.len();
-            transactions.retain(|tx| !tx.is_eip4844());
-            let dropped = len_before - transactions.len();
-            if dropped > 0 {
-                trace!(target: "net::tx",
-                    peer_id=format!("{peer_id:#}"),
-                    dropped,
-                    "dropped blob transactions from sparse blobpool response, cell fetching not implemented"
-                );
-            }
-        }
-
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
@@ -1524,9 +1523,17 @@ where
             }
         };
 
-        let new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
+        let mut new_txs = transactions.into_par_iter().filter_map(recover).collect::<Vec<_>>();
 
         has_bad_transactions |= new_txs.len() != txs_len;
+
+        // eth/72 peers send blob transactions without their blobs, per EIP-8070. Their bodies
+        // wait in the blob fetcher for their cells, which then hands them back for the import.
+        if version.is_eth72_or_newer() {
+            for tx in new_txs.extract_if(.., |tx| tx.is_eip4844()) {
+                has_bad_transactions |= !self.blob_fetcher.body(peer_id, tx);
+            }
+        }
 
         // Record the transactions as seen by the peer
         for tx in &new_txs {
@@ -1535,6 +1542,31 @@ where
 
         // 3. import new transactions as a batch to minimize lock contention on the underlying
         // pool
+        self.import_recovered_transactions(new_txs);
+
+        if num_already_seen_by_peer > 0 {
+            self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
+            self.metrics
+                .occurrences_of_transaction_already_seen_by_peer
+                .increment(num_already_seen_by_peer);
+            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
+        }
+
+        if has_bad_transactions {
+            // peer sent us invalid transactions
+            self.report_peer_bad_transactions(peer_id)
+        }
+
+        if num_already_seen_by_peer > 0 {
+            self.report_already_seen(peer_id);
+        }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
+    }
+
+    /// Queues recovered transactions for a batched pool import, counted against the import
+    /// limits.
+    fn import_recovered_transactions(&self, new_txs: Vec<Pool::Transaction>) {
         if !new_txs.is_empty() {
             let pool = self.pool.clone();
             // update metrics
@@ -1574,25 +1606,6 @@ where
 
             self.pool_imports.push(import);
         }
-
-        if num_already_seen_by_peer > 0 {
-            self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
-            self.metrics
-                .occurrences_of_transaction_already_seen_by_peer
-                .increment(num_already_seen_by_peer);
-            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=%client_version, "Peer sent already seen transactions");
-        }
-
-        if has_bad_transactions {
-            // peer sent us invalid transactions
-            self.report_peer_bad_transactions(peer_id)
-        }
-
-        if num_already_seen_by_peer > 0 {
-            self.report_already_seen(peer_id);
-        }
-
-        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].
@@ -1702,6 +1715,16 @@ where
             },
             |event| this.on_fetch_event(event),
         );
+
+        // Import blob transactions whose cells passed their check.
+        if this.has_capacity_for_pending_pool_imports() &&
+            let Poll::Ready((peer_id, tx)) = this.blob_fetcher.poll(cx, &this.peers)
+        {
+            this.transactions_by_peers.insert(*tx.hash(), smallvec::smallvec![peer_id]);
+            this.import_recovered_transactions(vec![tx]);
+            // Other checks may have finished too.
+            cx.waker().wake_by_ref();
+        }
 
         // Remember whether response polling stopped at capacity so imports completing below
         // can trigger another poll even if the waiting response has not registered a waker yet.

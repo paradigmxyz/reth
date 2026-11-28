@@ -231,9 +231,9 @@ fn with_current_worker<R>(f: impl FnOnce(&RefCell<Worker>) -> R) -> R {
 /// `--cfg dst`). State is created, accessed, and dropped on its worker, including non-`Send`
 /// values. Under `fuzz` plus `--cfg dst`, different simulated jobs sharing a logical slot serialize
 /// worker access even across blocking executor waits; recursive access retains the native borrow
-/// checks. Keep [`with_worker`](Self::with_worker) and [`with_worker_mut`](Self::with_worker_mut) closures short
-/// and non-yielding: if Rayon runs another job on the same thread while a borrow is active,
-/// re-entrant worker access can panic.
+/// checks. Keep [`with_worker`](Self::with_worker) and [`with_worker_mut`](Self::with_worker_mut)
+/// closures short and non-yielding: if Rayon runs another job on the same thread while a borrow is
+/// active, re-entrant worker access can panic.
 ///
 /// Independent [`WorkerStatefulPool`] owners can reuse the same threads with different state
 /// configurations; each owner clears its state when dropped.
