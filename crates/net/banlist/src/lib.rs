@@ -112,6 +112,14 @@ impl BanList {
         self.banned_peers.contains_key(peer_id)
     }
 
+    /// Returns true if the given peer is banned at `now`.
+    ///
+    /// Unlike [`Self::is_banned_peer`], a ban whose deadline has passed doesn't count, even if
+    /// [`Self::evict_peers`] hasn't removed it yet.
+    pub fn is_banned_peer_at(&self, peer_id: &PeerId, now: Instant) -> bool {
+        self.banned_peers.get(peer_id).is_some_and(|until| until.is_none_or(|until| now <= until))
+    }
+
     /// Unbans the ip address
     pub fn unban_ip(&mut self, ip: &IpAddr) {
         self.banned_ips.remove(ip);
@@ -190,6 +198,21 @@ mod tests {
         assert!(banlist.is_banned_peer(&peer));
         banlist.unban_peer(&peer);
         assert!(!banlist.is_banned_peer(&peer));
+    }
+
+    #[test]
+    fn expired_peer_ban_is_not_active() {
+        let peer = PeerId::repeat_byte(1);
+        let now = Instant::now();
+        let mut banlist = BanList::default();
+        banlist.ban_peer_until(peer, now);
+        assert!(banlist.is_banned_peer_at(&peer, now));
+        assert!(!banlist.is_banned_peer_at(&peer, now + std::time::Duration::from_millis(1)));
+        assert!(banlist.is_banned_peer(&peer));
+
+        banlist.ban_peer(peer);
+        assert!(banlist.is_banned_peer_at(&peer, now + std::time::Duration::from_secs(3600)));
+        assert!(!banlist.is_banned_peer_at(&PeerId::repeat_byte(2), now));
     }
 
     #[test]

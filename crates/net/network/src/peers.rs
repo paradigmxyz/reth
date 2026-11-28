@@ -1216,13 +1216,16 @@ impl PeersManager {
     ///
     /// Returns `None` if no peer is available.
     fn best_unconnected(&mut self, trusted_only: bool) -> Option<(PeerId, &mut Peer)> {
+        let now = std::time::Instant::now();
         let mut unconnected = self.peers.iter_mut().filter(|(peer_id, peer)| {
             !peer.is_backed_off() &&
                 !peer.is_banned() &&
                 peer.state.is_unconnected() &&
                 (!(self.trusted_nodes_only || trusted_only) ||
                     peer.is_trusted() ||
-                    self.trusted_peer_ids.contains(*peer_id))
+                    self.trusted_peer_ids.contains(*peer_id)) &&
+                // trusted peers stay in the set after a fatal error but are banned for a while
+                !self.ban_list.is_banned_peer_at(peer_id, now)
         });
 
         // keep track of the best peer, if there's one
@@ -2778,12 +2781,20 @@ mod tests {
         // await for the ban to expire
         tokio::time::sleep(peers.backoff_durations.medium).await;
 
-        match event!(peers) {
-            PeerAction::Connect { peer_id, remote_addr } => {
-                assert_eq!(peer_id, peer);
-                assert_eq!(remote_addr, socket_addr);
+        // the redial is gated by the ban deadline and the unban by the eviction sweep, so they
+        // can arrive in either order
+        loop {
+            match event!(peers) {
+                PeerAction::UnBanPeer { peer_id } => {
+                    assert_eq!(peer_id, peer);
+                }
+                PeerAction::Connect { peer_id, remote_addr } => {
+                    assert_eq!(peer_id, peer);
+                    assert_eq!(remote_addr, socket_addr);
+                    break
+                }
+                err => unreachable!("{err:?}"),
             }
-            err => unreachable!("{err:?}"),
         }
     }
 
@@ -4894,5 +4905,39 @@ mod tests {
         assert!(peers.peers.is_empty());
         assert_eq!(peers.num_pending_outbound_connections(), 0);
         assert_eq!(peers.num_outbound_connections(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_trusted_peer_not_redialed_while_banned() {
+        let peer = PeerId::random();
+        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
+        // the default backoff keeps the trusted peer banned for the whole test
+        let mut peers = PeersManager::new(
+            PeersConfig::test().with_backoff_durations(PeerBackoffDurations::default()),
+        );
+        peers.add_trusted_peer(peer, PeerAddr::from_tcp(socket_addr));
+        match event!(peers) {
+            PeerAction::PeerAdded(peer_id) => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        match event!(peers) {
+            PeerAction::Connect { peer_id, .. } => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        peers.on_active_outgoing_established(peer);
+
+        peers.on_active_session_dropped(
+            &socket_addr,
+            &peer,
+            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+                DisconnectReason::ProtocolBreach,
+            )),
+        );
+        match poll_now(&mut peers) {
+            Poll::Ready(PeerAction::BanPeer { peer_id }) => assert_eq!(peer_id, peer),
+            _ => unreachable!(),
+        }
+        assert!(peers.peers.contains_key(&peer));
+        assert!(poll_now(&mut peers).is_pending());
     }
 }
