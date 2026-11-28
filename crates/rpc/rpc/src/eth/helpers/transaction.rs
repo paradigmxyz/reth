@@ -145,7 +145,7 @@ mod tests {
         test_utils::{ExtendedAccount, MockEthProvider},
         ChainSpecProvider,
     };
-    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
+    use reth_rpc_eth_api::{helpers::SpawnBlocking, node::RpcNodeCoreAdapter};
     use reth_transaction_pool::{
         test_utils::{testing_pool, TestPool, TransactionGenerator},
         PoolPooledTx, TransactionOrigin, TransactionPool,
@@ -573,6 +573,67 @@ mod tests {
             .collect::<Vec<_>>();
         nonces.sort_unstable();
         assert_eq!(nonces, [0, 1, 2, 3, 4]);
+    }
+
+    /// `eth_sendTransaction` waits for a blocking IO permit to estimate gas, like
+    /// `eth_estimateGas`, but holds none while queued on the signer's nonce lock.
+    #[tokio::test]
+    async fn send_transaction_takes_blocking_io_permit() {
+        let signers = DevSigner::random_signers(1);
+        let address = signers[0].accounts()[0];
+        let nonce_lock = signers[0].nonce_lock().unwrap();
+        let accounts = AddressMap::from_iter([(
+            address,
+            ExtendedAccount::new(0, U256::from(10_000_000_000_000_000_000u64)),
+        )]);
+        let eth_api = mock_eth_api_builder(accounts).max_blocking_io_requests(1).build();
+        eth_api.signers().write().extend(signers);
+
+        // No gas limit, so the request runs a gas estimate.
+        let tx_req = TransactionRequest {
+            from: Some(address),
+            to: Some(address.into()),
+            value: Some(U256::ONE),
+            ..Default::default()
+        };
+
+        // Exceeds the balance, so its estimate fails as soon as it runs. Stalling while the permit
+        // is held shows the estimate waits for it.
+        let unaffordable = TransactionRequest { value: Some(U256::MAX), ..tx_req.clone() };
+        let permit = eth_api.acquire_owned_blocking_io().await.unwrap();
+        assert!(tokio::time::timeout(
+            Duration::from_millis(200),
+            reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, unaffordable.clone())
+        )
+        .await
+        .is_err());
+
+        drop(permit);
+        let err = reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, unaffordable)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.message(),
+            format!(
+                "insufficient funds for gas * price + value: have 10000000000000000000 want {}",
+                U256::MAX
+            )
+        );
+
+        let hash = reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req.clone())
+            .await
+            .unwrap();
+        let pooled = eth_api.pool().get(&hash).expect("transaction should be in the pool");
+        assert_eq!(pooled.transaction.gas_limit(), 21_000);
+
+        let nonce_guard = nonce_lock.lock().await;
+        let mut queued =
+            std::pin::pin!(reth_rpc_eth_api::EthApiServer::send_transaction(&eth_api, tx_req));
+        assert!(futures::poll!(&mut queued).is_pending());
+        assert_eq!(eth_api.blocking_io_task_guard().available_permits(), 1);
+
+        drop(nonce_guard);
+        queued.await.unwrap();
     }
 
     #[tokio::test]

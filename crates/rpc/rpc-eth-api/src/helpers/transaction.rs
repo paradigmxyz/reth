@@ -569,6 +569,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             if request.as_ref().gas_limit().is_none() {
+                // Taken after the nonce lock, so requests queued on that lock hold no permit.
+                let _permit = self
+                    .acquire_owned_blocking_io()
+                    .await
+                    .map_err(|_| EthApiError::InternalEthError)?;
                 let estimated_gas = self
                     .estimate_gas_at(request.clone(), BlockId::pending(), EvmOverrides::default())
                     .await?;
