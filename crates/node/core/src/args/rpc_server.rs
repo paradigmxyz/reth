@@ -75,6 +75,7 @@ pub struct DefaultRpcServerArgs {
     http_decompression_algorithms: Option<Vec<String>>,
     http_api: Option<RpcModuleSelection>,
     http_corsdomain: Option<String>,
+    http_vhosts: Option<String>,
     ws: bool,
     ws_addr: IpAddr,
     ws_port: u16,
@@ -173,6 +174,12 @@ impl DefaultRpcServerArgs {
     /// Set the default HTTP CORS domain
     pub fn with_http_corsdomain(mut self, v: Option<String>) -> Self {
         self.http_corsdomain = v;
+        self
+    }
+
+    /// Set the default allowed HTTP `Host` names
+    pub fn with_http_vhosts(mut self, v: Option<String>) -> Self {
+        self.http_vhosts = v;
         self
     }
 
@@ -428,6 +435,7 @@ impl Default for DefaultRpcServerArgs {
             http_decompression_algorithms: None,
             http_api: None,
             http_corsdomain: None,
+            http_vhosts: None,
             ws: false,
             ws_addr: Ipv4Addr::LOCALHOST.into(),
             ws_port: constants::DEFAULT_WS_RPC_PORT,
@@ -538,6 +546,15 @@ pub struct RpcServerArgs {
     /// Http Corsdomain to allow request from
     #[arg(long = "http.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_corsdomain.as_ref().map(|v| v.to_string().into())))]
     pub http_corsdomain: Option<String>,
+
+    /// Comma-separated list of `Host` names the HTTP server accepts requests for. Use `*` to
+    /// accept any host.
+    ///
+    /// IP addresses are always accepted. Defaults to names without a dot, such as `localhost` or a
+    /// Docker service name. Set this when clients or a reverse proxy reach the server under a
+    /// domain name. The list replaces the default names. Names are matched without the port.
+    #[arg(long = "http.vhosts", value_name = "HOSTS", default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_vhosts.as_ref().map(|v| v.to_string().into())))]
+    pub http_vhosts: Option<String>,
 
     /// Enable the WS-RPC server
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().ws)]
@@ -1056,6 +1073,7 @@ impl Default for RpcServerArgs {
             http_decompression_algorithms,
             http_api,
             http_corsdomain,
+            http_vhosts,
             ws,
             ws_addr,
             ws_port,
@@ -1106,6 +1124,7 @@ impl Default for RpcServerArgs {
             http_decompression_algorithms,
             http_api,
             http_corsdomain,
+            http_vhosts,
             ws,
             ws_addr,
             ws_port,
@@ -1468,6 +1487,7 @@ mod tests {
             http_decompression_algorithms: None,
             http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             http_corsdomain: Some("*".to_string()),
+            http_vhosts: Some("rpc.example.com".to_string()),
             ws: true,
             ws_addr: "127.0.0.1".parse().unwrap(),
             ws_port: 8546,
@@ -1545,6 +1565,8 @@ mod tests {
             "eth,admin",
             "--http.corsdomain",
             "*",
+            "--http.vhosts",
+            "rpc.example.com",
             "--ws",
             "--ws.addr",
             "127.0.0.1",
