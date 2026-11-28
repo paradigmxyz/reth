@@ -1380,7 +1380,9 @@ impl Discv4Service {
     fn max_pending_pings(&mut self, node: &NodeRecord, is_lookup: bool) -> usize {
         let may_use_reserved = is_lookup ||
             self.on_entry(node.id, |entry| {
-                entry.has_endpoint_proof && entry.record.udp_addr() == node.udp_addr()
+                entry.has_endpoint_proof &&
+                    entry.record.address.to_canonical() == node.address.to_canonical() &&
+                    entry.record.udp_port == node.udp_port
             })
             .unwrap_or_default();
         if may_use_reserved {
@@ -3274,6 +3276,25 @@ mod tests {
             service.queued_pings.iter().map(|(node, _)| node.id).collect::<Vec<_>>(),
             queued
         );
+
+        // A renewal still counts when the proven endpoint was stored as IPv4-mapped IPv6.
+        let mapped = loop {
+            let record =
+                NodeRecord::new("[::ffff:127.0.0.6]:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, record);
+            if service.on_entry(record.id, |_| ()).is_some() {
+                break record
+            }
+        };
+        service.received_pongs = PongTable::default();
+        let ping = Ping {
+            from: mapped.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, mapped.udp_addr(), mapped.id, B256::random());
+        assert!(matches!(service.pending_pings[&mapped.id].reason, PingReason::EstablishBond));
     }
 
     // Bootstraps with mainnet boot nodes
