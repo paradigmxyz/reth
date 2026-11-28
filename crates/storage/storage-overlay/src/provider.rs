@@ -44,7 +44,7 @@ use reth_trie_db::{
     PackedStoragesTrie,
 };
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     fmt,
     marker::PhantomPinned,
     ops::Deref,
@@ -179,6 +179,9 @@ where
     /// first.
     multiproof_calculator:
         RefCell<Option<CachedMultiProofCalculator<<Provider::Target as DbTxProvider>::Tx>>>,
+    /// Last address hashed for a hashed-state storage read, since slot-heavy callers read many
+    /// slots of one account in a row.
+    last_hashed_address: Cell<Option<(Address, B256)>>,
     /// The `!Unpin` pointee preserves cached transaction borrows when the owning box moves.
     provider: Pin<Box<(Provider, PhantomPinned)>>,
     overlay_builder: Option<OverlayBuilder<N>>,
@@ -300,6 +303,7 @@ where
     ) -> Self {
         Self {
             multiproof_calculator: RefCell::new(None),
+            last_hashed_address: Cell::new(None),
             provider: Box::pin((provider, PhantomPinned)),
             overlay_builder,
             state_trie_overlay_cache,
@@ -952,7 +956,15 @@ where
         zero_if_missing: bool,
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         if self.provider().cached_storage_settings().use_hashed_state() {
-            let hashed_address = alloy_primitives::keccak256(address);
+            let hashed_address = if let Some((last, hashed)) = self.last_hashed_address.get() &&
+                last == address
+            {
+                hashed
+            } else {
+                let hashed = alloy_primitives::keccak256(address);
+                self.last_hashed_address.set(Some((address, hashed)));
+                hashed
+            };
             let hashed_slot = alloy_primitives::keccak256(storage_key);
             let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
             let value = cursor
@@ -1146,7 +1158,7 @@ mod tests {
         ExecutionOverlay, OverlayManager,
     };
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{keccak256, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
@@ -1615,5 +1627,66 @@ mod tests {
         assert_eq!(provider.basic_account(&address)?.map(|account| account.balance), Some(balance));
         assert_eq!(provider.storage(address, slot)?, Some(storage));
         Ok(())
+    }
+
+    #[test]
+    fn storage_reads_reuse_last_hashed_address() {
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(settings);
+            let first = Address::with_last_byte(1);
+            let second = Address::with_last_byte(2);
+            let provider_rw = factory.provider_rw().unwrap();
+            for (address, key, value) in [
+                (first, B256::with_last_byte(1), U256::from(11)),
+                (first, B256::with_last_byte(2), U256::from(12)),
+                (second, B256::with_last_byte(1), U256::from(21)),
+            ] {
+                if settings.use_hashed_state() {
+                    provider_rw
+                        .tx_ref()
+                        .put::<tables::HashedStorages>(
+                            keccak256(address),
+                            StorageEntry::new(keccak256(key), value),
+                        )
+                        .unwrap();
+                } else {
+                    provider_rw
+                        .tx_ref()
+                        .put::<tables::PlainStorageState>(address, StorageEntry::new(key, value))
+                        .unwrap();
+                }
+            }
+            provider_rw.commit().unwrap();
+
+            let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
+                factory.provider().unwrap(),
+                Arc::new(ExecutionOverlay::default()),
+                settings.is_v2(),
+            );
+
+            // A read for a different account must replace the remembered hash, or `second` and
+            // then `first` again would be looked up under the previous account's hash.
+            assert_eq!(
+                provider.storage(first, B256::with_last_byte(1)).unwrap(),
+                Some(U256::from(11))
+            );
+            assert_eq!(
+                provider.storage(first, B256::with_last_byte(2)).unwrap(),
+                Some(U256::from(12))
+            );
+            assert_eq!(
+                provider.storage(second, B256::with_last_byte(1)).unwrap(),
+                Some(U256::from(21))
+            );
+            assert_eq!(
+                provider.storage(first, B256::with_last_byte(1)).unwrap(),
+                Some(U256::from(11))
+            );
+            assert_eq!(
+                provider.last_hashed_address.get(),
+                settings.use_hashed_state().then(|| (first, keccak256(first)))
+            );
+        }
     }
 }
