@@ -1,6 +1,6 @@
 use crate::{
-    ArenaParallelSparseTrie, LeafUpdate, SparseTrie as SparseTrieTrait, SparseTrieUpdates,
-    TrieNodeEpoch,
+    LeafUpdate, PersistentArenaParallelSparseTrie, SparseTrie as SparseTrieTrait,
+    SparseTrieUpdates, TrieNodeEpoch,
 };
 use alloc::boxed::Box;
 use alloy_primitives::{map::B256Map, B256};
@@ -20,7 +20,7 @@ use reth_trie_common::{ProofTrieNode, ProofV2TargetParent};
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum RevealableSparseTrie<T = ArenaParallelSparseTrie> {
+pub enum RevealableSparseTrie<T = PersistentArenaParallelSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
@@ -51,7 +51,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
 
     /// Reveals the root from a V2 calculator batch, converting a blind trie into a revealed one.
     ///
-    /// `nodes` must contain the root and, for an extension root, its separate branch child.
+    /// `nodes` must contain the root. An extension's branch child may be revealed later.
     /// The root and its branch may be consumed; other proof nodes are left for revelation.
     /// The retention flag controls whether trie updates should be tracked.
     ///
@@ -230,7 +230,7 @@ impl<T: SparseTrieTrait + Default> RevealableSparseTrie<T> {
             Self::Blind(_) => {
                 // Nothing is revealed - emit proof targets for all keys without a known parent.
                 for key in updates.keys() {
-                    #[cfg(all(feature = "fuzz", reth_sparse_trie_coverage))]
+                    #[cfg(reth_sparse_trie_coverage)]
                     crate::arena::observe_blind_root_proof_target();
                     proof_required_fn(*key, ProofV2TargetParent::NONE);
                 }

@@ -68,13 +68,11 @@ impl LeafUpdate {
 pub trait SparseTrie: Sized + Debug + Send + Sync {
     /// Reveals the root from a batch produced by the V2 proof calculator.
     ///
-    /// `nodes` must contain a node at the empty path. An extension root must be accompanied by
-    /// its branch child in the same batch, including that branch's persistence masks.
+    /// `nodes` must contain a node at the empty path.
     /// Root nodes may be consumed; remaining nodes can be passed to [`Self::reveal_nodes`].
     /// `retain_updates` controls whether trie updates should be tracked.
     ///
-    /// Returns an error if the root cannot be revealed. Standalone hashed extensions are not
-    /// supported.
+    /// Returns an error if the root cannot be revealed.
     ///
     /// # Panics
     ///
@@ -99,10 +97,9 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
 
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
-    /// The batch must come from the V2 proof calculator, with every extension accompanied by
-    /// its branch child. Attaches nodes where their paths identify blinded nodes in the current
-    /// trie. Nodes already revealed, paths diverging from the trie, and paths naming absent
-    /// children may be skipped.
+    /// The batch must come from the V2 proof calculator. Attaches nodes where their paths
+    /// identify blinded nodes in the current trie. Nodes already revealed, paths diverging from
+    /// the trie, and paths naming absent children may be skipped.
     ///
     /// # Arguments
     ///
@@ -242,6 +239,26 @@ pub trait SparseTrie: Sized + Debug + Send + Sync {
         updates: &mut B256Map<LeafUpdate>,
         proof_required_fn: impl FnMut(B256, ProofV2TargetParent),
     ) -> SparseTrieResult<()>;
+
+    /// Returns an independently writable snapshot of the current trie.
+    ///
+    /// Use this before applying different changes to two tries that start from the same state.
+    /// This does not hash the trie: a dirty root stays dirty, and a cached root retains its hash
+    /// and modification epoch. Subsequent changes to either trie do not affect the other.
+    ///
+    /// Both tries start with the same accumulated updates. Taking updates from one does not drain
+    /// the other. When persisting updates from a shared history with [`Self::take_updates`], apply
+    /// those common updates only once.
+    ///
+    /// The default calls [`Clone::clone`], so the method is available only when `Self: Clone`.
+    /// Implementations can prepare the source for efficient forking through the mutable receiver
+    /// without changing its logical state. Snapshot cost depends on the implementation.
+    fn snapshot(&mut self) -> Self
+    where
+        Self: Clone,
+    {
+        self.clone()
+    }
 }
 
 /// Tracks modifications to the sparse trie structure.

@@ -34,8 +34,8 @@ use reth_trie_sparse::{
     errors::{
         SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind, SparseTrieResult,
     },
-    ArenaParallelSparseTrie, DeferredDrops, LeafUpdate, RevealableSparseTrie, SparseStateTrie,
-    SparseTrie, TrieNodeEpoch,
+    DeferredDrops, LeafUpdate, PersistentArenaParallelSparseTrie, RevealableSparseTrie,
+    SparseStateTrie, SparseTrie, TrieNodeEpoch,
 };
 use tracing::{debug, debug_span, error, instrument, trace_span};
 
@@ -120,7 +120,10 @@ use tracing::{debug, debug_span, error, instrument, trace_span};
 /// errors fail the calculation; [`StorageJobMessage::Panicked`] resumes the worker's panic on
 /// this task's thread. During draining, pending updates with no remaining source of progress
 /// produce [`StateRootTaskError::Stalled`].
-pub(super) struct SparseTrieCacheTask<A = ArenaParallelSparseTrie, S = ArenaParallelSparseTrie> {
+pub(super) struct SparseTrieCacheTask<
+    A = PersistentArenaParallelSparseTrie,
+    S = PersistentArenaParallelSparseTrie,
+> {
     /// Receives updates from execution and prewarming.
     updates: Receiver<SparseTrieTaskMessage>,
     /// Fires (by disconnecting) when the consumer drops its cancel guard, meaning nobody is
@@ -1668,7 +1671,7 @@ mod tests {
         BranchNode, BranchNodeMasks, ExtensionNode, LeafNode, Nibbles, TrieMask, TrieNode,
     };
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerCounts};
-    use reth_trie_sparse::ArenaParallelSparseTrie;
+    use reth_trie_sparse::PersistentArenaParallelSparseTrie;
 
     fn drain_sparse_trie_tasks(runtime: &Runtime) {
         for task_name in ["trie-hashing", "storage-workers", "account-workers"] {
@@ -1712,7 +1715,7 @@ mod tests {
 
     fn receive_storage_job(
         task: &SparseTrieCacheTask,
-    ) -> StorageJobMessage<ArenaParallelSparseTrie> {
+    ) -> StorageJobMessage<PersistentArenaParallelSparseTrie> {
         task.storage_done_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("storage job did not return")
@@ -1722,7 +1725,7 @@ mod tests {
     fn check_out_storage(
         task: &mut SparseTrieCacheTask,
         address: B256,
-    ) -> Box<StorageTrieWork<ArenaParallelSparseTrie>> {
+    ) -> Box<StorageTrieWork<PersistentArenaParallelSparseTrie>> {
         let state = task.storage.get_mut(&address).expect("address must have an entry");
         let StorageTrieState::Idle(work) = core::mem::replace(
             state,
@@ -1738,7 +1741,7 @@ mod tests {
     fn return_storage(
         task: &mut SparseTrieCacheTask,
         address: B256,
-        work: Box<StorageTrieWork<ArenaParallelSparseTrie>>,
+        work: Box<StorageTrieWork<PersistentArenaParallelSparseTrie>>,
     ) {
         task.on_storage_trie_returned(StorageTrieJobDone {
             address,
@@ -1835,9 +1838,11 @@ mod tests {
     fn checked_out_storage_trie_holds_back_its_updates_until_it_returns() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
-            .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
+            .with_accounts_trie(
+                RevealableSparseTrie::<PersistentArenaParallelSparseTrie>::revealed_empty(),
+            )
             .with_default_storage_trie(RevealableSparseTrie::blind_from(
-                ArenaParallelSparseTrie::default(),
+                PersistentArenaParallelSparseTrie::default(),
             ))
             .with_updates(true);
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
@@ -2025,7 +2030,7 @@ mod tests {
             )])
         );
 
-        let mut serial = RevealableSparseTrie::<ArenaParallelSparseTrie>::blind();
+        let mut serial = RevealableSparseTrie::<PersistentArenaParallelSparseTrie>::blind();
         serial.reveal_v2_proof_nodes(&mut [parent_leaf], true).unwrap();
         let mut final_updates = B256Map::from_iter([
             (removed_slot, LeafUpdate::Changed(Vec::new())),
@@ -2179,9 +2184,11 @@ mod tests {
     fn large_storage_batches_run_off_thread() {
         let runtime = Runtime::test();
         let trie = SparseStateTrie::default()
-            .with_accounts_trie(RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty())
+            .with_accounts_trie(
+                RevealableSparseTrie::<PersistentArenaParallelSparseTrie>::revealed_empty(),
+            )
             .with_default_storage_trie(RevealableSparseTrie::blind_from(
-                ArenaParallelSparseTrie::default(),
+                PersistentArenaParallelSparseTrie::default(),
             ))
             .with_updates(true);
         let (mut task, updates_tx, _cancel_guard) = test_task(&runtime, trie);
@@ -2229,7 +2236,8 @@ mod tests {
     #[allow(clippy::clone_on_copy)]
     fn run_waits_for_storage_tries_hashed_off_thread() {
         let runtime = Runtime::test();
-        let default_trie = RevealableSparseTrie::<ArenaParallelSparseTrie>::revealed_empty();
+        let default_trie =
+            RevealableSparseTrie::<PersistentArenaParallelSparseTrie>::revealed_empty();
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
@@ -2294,7 +2302,8 @@ mod tests {
             Default::default(),
         );
 
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let default_trie =
+            RevealableSparseTrie::blind_from(PersistentArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
@@ -2375,7 +2384,8 @@ mod tests {
             Default::default(),
         );
 
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let default_trie =
+            RevealableSparseTrie::blind_from(PersistentArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
@@ -2427,7 +2437,8 @@ mod tests {
             Default::default(),
         );
 
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let default_trie =
+            RevealableSparseTrie::blind_from(PersistentArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)
@@ -2511,7 +2522,8 @@ mod tests {
             Default::default(),
         );
 
-        let default_trie = RevealableSparseTrie::blind_from(ArenaParallelSparseTrie::default());
+        let default_trie =
+            RevealableSparseTrie::blind_from(PersistentArenaParallelSparseTrie::default());
         let trie = SparseStateTrie::default()
             .with_accounts_trie(default_trie.clone())
             .with_default_storage_trie(default_trie)

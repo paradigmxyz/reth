@@ -56,7 +56,9 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie>(new_trie: fn() ->
     let TrieNode::Extension(extension) = &root.node else {
         panic!("fixture root must be an extension");
     };
-    let error = trie.set_root(&mut [root.clone()], true).unwrap_err();
+    let mut invalid_child = root.clone();
+    invalid_child.path = extension.key;
+    let error = trie.set_root(&mut [root.clone(), invalid_child.clone()], true).unwrap_err();
     match error.kind() {
         SparseTrieErrorKind::Reveal { path, node } => {
             assert_eq!(*path, Nibbles::default());
@@ -76,7 +78,9 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie>(new_trie: fn() ->
     for retain_updates in [false, true] {
         let mut probe = (new_trie)();
         probe.set_updates(retain_updates);
-        let probe_error = probe.set_root(&mut [root.clone()], !retain_updates).unwrap_err();
+        let probe_error = probe
+            .set_root(&mut [root.clone(), invalid_child.clone()], !retain_updates)
+            .unwrap_err();
         assert_eq!(probe_error.to_string(), error.to_string());
         // No intervening successful set_root may reset the policy being checked.
         let mut updates = SuiteTestHarness::leaf_updates(probe_harness.storage());
@@ -92,7 +96,7 @@ pub(super) fn test_set_root_with_extension_node<T: SparseTrie>(new_trie: fn() ->
         assert!(updates.removed_nodes.is_empty());
     }
 
-    // A rejected incomplete root must not prevent initialization with the full calculator pair.
+    // A rejected malformed root must not prevent initialization with the full calculator pair.
     let mut nodes = harness.root_nodes();
     trie.set_root(&mut nodes, true).expect("complete root pair should succeed after rejection");
     trie.reveal_nodes(&mut nodes).unwrap();
