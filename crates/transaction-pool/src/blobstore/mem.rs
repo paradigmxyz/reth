@@ -1,7 +1,7 @@
 use crate::blobstore::{
     cells::{merge_cells, missing_hashes},
     without_blobs, BlobStore, BlobStoreCleanupStat, BlobStoreError, BlobStoreSize,
-    BlobTxCellSidecar, PooledBlobSidecar, RebuiltSidecars,
+    BlobTxCellSidecar, PooledBlobSidecar,
 };
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1},
@@ -54,11 +54,10 @@ impl InMemoryBlobStore {
             }
         }
         let mut missing = missing_hashes(versioned_hashes, &result);
-        for (tx, cells) in self.inner.cells_matching(&missing) {
-            // Sidecars sharing a blob are rebuilt only while it is missing.
+        for (_, cells) in self.inner.cells_matching(&missing) {
+            // Sidecars sharing a blob are joined only while it is missing.
             if cells.versioned_hashes().any(|hash| missing.contains(&hash)) &&
-                let Some(sidecar) = self.inner.rebuilt.get_or_rebuild(tx, &cells) &&
-                let Some(sidecar) = sidecar.as_eip7594()
+                let Some(sidecar) = cells.to_full()
             {
                 for (hash_idx, match_result) in sidecar.match_versioned_hashes(versioned_hashes) {
                     missing.remove(&versioned_hashes[hash_idx]);
@@ -114,13 +113,11 @@ struct InMemoryBlobStoreInner {
     // Sidecars that keep only some cells, for transactions not in `store`. Locked after `store`
     // when both are held.
     cells: RwLock<B256Map<Arc<BlobTxCellSidecar>>>,
-    // Sidecars rebuilt from `cells`.
-    rebuilt: RebuiltSidecars,
     size_tracker: BlobStoreSize,
 }
 
 impl InMemoryBlobStoreInner {
-    // Returns the sidecar of `tx`, rebuilding it from cells if needed.
+    // Returns the sidecar of `tx`, joined from its cells if needed.
     fn get(&self, tx: &B256) -> Option<Arc<BlobTransactionSidecarVariant>> {
         let cells = {
             // Held across both lookups, so a move from cells to full is not missed.
@@ -130,7 +127,7 @@ impl InMemoryBlobStoreInner {
             }
             self.cells.read().get(tx).cloned()?
         };
-        self.rebuilt.get_or_rebuild(*tx, &cells)
+        cells.to_full().map(|sidecar| Arc::new(BlobTransactionSidecarVariant::Eip7594(sidecar)))
     }
 
     // Returns the cell sidecars with a blob in `hashes`.
@@ -145,7 +142,6 @@ impl InMemoryBlobStoreInner {
 
     // Removes the cell sidecar of `tx` and returns its size.
     fn remove_cells(&self, cells: &mut B256Map<Arc<BlobTxCellSidecar>>, tx: &B256) -> usize {
-        self.rebuilt.remove(tx);
         cells.remove(tx).map(|cells| cells.size()).unwrap_or_default()
     }
 }
@@ -189,9 +185,13 @@ impl BlobStore for InMemoryBlobStore {
     fn insert_cells(&self, tx: B256, data: BlobTxCellSidecar) -> Result<(), BlobStoreError> {
         let store = self.inner.store.read();
         let mut cells = self.inner.cells.write();
-        if !store.contains_key(&tx) && !cells.contains_key(&tx) {
+        // A full sidecar holds every cell, while older cells of a readmitted transaction may miss
+        // some that its new availability claims.
+        if !store.contains_key(&tx) {
             self.inner.size_tracker.add_size(data.size());
-            cells.insert(tx, Arc::new(data));
+            if let Some(replaced) = cells.insert(tx, Arc::new(data)) {
+                self.inner.size_tracker.sub_size(replaced.size());
+            }
             self.inner.size_tracker.update_len(store.len() + cells.len());
         }
         Ok(())
@@ -333,8 +333,8 @@ impl BlobStore for InMemoryBlobStore {
                 return Ok(result)
             }
         }
-        // Only blobs that can be rebuilt from their cells count as available.
-        for cells in self.inner.cells.read().values().filter(|cells| cells.is_recoverable()) {
+        // Only blobs that can be joined from their cells count as available.
+        for cells in self.inner.cells.read().values().filter(|cells| cells.has_data_columns()) {
             for available_hash in cells.versioned_hashes() {
                 for (idx, requested_hash) in versioned_hashes.iter().enumerate() {
                     if *requested_hash == available_hash {
@@ -397,7 +397,6 @@ fn insert_size(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blobstore::cells::tests::{fixture, subset};
     use alloy_consensus::BlobTransactionSidecar;
     use alloy_eips::{
         eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2, Bytes48},
@@ -506,18 +505,5 @@ mod tests {
             .unwrap();
 
         assert_eq!(store.get_cells(tx_hash, cell_mask).unwrap(), Some(expected));
-    }
-
-    #[test]
-    fn mem_get_blobs_v3_rebuilds_a_shared_blob_once() {
-        let store = InMemoryBlobStore::default();
-        let (_, all) = fixture();
-        let hash = all.versioned_hashes().next().unwrap();
-        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
-        store.insert_cells(B256::random(), half.clone()).unwrap();
-        store.insert_cells(B256::random(), half).unwrap();
-
-        assert!(store.get_by_versioned_hashes_v3(&[hash]).unwrap()[0].is_some());
-        assert_eq!(store.inner.rebuilt.cache.lock().sidecars.len(), 1);
     }
 }

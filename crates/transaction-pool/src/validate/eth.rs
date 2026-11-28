@@ -832,7 +832,7 @@ where
                         ))
                     }
                 }
-                EthBlobTransactionSidecar::Present(sidecar) => {
+                EthBlobTransactionSidecar::Present(mut sidecar) => {
                     let now = Instant::now();
 
                     // EIP-7594 sidecar version handling
@@ -861,12 +861,32 @@ where
                         }
                     }
 
-                    // validate the blob
-                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
-                        self.validation_metrics.invalid_4844.increment(1);
-                        return Err(InvalidPoolTransactionError::Eip4844(
-                            Eip4844PoolTransactionError::InvalidEip4844Blob(err),
-                        ))
+                    // validate the blob, or the kept cells of a sidecar fetched as cells, extended
+                    // to all cells once they can rebuild the blobs
+                    let validation = if let Some(cells) = sidecar.cells() {
+                        cells
+                            .validate(
+                                transaction.blob_versioned_hashes().unwrap_or_default(),
+                                self.kzg_settings.get(),
+                            )
+                            .and_then(|()| {
+                                cells
+                                    .is_recoverable()
+                                    .then(|| cells.extend(self.kzg_settings.get()))
+                                    .transpose()
+                            })
+                    } else {
+                        transaction.validate_blob(&sidecar, self.kzg_settings.get()).map(|()| None)
+                    };
+                    match validation {
+                        Ok(Some(extended)) => sidecar.set_extended_cells(extended),
+                        Ok(None) => {}
+                        Err(err) => {
+                            self.validation_metrics.invalid_4844.increment(1);
+                            return Err(InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::InvalidEip4844Blob(err),
+                            ))
+                        }
                     }
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
@@ -1600,21 +1620,28 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
 mod tests {
     use super::*;
     use crate::{
-        blobstore::InMemoryBlobStore, error::PoolErrorKind, test_utils::TransactionBuilder,
-        traits::PoolTransaction, CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
+        blobstore::{BlobTxCellSidecar, InMemoryBlobStore},
+        error::PoolErrorKind,
+        test_utils::TransactionBuilder,
+        traits::PoolTransaction,
+        CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionPool,
     };
-    use alloy_consensus::{Header, Transaction};
+    use alloy_consensus::{
+        Header, SignableTransaction, Transaction, TxEip4844, TxEip4844WithSidecar,
+    };
     use alloy_eips::{
         eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M,
         eip2718::{Decodable2718, Encodable2718},
         eip2930::{AccessList, AccessListItem},
+        eip4844::{env_settings::EnvKzgSettings, Blob, BlobTransactionValidationError},
+        eip7594::{BlobCellMask, BlobTransactionSidecarEip7594, Cell, CELLS_PER_EXT_BLOB},
         eip7702::Authorization,
     };
     use alloy_primitives::{hex, Address, Bytes, Signature, B256, U256};
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_ethereum_primitives::PooledTransactionVariant;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::SignedTransaction;
+    use reth_primitives_traits::{Recovered, SignedTransaction};
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
 
     fn test_evm_config() -> EthEvmConfig {
@@ -2502,6 +2529,84 @@ mod tests {
         assert!(matches!(
             validator.validate_stateless(TransactionOrigin::External, &transaction(gas_limit + 1)),
             Err(InvalidPoolTransactionError::ExceedsGasLimit(60_000_001, 60_000_000))
+        ));
+    }
+
+    #[test]
+    fn validate_blob_tx_fetched_as_cells() {
+        let settings = EnvKzgSettings::Default.get();
+        // A non-zero blob, so its cell proofs differ.
+        let mut blob = Blob::default();
+        blob[31] = 1;
+        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![blob]).unwrap();
+        let all = BlobTxCellSidecar::from_full(&full, settings).unwrap();
+        let mask = BlobCellMask::from_bits(0b101);
+        let kept = |cells| {
+            BlobTxCellSidecar::new(all.commitments().to_vec(), all.proofs().to_vec(), cells, mask)
+                .unwrap()
+        };
+        let data_columns = |proofs| {
+            let data = BlobCellMask::from_bits(u64::MAX.into());
+            BlobTxCellSidecar::new(
+                all.commitments().to_vec(),
+                proofs,
+                all.get_cells(data).unwrap(),
+                data,
+            )
+            .unwrap()
+        };
+        let body = PooledTransactionVariant::Eip4844(
+            TxEip4844WithSidecar {
+                tx: TxEip4844 {
+                    blob_versioned_hashes: all.versioned_hashes().collect(),
+                    ..Default::default()
+                },
+                sidecar: all.without_blobs().into(),
+            }
+            .into_signed(Signature::test_signature()),
+        );
+        let validator = EthTransactionValidatorBuilder::new(mock_provider(), test_evm_config())
+            .set_osaka(true)
+            .build(InMemoryBlobStore::default());
+        let validate = |cells: BlobTxCellSidecar| {
+            let mut tx = EthPooledTransaction::from_pooled(Recovered::new_unchecked(
+                body.clone(),
+                Address::ZERO,
+            ));
+            assert!(tx.set_blob_sidecar(PooledBlobSidecar::from_cells(cells)));
+            validator.validate_eip4844(&mut tx)
+        };
+
+        // Only the kept cells are checked, since the sidecar has no blobs.
+        let cells = kept(all.get_cells(mask).unwrap());
+        let sidecar = validate(cells.clone()).unwrap().unwrap();
+        assert_eq!(sidecar.cells(), Some(&cells));
+        assert_eq!(sidecar.availability().get(), mask);
+
+        let mut bad = all.get_cells(mask).unwrap();
+        bad[0] = Cell::repeat_byte(1);
+        assert!(matches!(
+            validate(kept(bad)),
+            Err(InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::InvalidEip4844Blob(_)
+            ))
+        ));
+
+        // Enough cells to rebuild the blob are extended to all of them.
+        let sidecar = validate(data_columns(all.proofs().to_vec())).unwrap().unwrap();
+        assert_eq!(sidecar.cells(), Some(&all));
+        assert!(sidecar.availability().is_full());
+
+        // A wrong proof of a column that isn't kept is caught once its cell is rebuilt.
+        let mut proofs = all.proofs().to_vec();
+        proofs[CELLS_PER_EXT_BLOB - 1] = proofs[CELLS_PER_EXT_BLOB - 2];
+        assert!(matches!(
+            validate(data_columns(proofs)),
+            Err(InvalidPoolTransactionError::Eip4844(
+                Eip4844PoolTransactionError::InvalidEip4844Blob(
+                    BlobTransactionValidationError::InvalidProof
+                )
+            ))
         ));
     }
 }

@@ -3,11 +3,11 @@
 
 use alloy_eips::{
     eip4844::{
-        c_kzg, env_settings::KzgSettings, kzg_to_versioned_hash, AsCkzg, BlobCellsAndProofsV1,
-        BlobTransactionValidationError, Bytes48,
+        c_kzg, env_settings::KzgSettings, kzg_to_versioned_hash, AsAlloy, AsCkzg, Blob,
+        BlobCellsAndProofsV1, BlobTransactionValidationError, Bytes48,
     },
     eip7594::{
-        BlobCellMask, BlobCellRecoveryError, BlobTransactionSidecarEip7594, Cell,
+        BlobCellMask, BlobCellRecoveryError, BlobTransactionSidecarEip7594, Cell, BYTES_PER_CELL,
         CELLS_PER_EXT_BLOB,
     },
 };
@@ -143,6 +143,79 @@ impl BlobTxCellSidecar {
             return Err(BlobTransactionValidationError::InvalidProof)
         }
         Ok(())
+    }
+
+    /// Returns a copy keeping all 128 cells, checking the rebuilt ones against their proofs.
+    ///
+    /// The kept cells must be validated first, see [`Self::validate`]. Rebuilding is a cheap
+    /// extension when the first 64 columns, which hold the blob itself, are kept, and a full
+    /// recovery from any other 64 columns.
+    pub fn extend(&self, settings: &KzgSettings) -> Result<Self, BlobTransactionValidationError> {
+        let missing = BlobCellMask::from_bits(!self.mask.bits());
+        if missing.count() == 0 {
+            return Ok(self.clone())
+        }
+        let indices = self.mask.selected_indices().map(|index| index as u64).collect::<Vec<_>>();
+        let mut cells = Vec::with_capacity(self.commitments.len() * CELLS_PER_EXT_BLOB);
+        for kept in self.cells.chunks_exact(self.mask.count()) {
+            let all = if self.has_data_columns() {
+                settings.compute_cells(blob_from_data_cells(kept).as_ckzg())?
+            } else {
+                settings.recover_cells_and_kzg_proofs(&indices, Cell::slice_as_ckzg(kept))?.0
+            };
+            cells.extend_from_slice(c_kzg::Cell::slice_as_alloy(all.as_ref()));
+        }
+
+        let len = self.commitments.len() * missing.count();
+        let (mut commitments, mut indices, mut rebuilt, mut proofs) = (
+            Vec::with_capacity(len),
+            Vec::with_capacity(len),
+            Vec::with_capacity(len),
+            Vec::with_capacity(len),
+        );
+        for (blob, commitment) in self.commitments.iter().enumerate() {
+            for index in missing.selected_indices() {
+                commitments.push(*commitment);
+                indices.push(index as u64);
+                rebuilt.push(cells[blob * CELLS_PER_EXT_BLOB + index]);
+                proofs.push(self.proofs[blob * CELLS_PER_EXT_BLOB + index]);
+            }
+        }
+        if !settings.verify_cell_kzg_proof_batch(
+            Bytes48::slice_as_ckzg(&commitments),
+            &indices,
+            Cell::slice_as_ckzg(&rebuilt),
+            Bytes48::slice_as_ckzg(&proofs),
+        )? {
+            return Err(BlobTransactionValidationError::InvalidProof)
+        }
+        Ok(Self {
+            commitments: self.commitments.clone(),
+            proofs: self.proofs.clone(),
+            cells,
+            mask: BlobCellMask::from_bits(u128::MAX),
+        })
+    }
+
+    /// Returns the full sidecar if the first 64 columns, which hold the blobs themselves, are kept.
+    ///
+    /// This does no KZG work: the blobs are those cells joined, with the stored proofs.
+    pub fn to_full(&self) -> Option<BlobTransactionSidecarEip7594> {
+        if !self.has_data_columns() {
+            return None
+        }
+        let blobs = self.cells.chunks_exact(self.mask.count()).map(blob_from_data_cells).collect();
+        Some(BlobTransactionSidecarEip7594::new(
+            blobs,
+            self.commitments.clone(),
+            self.proofs.clone(),
+        ))
+    }
+
+    /// Returns whether the first 64 columns are kept, whose cells are the blobs themselves, so
+    /// [`Self::to_full`] can join them.
+    pub const fn has_data_columns(&self) -> bool {
+        self.mask.bits() as u64 == u64::MAX
     }
 
     /// Rebuilds the full sidecar, checking each rebuilt blob against its commitment.
@@ -302,6 +375,15 @@ pub(crate) fn missing_hashes<T>(versioned_hashes: &[B256], result: &[Option<T>])
         .zip(result)
         .filter_map(|(hash, found)| found.is_none().then_some(*hash))
         .collect()
+}
+
+// Joins the first 64 cells of a blob, which hold the blob itself.
+fn blob_from_data_cells(cells: &[Cell]) -> Blob {
+    let mut blob = Blob::ZERO;
+    for (chunk, cell) in blob.as_chunks_mut::<BYTES_PER_CELL>().0.iter_mut().zip(cells) {
+        chunk.copy_from_slice(cell.as_slice());
+    }
+    blob
 }
 
 #[cfg(test)]
@@ -513,5 +595,51 @@ pub(crate) mod tests {
             BlobTxCellSidecar::decode(&mut alloy_rlp::encode(&mismatched).as_slice()),
             Err(alloy_rlp::Error::Custom("cell sidecar counts do not match"))
         );
+    }
+
+    #[test]
+    fn extend_rebuilds_all_cells_from_the_data_columns() {
+        let (full, all) = fixture();
+        let data = subset(BlobCellMask::from_bits(u64::MAX.into()));
+        assert_eq!(&data.extend(settings()).unwrap(), all);
+        assert_eq!(data.to_full().as_ref(), Some(full));
+        assert_eq!(&all.extend(settings()).unwrap(), all);
+    }
+
+    #[test]
+    fn extend_recovers_all_cells_from_any_half() {
+        let (_, all) = fixture();
+        let half = subset(BlobCellMask::from_bits(u128::MAX / 3));
+        assert_eq!(&half.extend(settings()).unwrap(), all);
+        // Without the data columns the blobs can't be joined.
+        assert_eq!(half.to_full(), None);
+    }
+
+    #[test]
+    fn extend_rejects_a_bad_proof_of_a_rebuilt_cell() {
+        let (_, all) = fixture();
+        let mut proofs = all.proofs().to_vec();
+        // A valid proof of another cell of the second blob, for column 127, which isn't kept.
+        proofs[2 * CELLS_PER_EXT_BLOB - 1] = proofs[2 * CELLS_PER_EXT_BLOB - 2];
+
+        // The data columns are extended from the blob, and every other column is recovered.
+        for mask in
+            [BlobCellMask::from_bits(u64::MAX.into()), BlobCellMask::from_bits(u128::MAX / 3)]
+        {
+            let cells = BlobTxCellSidecar::new(
+                all.commitments().to_vec(),
+                proofs.clone(),
+                all.get_cells(mask).unwrap(),
+                mask,
+            )
+            .unwrap();
+
+            // The kept cells match their proofs, so only the extension catches it.
+            cells.validate(&all.versioned_hashes().collect::<Vec<_>>(), settings()).unwrap();
+            assert!(matches!(
+                cells.extend(settings()),
+                Err(BlobTransactionValidationError::InvalidProof)
+            ));
+        }
     }
 }

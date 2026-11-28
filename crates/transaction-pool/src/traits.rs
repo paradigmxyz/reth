@@ -70,7 +70,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip4844::{
         env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobCellsAndProofsV1,
-        BlobTransactionValidationError,
+        BlobTransactionValidationError, BYTES_PER_BLOB,
     },
     eip7594::{BlobCellMask, BlobSidecarEncoding, BlobTransactionSidecarVariant, Encodable7594},
     eip7702::SignedAuthorization,
@@ -79,7 +79,7 @@ use alloy_primitives::{
     map::{AddressSet, B256Map},
     Address, Bytes, TxHash, TxKind, B256, U256,
 };
-use alloy_rlp::Header;
+use alloy_rlp::{length_of_length, Encodable, Header};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
@@ -1547,6 +1547,18 @@ pub trait PoolTransaction:
         None
     }
 
+    /// Returns the attached blob sidecar, if any.
+    fn blob_sidecar(&self) -> Option<&PooledBlobSidecar> {
+        None
+    }
+
+    /// Attaches `sidecar` to a blob transaction, for example one fetched as cells.
+    ///
+    /// Returns `false` if this transaction can't carry a sidecar.
+    fn set_blob_sidecar(&mut self, _sidecar: PooledBlobSidecar) -> bool {
+        false
+    }
+
     /// Ensures that the transaction's code size does not exceed the provided `max_init_code_size`.
     ///
     /// This is specifically relevant for contract creation transactions ([`TxKind::Create`]),
@@ -1765,11 +1777,16 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = Recovered::new_unchecked(tx, signer);
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blobless_encoded_length = blobless_encoded_length;
-                if let Some(availability) = pooled.blob_cell_availability.clone() {
-                    pooled.blob_sidecar = EthBlobTransactionSidecar::Present(
-                        PooledBlobSidecar::new(blob, availability),
-                    );
-                }
+                // eth/72 peers send the sidecar without blobs, and its cells are fetched later.
+                let availability =
+                    if blob.as_eip7594().is_some_and(|sidecar| sidecar.blobs.is_empty()) {
+                        BlobCellAvailability::new(BlobCellMask::from_bits(0))
+                    } else {
+                        BlobCellAvailability::full()
+                    };
+                pooled.blob_cell_availability = Some(availability.clone());
+                pooled.blob_sidecar =
+                    EthBlobTransactionSidecar::Present(PooledBlobSidecar::new(blob, availability));
                 pooled
             }
             tx => {
@@ -1829,6 +1846,38 @@ impl PoolTransaction for EthPooledTransaction {
 
     fn blob_cell_availability(&self) -> Option<&BlobCellAvailability> {
         Self::blob_cell_availability(self)
+    }
+
+    fn blob_sidecar(&self) -> Option<&PooledBlobSidecar> {
+        match &self.blob_sidecar {
+            EthBlobTransactionSidecar::Present(sidecar) => Some(sidecar),
+            _ => None,
+        }
+    }
+
+    fn set_blob_sidecar(&mut self, sidecar: PooledBlobSidecar) -> bool {
+        if !self.is_eip4844() {
+            return false
+        }
+        if sidecar.cells().is_some() &&
+            let Some(without_blobs) = sidecar.as_eip7594()
+        {
+            // Keep the size with blobs, which eth/68 to eth/71 announcements and pool limits use.
+            let blob = BYTES_PER_BLOB + length_of_length(BYTES_PER_BLOB);
+            let blobs =
+                Header { list: true, payload_length: without_blobs.commitments.len() * blob };
+            // The consensus encoding without its type byte is the transaction body of the
+            // network encoding, followed by the wrapper version and the sidecar fields.
+            let payload_length = self.transaction.encode_2718_len() - 1 +
+                1 +
+                blobs.length_with_payload() +
+                without_blobs.commitments.length() +
+                without_blobs.cell_proofs.length();
+            self.encoded_length = 1 + Header { list: true, payload_length }.length_with_payload();
+        }
+        self.blob_cell_availability = Some(sidecar.availability().clone());
+        self.blob_sidecar = EthBlobTransactionSidecar::Present(sidecar);
+        true
     }
 }
 
@@ -2125,13 +2174,15 @@ impl<Tx: PoolTransaction> Stream for NewSubpoolTransactionStream<Tx> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blobstore::BlobCellAvailability;
+    use crate::blobstore::{BlobCellAvailability, BlobTxCellSidecar};
     use alloy_consensus::{
         EthereumTxEnvelope, SignableTransaction, TxEip1559, TxEip2930, TxEip4844,
         TxEip4844WithSidecar, TxEip7702, TxEnvelope, TxLegacy,
     };
     use alloy_eips::{
-        eip4844::{Blob, BlobTransactionSidecar, Bytes48, DATA_GAS_PER_BLOB},
+        eip4844::{
+            env_settings::EnvKzgSettings, Blob, BlobTransactionSidecar, Bytes48, DATA_GAS_PER_BLOB,
+        },
         eip7594::{BlobTransactionSidecarEip7594, CELLS_PER_EXT_BLOB},
     };
     use alloy_primitives::Signature;
@@ -2371,5 +2422,51 @@ mod tests {
                 served.as_ref().map(Encodable2718::encode_2718_len)
             );
         }
+    }
+
+    #[test]
+    fn blob_transaction_fetched_as_cells_keeps_the_size_with_blobs() {
+        let full = BlobTransactionSidecarEip7594::try_from_blobs(vec![Blob::default(); 2]).unwrap();
+        let cells = BlobTxCellSidecar::from_full(&full, EnvKzgSettings::Default.get()).unwrap();
+        let blob_tx = |sidecar: BlobTransactionSidecarEip7594| {
+            PooledTransactionVariant::Eip4844(
+                TxEip4844WithSidecar {
+                    tx: TxEip4844 {
+                        blob_versioned_hashes: cells.versioned_hashes().collect(),
+                        ..Default::default()
+                    },
+                    sidecar: sidecar.into(),
+                }
+                .into_signed(Signature::test_signature()),
+            )
+        };
+        let with_blobs = blob_tx(full);
+        let without_blobs = blob_tx(cells.without_blobs());
+
+        // An eth/72 body has no blobs, so none of its cells are available yet.
+        let mut pooled = EthPooledTransaction::from_pooled(Recovered::new_unchecked(
+            without_blobs.clone(),
+            Default::default(),
+        ));
+        assert_eq!(pooled.blob_cell_availability().unwrap().get(), BlobCellMask::from_bits(0));
+
+        assert!(pooled.set_blob_sidecar(PooledBlobSidecar::from_cells(cells.clone())));
+        assert_eq!(pooled.encoded_length(), with_blobs.encode_2718_len());
+        assert_eq!(pooled.encoded_length_eth72(), Some(without_blobs.encode_2718_len()));
+        assert_eq!(pooled.blob_cell_availability().unwrap().get(), cells.mask());
+        assert_eq!(pooled.blob_sidecar().and_then(PooledBlobSidecar::cells), Some(&cells));
+
+        // Other transactions can't carry a sidecar.
+        let mut plain = EthPooledTransaction::new(
+            Recovered::new_unchecked(
+                TransactionSigned::from(
+                    TxEip1559::default().into_signed(Signature::test_signature()),
+                ),
+                Default::default(),
+            ),
+            0,
+        );
+        assert!(!plain.set_blob_sidecar(PooledBlobSidecar::from_cells(cells)));
+        assert_eq!(plain.blob_sidecar(), None);
     }
 }
