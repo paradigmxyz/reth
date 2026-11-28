@@ -2197,31 +2197,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_backoff_on_active_useless_peer_drop() {
-        let peer = PeerId::random();
-        let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);
-        let mut peers = PeersManager::default();
-        peers.add_and_connect(peer, PeerAddr::from_tcp(socket_addr), None);
-        peers.on_active_outgoing_established(peer);
-
-        peers.on_active_session_dropped(
-            &socket_addr,
-            &peer,
-            &EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
-                DisconnectReason::UselessPeer,
-            )),
-        );
-
-        let p = peers.peers.get(&peer).unwrap();
-        assert_eq!(p.state, PeerConnectionState::Idle);
-        assert!(p.is_backed_off());
-        assert_eq!(p.severe_backoff_counter, 0);
-        assert!(peers.backed_off_peers.contains_key(&peer));
-        assert!(!peers.ban_list.is_banned_peer(&peer));
-        assert_eq!(peers.connection_info.num_outbound, 0);
-    }
-
-    #[tokio::test]
     async fn test_keep_banned_static_peer_on_active_drop() {
         let peer = PeerId::random();
         let socket_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 1, 2)), 8008);

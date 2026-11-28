@@ -340,18 +340,13 @@ mod tests {
         ));
 
         assert!(err.is_fatal_protocol_error());
-    }
 
-    #[test]
-    fn test_useless_peer_fatal_only_while_pending() {
+        // Peer rotation sends `UselessPeer` on established sessions.
         let err = EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
             DisconnectReason::UselessPeer,
         ));
         assert!(!err.is_fatal_protocol_error());
-        assert_eq!(err.should_backoff(), Some(BackoffKind::Low));
-
-        let err = PendingSessionHandshakeError::Eth(err);
-        assert!(err.is_fatal_protocol_error());
+        assert!(PendingSessionHandshakeError::Eth(err).is_fatal_protocol_error());
     }
 
     #[test]
@@ -361,6 +356,11 @@ mod tests {
         ));
 
         assert_eq!(err.as_disconnected(), Some(DisconnectReason::TooManyPeers));
+        assert_eq!(err.should_backoff(), Some(BackoffKind::Low));
+
+        let err = EthStreamError::P2PStreamError(P2PStreamError::Disconnected(
+            DisconnectReason::UselessPeer,
+        ));
         assert_eq!(err.should_backoff(), Some(BackoffKind::Low));
 
         let err = EthStreamError::P2PStreamError(P2PStreamError::HandshakeError(
