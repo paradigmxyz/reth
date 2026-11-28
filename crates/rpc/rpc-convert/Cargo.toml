@@ -36,3 +36,6 @@ dyn-clone.workspace = true
 
 [features]
 default = []
+
+[dev-dependencies]
+ephyra.workspace = true
