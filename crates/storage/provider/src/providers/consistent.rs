@@ -1244,6 +1244,18 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
+    fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Self::Block>> {
+        match id {
+            // The pending block is not canonical, so a lookup by its number would miss it.
+            BlockNumberOrTag::Pending => {
+                Ok(self.canonical_in_memory_state.pending_block().map(|block| block.into_block()))
+            }
+            _ => self
+                .convert_block_number(id)?
+                .map_or_else(|| Ok(None), |num| self.block(num.into())),
+        }
+    }
+
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),
@@ -1259,6 +1271,24 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
                     self.block_by_hash(hash.block_hash)
                 }
             }
+        }
+    }
+
+    fn block_with_senders_by_id(
+        &self,
+        id: BlockId,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        match id {
+            // The pending block is not canonical, so a lookup by its number would miss it.
+            BlockId::Number(BlockNumberOrTag::Pending) => Ok(self
+                .canonical_in_memory_state
+                .pending_recovered_block()
+                .map(|block| block.as_ref().clone())),
+            BlockId::Hash(hash) => self.recovered_block(hash.block_hash.into(), transaction_kind),
+            BlockId::Number(num) => self
+                .convert_block_number(num)?
+                .map_or_else(|| Ok(None), |num| self.recovered_block(num.into(), transaction_kind)),
         }
     }
 
