@@ -117,6 +117,10 @@ const ALPHA: usize = 3;
 /// backpressure in recursive lookups.
 const MAX_NODES_PING: usize = 2 * MAX_NODES_PER_BUCKET;
 
+// Number of `MAX_NODES_PING` slots reserved for lookups and pings to proven endpoints, so unproven
+// nodes that never answer our ping can't block lookups or bond renewals.
+const RESERVED_PINGS: usize = MAX_NODES_PER_BUCKET / 2;
+
 /// Maximum number of pings to keep queued.
 ///
 /// If we are currently sending too many pings, any new pings will be queued. To prevent unbounded
@@ -1347,8 +1351,20 @@ impl Discv4Service {
             return
         }
 
-        if self.queued_pings.iter().any(|(n, _)| n.id == node.id && n.address == node.address) {
-            return
+        if let Some(idx) = self.queued_pings.iter().position(|(queued, _)| {
+            queued.id == node.id && queued.address.to_canonical() == node.address.to_canonical()
+        }) {
+            let (queued, queued_reason) = &self.queued_pings[idx];
+            // Prefer the proven port when two bond pings compete for the same peer and IP.
+            if matches!(reason, PingReason::EstablishBond) &&
+                matches!(queued_reason, PingReason::EstablishBond) &&
+                queued.udp_port != node.udp_port &&
+                self.is_proven_endpoint(&node)
+            {
+                self.queued_pings.remove(idx);
+            } else {
+                return
+            }
         }
 
         if self.pending_pings.contains_key(&node.id) ||
@@ -1362,11 +1378,33 @@ impl Discv4Service {
             return
         }
 
-        if self.pending_pings.len() < MAX_NODES_PING {
+        if self.pending_pings.len() <
+            self.max_pending_pings(&node, matches!(reason, PingReason::Lookup(..)))
+        {
             self.send_ping(node, reason);
         } else if self.queued_pings.len() < MAX_QUEUED_PINGS {
             self.queued_pings.push_back((node, reason));
         }
+    }
+
+    // Returns how many pings may be in flight before a ping to `node` has to wait. Lookups and
+    // pings to an endpoint the node already proved may also use the `RESERVED_PINGS` slots.
+    fn max_pending_pings(&mut self, node: &NodeRecord, is_lookup: bool) -> usize {
+        if is_lookup || self.is_proven_endpoint(node) {
+            MAX_NODES_PING
+        } else {
+            MAX_NODES_PING - RESERVED_PINGS
+        }
+    }
+
+    // Whether the routing table has an endpoint proof for this node at its current UDP socket.
+    fn is_proven_endpoint(&mut self, node: &NodeRecord) -> bool {
+        self.on_entry(node.id, |entry| {
+            entry.has_endpoint_proof &&
+                entry.record.address.to_canonical() == node.address.to_canonical() &&
+                entry.record.udp_port == node.udp_port
+        })
+        .unwrap_or_default()
     }
 
     /// Sends a ping message to the node's UDP address.
@@ -1882,14 +1920,20 @@ impl Discv4Service {
     }
 
     /// Pops buffered ping requests and sends them.
+    ///
+    /// While only reserved slots are free, pings that can't use them stay queued in place.
     fn ping_buffered(&mut self) {
+        let mut idx = 0;
         for _ in 0..self.queued_pings.len() {
             if self.pending_pings.len() >= MAX_NODES_PING {
                 break
             }
-            match self.queued_pings.pop_front() {
-                Some((next, reason)) => self.try_ping(next, reason),
-                None => break,
+            let Some((node, reason)) = self.queued_pings.get(idx) else { break };
+            let (node, is_lookup) = (*node, matches!(reason, PingReason::Lookup(..)));
+            if self.pending_pings.len() >= self.max_pending_pings(&node, is_lookup) {
+                idx += 1;
+            } else if let Some((node, reason)) = self.queued_pings.remove(idx) {
+                self.try_ping(node, reason);
             }
         }
     }
@@ -3174,6 +3218,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn proven_renewal_supersedes_queued_wrong_port() {
+        for reserved_slots_full in [false, true] {
+            let (_, mut service) = create_discv4().await;
+            let proven = NodeRecord::new("127.0.0.1:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, proven);
+            let pending =
+                if reserved_slots_full { MAX_NODES_PING } else { MAX_NODES_PING - RESERVED_PINGS };
+            for _ in 0..pending {
+                insert_initial_ping(&mut service, NodeRecord { id: PeerId::random(), ..proven });
+            }
+
+            let other = proven.with_udp_port(30304);
+            service.try_ping(other, PingReason::EstablishBond);
+            for _ in 1..MAX_QUEUED_PINGS {
+                service.try_ping(
+                    NodeRecord { id: PeerId::random(), ..proven },
+                    PingReason::InitialInsert,
+                );
+            }
+            assert_eq!(service.queued_pings.len(), MAX_QUEUED_PINGS);
+
+            service.try_ping(proven, PingReason::EstablishBond);
+            if reserved_slots_full {
+                // Another port and a repeated renewal must leave the proven endpoint queued once.
+                service.try_ping(other, PingReason::EstablishBond);
+                service.try_ping(proven, PingReason::EstablishBond);
+                assert_eq!(service.queued_pings.len(), MAX_QUEUED_PINGS);
+                let completed = *service.pending_pings.keys().next().unwrap();
+                service.pending_pings.remove(&completed);
+                service.ping_buffered();
+            }
+
+            assert_eq!(service.pending_pings[&proven.id].node, proven);
+            assert_eq!(service.queued_pings.len(), MAX_QUEUED_PINGS - 1);
+            assert!(service.queued_pings.iter().all(|(node, _)| node.id != proven.id));
+        }
+    }
+
+    #[tokio::test]
     async fn test_pending_ping() {
         let (_, mut service) = create_discv4().await;
 
@@ -3186,23 +3269,86 @@ mod tests {
                 num_inserted += 1;
                 assert!(service.pending_pings.contains_key(&node.id));
                 assert_eq!(service.pending_pings.len(), num_inserted);
-                if num_inserted == MAX_NODES_PING {
+                if num_inserted == MAX_NODES_PING - RESERVED_PINGS {
                     break
                 }
             }
         }
 
-        // `pending_pings` is full, insert into `queued_pings`.
+        // Unreserved slots are full, insert into `queued_pings`.
         num_inserted = 0;
         for _ in 0..MAX_NODES_PING {
             let node = NodeRecord::new(local_addr, PeerId::random());
             if service.add_node(node) {
                 num_inserted += 1;
                 assert!(!service.pending_pings.contains_key(&node.id));
-                assert_eq!(service.pending_pings.len(), MAX_NODES_PING);
+                assert_eq!(service.pending_pings.len(), MAX_NODES_PING - RESERVED_PINGS);
                 assert_eq!(service.queued_pings.len(), num_inserted);
             }
         }
+
+        // Lookups and renewals to proven endpoints can still use the reserved slots.
+        let lookup = NodeRecord::new("127.0.0.2:30303".parse().unwrap(), PeerId::random());
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        service.try_ping(lookup, PingReason::Lookup(lookup, ctx));
+        assert!(service.pending_pings.contains_key(&lookup.id));
+
+        // Retry ids until one lands in a bucket the filled table still has room in.
+        let renewal = loop {
+            let record = NodeRecord::new("127.0.0.3:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, record);
+            if service.on_entry(record.id, |_| ()).is_some() {
+                break record
+            }
+        };
+
+        // Its node id at an endpoint it never proved gets no reserved slot.
+        let other = NodeRecord::new("127.0.0.4:30303".parse().unwrap(), renewal.id);
+        service.try_ping(other, PingReason::EstablishBond);
+        assert!(!service.pending_pings.contains_key(&renewal.id));
+
+        // Its bond lapsed and it pings us from the endpoint it proved.
+        service.received_pongs = PongTable::default();
+        let ping = Ping {
+            from: renewal.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, renewal.udp_addr(), renewal.id, B256::random());
+        assert!(matches!(service.pending_pings[&renewal.id].reason, PingReason::EstablishBond));
+
+        // Draining the queue sends a queued lookup and leaves the other pings queued in place.
+        service.queued_pings.truncate(2);
+        let queued = service.queued_pings.iter().map(|(node, _)| node.id).collect::<Vec<_>>();
+        let lookup = NodeRecord::new("127.0.0.5:30303".parse().unwrap(), PeerId::random());
+        let ctx = LookupContext::new(kad_key(PeerId::random()), [], None);
+        service.queued_pings.insert(1, (lookup, PingReason::Lookup(lookup, ctx)));
+        service.ping_buffered();
+        assert!(service.pending_pings.contains_key(&lookup.id));
+        assert_eq!(
+            service.queued_pings.iter().map(|(node, _)| node.id).collect::<Vec<_>>(),
+            queued
+        );
+
+        // A renewal still counts when the proven endpoint was stored as IPv4-mapped IPv6.
+        let mapped = loop {
+            let record =
+                NodeRecord::new("[::ffff:127.0.0.6]:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, record);
+            if service.on_entry(record.id, |_| ()).is_some() {
+                break record
+            }
+        };
+        service.received_pongs = PongTable::default();
+        let ping = Ping {
+            from: mapped.into(),
+            to: service.local_node_record.into(),
+            expire: service.ping_expiration(),
+            enr_sq: None,
+        };
+        service.on_ping(ping, mapped.udp_addr(), mapped.id, B256::random());
+        assert!(matches!(service.pending_pings[&mapped.id].reason, PingReason::EstablishBond));
     }
 
     // Bootstraps with mainnet boot nodes
