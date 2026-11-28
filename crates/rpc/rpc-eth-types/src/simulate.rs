@@ -535,6 +535,12 @@ where
         return Err(EthApiError::ConflictingFeeFieldsInRequest)
     }
 
+    if tx.as_ref().authorization_list.is_some() && tx.as_ref().blob_versioned_hashes.is_some() {
+        return Err(EthApiError::InvalidParams(
+            "authorizationList conflicts with blobVersionedHashes".into(),
+        ));
+    }
+
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
     let tx_type = tx.as_ref().output_tx_type();

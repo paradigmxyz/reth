@@ -14,9 +14,11 @@ pub type EthRpcConverter<ChainSpec> =
 mod tests {
     use super::*;
     use alloy_consensus::{Transaction, TxType};
-    use alloy_primitives::{Address, B256, U256};
+    use alloy_eips::eip7702::Authorization;
+    use alloy_primitives::{Address, Signature, B256, U256};
     use alloy_rpc_types_eth::TransactionRequest;
     use evm2::evm::EmptyDB;
+    use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use reth_chainspec::MAINNET;
     use reth_evm_ethereum::EthEvmEnv;
     use reth_rpc_convert::RpcConvert;
@@ -105,6 +107,26 @@ mod tests {
         let result = resolve_transaction(tx, 21000, 0, 1, true, &mut db, &rpc_converter).unwrap();
 
         assert_eq!(result.nonce(), 0);
+    }
+
+    #[test]
+    fn test_resolve_transaction_rejects_conflicting_lists() {
+        let converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+        let mut db = EmptyDB::default();
+        let authorization =
+            Authorization { chain_id: U256::ZERO, address: Address::ZERO, nonce: 0 }
+                .into_signed(Signature::test_signature());
+        let mut request = TransactionRequest::default().to(Address::ZERO);
+        let lists = [(vec![], vec![]), (vec![authorization], vec![B256::repeat_byte(1)])];
+        let message = "authorizationList conflicts with blobVersionedHashes";
+        for (authorizations, hashes) in lists {
+            request.authorization_list = Some(authorizations);
+            request.blob_versioned_hashes = Some(hashes);
+            let result =
+                resolve_transaction(request.clone(), 21_000, 0, 1, false, &mut db, &converter);
+            let error = result.unwrap_err().into_rpc_err();
+            assert_eq!((error.code(), error.message()), (INVALID_PARAMS_CODE, message));
+        }
     }
 
     #[test]
