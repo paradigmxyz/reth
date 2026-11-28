@@ -4,7 +4,10 @@ use http::{
     HeaderValue, Method, Request, Response, StatusCode,
 };
 use jsonrpsee::server::{ws, HttpBody};
-use std::{net::IpAddr, sync::Arc};
+use std::{
+    net::{Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 use tower_http::{
     cors::{AllowOrigin, Any, CorsLayer},
     validate_request::ValidateRequest,
@@ -123,16 +126,20 @@ impl HostValidator {
 
     fn allows(&self, authority: &Authority) -> bool {
         let host = authority.host();
-        // `host()` drops userinfo and anything after a bracketed literal, so reject those.
-        if !authority
-            .as_str()
-            .strip_prefix(host)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
-        {
+        // `host()` drops userinfo and anything after a bracketed literal, so require the value to
+        // be exactly the host and an optional port.
+        if !authority.as_str().strip_prefix(host).is_some_and(|rest| {
+            rest.is_empty() ||
+                rest.strip_prefix(':').is_some_and(|port| port.parse::<u16>().is_ok())
+        }) {
             return false
         }
-        let ip = host.strip_prefix('[').and_then(|host| host.strip_suffix(']')).unwrap_or(host);
-        if ip.parse::<IpAddr>().is_ok() {
+        // IPv6 addresses must be bracketed and IPv4 addresses must not.
+        let is_ip = match host.strip_prefix('[').and_then(|host| host.strip_suffix(']')) {
+            Some(ip) => ip.parse::<Ipv6Addr>().is_ok(),
+            None => host.parse::<Ipv4Addr>().is_ok(),
+        };
+        if is_ip {
             return true
         }
         match self {
@@ -230,6 +237,8 @@ mod tests {
             (vec!["bad host"], false, false),
             (vec!["[::1].unknown.example"], false, false),
             (vec!["unknown.example@127.0.0.1"], false, false),
+            (vec!["[127.0.0.1]"], false, false),
+            (vec!["127.0.0.1:"], false, false),
             (vec!["localhost", "localhost"], false, false),
         ] {
             for (validator, allowed) in [(&local, local_allowed), (&list, list_allowed)] {
