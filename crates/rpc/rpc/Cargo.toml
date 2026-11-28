@@ -26,7 +26,7 @@ reth-chain-state.workspace = true
 reth-transaction-pool.workspace = true
 reth-network-api.workspace = true
 reth-rpc-engine-api.workspace = true
-evm2.workspace = true
+evm2 = { workspace = true, features = ["block"] }
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-rpc-convert.workspace = true
 evm2-inspectors = { workspace = true, features = ["serde", "std"] }

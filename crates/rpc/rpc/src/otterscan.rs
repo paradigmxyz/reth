@@ -1,4 +1,3 @@
-use crate::trace::{base_block_reward, block_reward, ommer_reward};
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_network::{ReceiptResponse, TransactionResponse};
@@ -11,7 +10,10 @@ use alloy_rpc_types_trace::{
     },
     parity::{Action, CreateAction, CreateOutput, LocalizedTransactionTrace, TraceOutput},
 };
-use evm2::interpreter::InstrStop;
+use evm2::{
+    block::ethereum::execution::{base_block_reward, block_reward, ommer_reward},
+    interpreter::InstrStop,
+};
 use evm2_inspectors::{
     otterscan::InternalOperationsInspector,
     tracing::{
