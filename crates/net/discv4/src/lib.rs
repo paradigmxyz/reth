@@ -3237,8 +3237,14 @@ mod tests {
         service.try_ping(lookup, PingReason::Lookup(lookup, ctx));
         assert!(service.pending_pings.contains_key(&lookup.id));
 
-        let renewal = NodeRecord::new("127.0.0.3:30303".parse().unwrap(), PeerId::random());
-        insert_proven_node(&mut service, renewal);
+        // Retry ids until one lands in a bucket the filled table still has room in.
+        let renewal = loop {
+            let record = NodeRecord::new("127.0.0.3:30303".parse().unwrap(), PeerId::random());
+            insert_proven_node(&mut service, record);
+            if service.on_entry(record.id, |_| ()).is_some() {
+                break record
+            }
+        };
 
         // Its node id at an endpoint it never proved gets no reserved slot.
         let other = NodeRecord::new("127.0.0.4:30303".parse().unwrap(), renewal.id);
