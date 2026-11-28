@@ -11,6 +11,7 @@ use std::{
 
 use crate::{
     server::{handle_rpc_call, ConnectionState, ServerConfig},
+    utils::SHUTDOWN_GRACE_PERIOD,
     HttpBody, HttpResponse, LOG_TARGET,
 };
 
@@ -614,14 +615,15 @@ pub(crate) enum Shutdown {
 
 /// Enforce a graceful shutdown.
 ///
-/// This will return once the connection has been terminated or all pending calls have been
-/// executed.
+/// This will return once the connection has been terminated and the queued responses have been
+/// written. When the server is stopped, it also waits for all pending calls, but for at most
+/// [`SHUTDOWN_GRACE_PERIOD`] in total.
 async fn graceful_shutdown<S>(
     result: Result<Shutdown, tungstenite::Error>,
     pending_calls: mpsc::Receiver<()>,
     ws_stream: S,
     mut conn_tx: oneshot::Sender<()>,
-    send_task_handle: tokio::task::JoinHandle<()>,
+    mut send_task_handle: tokio::task::JoinHandle<()>,
 ) where
     S: StreamExt<Item = Result<Bytes, tungstenite::Error>> + Unpin,
 {
@@ -631,15 +633,28 @@ async fn graceful_shutdown<S>(
         let graceful_shutdown = pending_calls.for_each(|_| async {});
         let disconnect = ws_stream.try_for_each(|_| async { Ok(()) });
 
-        tokio::select! {
-            _ = graceful_shutdown => {}
-            res = disconnect => {
-                if let Err(err) = res {
-                    tracing::warn!(target: LOG_TARGET, "Graceful shutdown terminated because of error: `{err}`");
+        let drain = async {
+            tokio::select! {
+                _ = graceful_shutdown => {}
+                res = disconnect => {
+                    if let Err(err) = res {
+                        tracing::warn!(target: LOG_TARGET, "Graceful shutdown terminated because of error: `{err}`");
+                    }
                 }
+                _ = conn_tx.closed() => {}
             }
-            _ = conn_tx.closed() => {}
+            _ = conn_tx.send(());
+            _ = (&mut send_task_handle).await;
+        };
+        // A slow call, or a client that reads its responses slowly, would otherwise keep this
+        // session, and with it `ServerHandle::stopped`, pending. Each write is bounded on its own,
+        // but the queue holds up to `message_buffer_capacity` of them.
+        if timeout(SHUTDOWN_GRACE_PERIOD, drain).await.is_err() {
+            tracing::debug!(target: LOG_TARGET, "WS graceful shutdown timed out after {SHUTDOWN_GRACE_PERIOD:?}");
+            send_task_handle.abort();
+            _ = send_task_handle.await;
         }
+        return;
     }
 
     // Send a message to close down the "send task".

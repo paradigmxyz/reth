@@ -1,5 +1,6 @@
 use crate::{
     tests::helpers::{init_logger, server_with_handles},
+    utils::SHUTDOWN_GRACE_PERIOD,
     HttpBody, HttpRequest, HttpResponse, ServerConfig,
 };
 use hyper::StatusCode;
@@ -271,4 +272,50 @@ async fn serve_closes_connection_with_incomplete_header() {
         .with_timeout(Duration::from_secs(60))
         .await;
     assert!(served.is_ok(), "connection whose request header never completed was kept open");
+}
+
+/// A request whose head is complete but whose body never is.
+const INCOMPLETE_BODY: &[u8] =
+    b"POST / HTTP/1.1\r\nhost: localhost\r\ncontent-type: application/json\r\ncontent-length: 100\r\n\r\n{";
+
+#[tokio::test(start_paused = true)]
+async fn serve_drops_connection_with_unfinished_request_after_stop() {
+    let (mut client, io) = tokio::io::duplex(1024);
+    client.write_all(INCOMPLETE_BODY).await.unwrap();
+    let service = tower::service_fn(|_: HttpRequest<hyper::body::Incoming>| {
+        std::future::pending::<Result<HttpResponse, BoxError>>()
+    });
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let served = tokio::spawn(crate::serve_with_graceful_shutdown(io, service, async move {
+        _ = stop_rx.await;
+    }));
+    // Let the connection read the request head.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    stop_tx.send(()).unwrap();
+    served.with_timeout(SHUTDOWN_GRACE_PERIOD * 2).await.unwrap().unwrap().unwrap_err();
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_drops_connection_with_incomplete_body() {
+    let (addr, server_handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
+    stream.write_all(INCOMPLETE_BODY).await.unwrap();
+    // Let the server read the request head.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    server_handle.stop().unwrap();
+    server_handle.stopped().with_timeout(SHUTDOWN_GRACE_PERIOD * 2).await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_drops_http2_connection_without_settings() {
+    let (addr, server_handle) = server_with_handles().with_default_timeout().await.unwrap();
+    let mut stream = TcpStream::connect(addr).with_default_timeout().await.unwrap().unwrap();
+    stream.write_all(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n").await.unwrap();
+    // Let the server read the preface.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    server_handle.stop().unwrap();
+    server_handle.stopped().with_timeout(SHUTDOWN_GRACE_PERIOD * 2).await.unwrap();
 }

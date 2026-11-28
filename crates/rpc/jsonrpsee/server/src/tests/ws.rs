@@ -29,6 +29,7 @@ use std::{sync::Arc, time::Duration};
 use crate::{
     tests::helpers::{deser_call, init_logger, server_with_context},
     types::SubscriptionId,
+    utils::SHUTDOWN_GRACE_PERIOD,
     BatchRequestConfig, RegisterMethodError, RpcModule, ServerBuilder, ServerConfig,
 };
 use jsonrpsee_core::{server::SendTimeoutError, traits::IdProvider, SubscriptionError};
@@ -1902,4 +1903,21 @@ async fn ws_pings_before_request_are_answered() {
 
     handle.stop().unwrap();
     handle.stopped().with_default_timeout().await.unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn ws_stop_does_not_wait_for_call_past_grace_period() {
+    init_logger();
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (handle, addr) = server_with_infinite_call(tx, ServerConfig::default()).await;
+
+    let mut client = WebSocketTestClient::new(addr).with_default_timeout().await.unwrap().unwrap();
+    let req = r#"{"jsonrpc":"2.0","method":"infinite_call","id":1}"#;
+    client.send(req).with_default_timeout().await.unwrap().unwrap();
+    rx.recv().with_default_timeout().await.unwrap().unwrap();
+
+    // The client stays connected and the call never returns.
+    handle.stop().unwrap();
+    handle.stopped().with_timeout(SHUTDOWN_GRACE_PERIOD * 2).await.unwrap();
 }
