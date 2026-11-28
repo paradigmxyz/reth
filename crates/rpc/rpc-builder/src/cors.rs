@@ -112,8 +112,10 @@ impl HostValidator {
         Some(Self::List(
             hosts
                 .map(|host| {
-                    host.parse::<Authority>()
-                        .map_or_else(|_| host.to_string(), |a| a.host().to_string())
+                    host.rsplit_once(':')
+                        .filter(|(_, port)| port.parse::<u16>().is_ok())
+                        .map_or(host, |(host, _)| host)
+                        .to_string()
                 })
                 .collect(),
         ))
@@ -207,7 +209,9 @@ mod tests {
     #[test]
     fn test_host_validator() {
         let mut local = HostValidator::new(None).unwrap();
-        let list = HostValidator::new(Some("rpc.example.com:8545, other.example")).unwrap();
+        let list =
+            HostValidator::new(Some("rpc.example.com:8545, other.example, x@userinfo.example"))
+                .unwrap();
         for (hosts, local_allowed, list_allowed) in [
             (vec![], true, true),
             (vec![""], true, true),
@@ -219,6 +223,7 @@ mod tests {
             (vec!["10.0.0.1"], true, true),
             (vec!["RPC.example.com:443"], false, true),
             (vec!["unknown.example:8545"], false, false),
+            (vec!["userinfo.example"], false, false),
             (vec!["localhost."], false, false),
             (vec!["127.0.0.1.nip.io"], false, false),
             (vec!["0x7f.1"], false, false),
