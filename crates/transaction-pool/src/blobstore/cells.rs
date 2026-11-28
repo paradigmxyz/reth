@@ -3,11 +3,11 @@
 
 use alloy_eips::{
     eip4844::{
-        c_kzg, env_settings::KzgSettings, kzg_to_versioned_hash, AsCkzg, BlobCellsAndProofsV1,
-        BlobTransactionValidationError, Bytes48,
+        c_kzg, env_settings::KzgSettings, kzg_to_versioned_hash, AsAlloy, AsCkzg, Blob,
+        BlobCellsAndProofsV1, BlobTransactionValidationError, Bytes48,
     },
     eip7594::{
-        BlobCellMask, BlobCellRecoveryError, BlobTransactionSidecarEip7594, Cell,
+        BlobCellMask, BlobCellRecoveryError, BlobTransactionSidecarEip7594, Cell, BYTES_PER_CELL,
         CELLS_PER_EXT_BLOB,
     },
 };
@@ -143,6 +143,78 @@ impl BlobTxCellSidecar {
             return Err(BlobTransactionValidationError::InvalidProof)
         }
         Ok(())
+    }
+
+    /// Returns a copy keeping all 128 cells, checking the rebuilt ones against their proofs.
+    ///
+    /// The kept cells must be validated first, see [`Self::validate`]. Rebuilding is a cheap
+    /// extension when the first 64 columns, which hold the blob itself, are kept, and a full
+    /// recovery from any other 64 columns.
+    pub fn extend(&self, settings: &KzgSettings) -> Result<Self, BlobTransactionValidationError> {
+        let missing = BlobCellMask::from_bits(!self.mask.bits());
+        if missing.count() == 0 {
+            return Ok(self.clone())
+        }
+        let indices = self.mask.selected_indices().map(|index| index as u64).collect::<Vec<_>>();
+        let mut cells = Vec::with_capacity(self.commitments.len() * CELLS_PER_EXT_BLOB);
+        for kept in self.cells.chunks_exact(self.mask.count()) {
+            let all = if self.has_data_columns() {
+                settings.compute_cells(blob_from_data_cells(kept).as_ckzg())?
+            } else {
+                settings.recover_cells_and_kzg_proofs(&indices, Cell::slice_as_ckzg(kept))?.0
+            };
+            cells.extend_from_slice(c_kzg::Cell::slice_as_alloy(all.as_ref()));
+        }
+
+        let len = self.commitments.len() * missing.count();
+        let (mut commitments, mut indices, mut rebuilt, mut proofs) = (
+            Vec::with_capacity(len),
+            Vec::with_capacity(len),
+            Vec::with_capacity(len),
+            Vec::with_capacity(len),
+        );
+        for (blob, commitment) in self.commitments.iter().enumerate() {
+            for index in missing.selected_indices() {
+                commitments.push(*commitment);
+                indices.push(index as u64);
+                rebuilt.push(cells[blob * CELLS_PER_EXT_BLOB + index]);
+                proofs.push(self.proofs[blob * CELLS_PER_EXT_BLOB + index]);
+            }
+        }
+        if !settings.verify_cell_kzg_proof_batch(
+            Bytes48::slice_as_ckzg(&commitments),
+            &indices,
+            Cell::slice_as_ckzg(&rebuilt),
+            Bytes48::slice_as_ckzg(&proofs),
+        )? {
+            return Err(BlobTransactionValidationError::InvalidProof)
+        }
+        Ok(Self {
+            commitments: self.commitments.clone(),
+            proofs: self.proofs.clone(),
+            cells,
+            mask: BlobCellMask::from_bits(u128::MAX),
+        })
+    }
+
+    /// Returns the full sidecar if the first 64 columns, which hold the blobs themselves, are kept.
+    ///
+    /// This does no KZG work: the blobs are those cells joined, with the stored proofs.
+    pub fn to_full(&self) -> Option<BlobTransactionSidecarEip7594> {
+        if !self.has_data_columns() {
+            return None
+        }
+        let blobs = self.cells.chunks_exact(self.mask.count()).map(blob_from_data_cells).collect();
+        Some(BlobTransactionSidecarEip7594::new(
+            blobs,
+            self.commitments.clone(),
+            self.proofs.clone(),
+        ))
+    }
+
+    // Returns whether the first 64 columns are kept, whose cells are the blob itself.
+    const fn has_data_columns(&self) -> bool {
+        self.mask.bits() as u64 == u64::MAX
     }
 
     /// Rebuilds the full sidecar, checking each rebuilt blob against its commitment.
@@ -302,6 +374,15 @@ pub(crate) fn missing_hashes<T>(versioned_hashes: &[B256], result: &[Option<T>])
         .zip(result)
         .filter_map(|(hash, found)| found.is_none().then_some(*hash))
         .collect()
+}
+
+// Joins the first 64 cells of a blob, which hold the blob itself.
+fn blob_from_data_cells(cells: &[Cell]) -> Blob {
+    let mut blob = Blob::ZERO;
+    for (chunk, cell) in blob.as_chunks_mut::<BYTES_PER_CELL>().0.iter_mut().zip(cells) {
+        chunk.copy_from_slice(cell.as_slice());
+    }
+    blob
 }
 
 #[cfg(test)]

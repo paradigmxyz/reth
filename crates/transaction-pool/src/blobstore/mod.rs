@@ -74,6 +74,12 @@ impl BlobCellAvailability {
     pub fn is_recoverable(&self) -> bool {
         self.get().count() >= CELLS_PER_EXT_BLOB / 2
     }
+
+    /// Marks every cell as available, once the missing cells were rebuilt.
+    pub fn set_full(&self) {
+        self.0[Self::LOW_WORD].store(u64::MAX, Ordering::Relaxed);
+        self.0[Self::HIGH_WORD].store(u64::MAX, Ordering::Relaxed);
+    }
 }
 
 impl PartialEq for BlobCellAvailability {
