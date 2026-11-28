@@ -10,7 +10,7 @@
 mod era1;
 mod ere;
 
-use crate::calculate_td_by_number;
+use crate::{calculate_td_by_number, history::verify_receipts};
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::Encodable;
@@ -158,7 +158,8 @@ type BodyOf<P> = <<P as BlockReader>::Block as Block>::Body;
 /// Fetches block history from `provider` and writes it to ERA files in the `W` format, chunked by
 /// [`ExportConfig::max_blocks_per_file`].
 ///
-/// Returns the paths of the files that were created.
+/// Returns the paths of the files that were created. A receipt mismatch with the block header
+/// returns an error before the affected chunk is written.
 pub fn export<W, P>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
     W: EraBlockWriter,
@@ -270,6 +271,9 @@ where
         let receipts = provider
             .receipts_by_block(actual.into())?
             .ok_or_else(|| eyre!("Receipts not found for block {actual}"))?;
+
+        // Stored status receipts cannot reproduce pre-Byzantium post-state receipts.
+        verify_receipts(&header, &receipts, true)?;
 
         let block_hash = header.hash_slow();
         *total_difficulty += header.difficulty();
