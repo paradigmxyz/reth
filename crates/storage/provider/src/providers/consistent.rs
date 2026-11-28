@@ -1244,6 +1244,18 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
 }
 
 impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
+    fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Self::Block>> {
+        match id {
+            // The pending block is not canonical, so a lookup by its number would miss it.
+            BlockNumberOrTag::Pending => {
+                Ok(self.canonical_in_memory_state.pending_block().map(|block| block.into_block()))
+            }
+            _ => self
+                .convert_block_number(id)?
+                .map_or_else(|| Ok(None), |num| self.block(num.into())),
+        }
+    }
+
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
             BlockId::Number(num) => self.block_by_number_or_tag(num),

@@ -894,6 +894,10 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for BlockchainProvider<N>
 where
     Self: ReceiptProviderIdExt,
 {
+    fn block_by_number_or_tag(&self, id: BlockNumberOrTag) -> ProviderResult<Option<Self::Block>> {
+        self.consistent_provider()?.block_by_number_or_tag(id)
+    }
+
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         self.consistent_provider()?.block_by_id(id)
     }
@@ -2020,12 +2024,13 @@ mod tests {
     #[test]
     fn test_block_reader_id_ext_block_by_id() -> eyre::Result<()> {
         let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
+        let (provider, database_blocks, in_memory_blocks, _, mut canonical_in_memory_state_writer) =
+            provider_with_random_blocks(
+                &mut rng,
+                TEST_BLOCKS_COUNT,
+                TEST_BLOCKS_COUNT,
+                BlockRangeParams::default(),
+            )?;
 
         let database_block = database_blocks.first().unwrap().clone();
         let in_memory_block = in_memory_blocks.last().unwrap().clone();
@@ -2051,6 +2056,28 @@ mod tests {
         assert_eq!(
             provider.block_by_id(block_hash.into()).unwrap(),
             Some(in_memory_block.into_block())
+        );
+
+        assert_eq!(provider.block_by_id(BlockId::pending())?, None);
+        let pending_block = random_block(
+            &mut rng,
+            block_number + 1,
+            BlockParams { parent: Some(block_hash), ..Default::default() },
+        );
+        canonical_in_memory_state_writer.set_pending_block(ExecutedBlock {
+            recovered_block: Arc::new(RecoveredBlock::new_sealed(
+                pending_block.clone(),
+                pending_block.senders().unwrap(),
+            )),
+            ..Default::default()
+        });
+        assert_eq!(
+            provider.block_by_id(BlockId::pending())?,
+            Some(pending_block.clone().into_block())
+        );
+        assert_eq!(
+            provider.block_by_number_or_tag(BlockNumberOrTag::Pending)?,
+            Some(pending_block.into_block())
         );
 
         Ok(())
