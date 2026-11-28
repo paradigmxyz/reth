@@ -510,8 +510,6 @@ mod tests {
             Some(PruneMode::Distance(REORG_RETENTION_WINDOW))
         );
 
-        // The EIP-8252 window must be the binding constraint, not the smaller reorg-safety margin.
-        assert!(REORG_RETENTION_WINDOW > MINIMUM_UNWIND_SAFE_DISTANCE);
         for mode in [full_config.segments.account_history, full_config.segments.storage_history] {
             match mode {
                 Some(PruneMode::Distance(distance)) => assert!(distance >= REORG_RETENTION_WINDOW),

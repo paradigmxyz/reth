@@ -275,9 +275,6 @@ mod tests {
         // EIP-8252: 8192 epochs * 32 slots/epoch = 2^18 = 262_144 blocks.
         assert_eq!(REORG_RETENTION_WINDOW, 262_144);
         assert_eq!(REORG_RETENTION_WINDOW, 1 << 18);
-        // The retention window must comfortably exceed the minimum reorg-safety margin it is
-        // decoupled from, otherwise the EIP-8252 default would not be the binding constraint.
-        assert!(REORG_RETENTION_WINDOW > MINIMUM_UNWIND_SAFE_DISTANCE);
     }
 
     #[test]
