@@ -701,6 +701,13 @@ evm2-inspectors = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a
 evm2-jit = { git = "https://github.com/DaniPopes/evm2", rev = "e80df9c46a8240b056a076ab930b1c5ecf7f1e47" }
 
 [patch.crates-io]
+# Indexed V4 REST encoder from alloy-rs/alloy#4555.
+alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "282b6ed7d3f665f67b5229a87b5fe6096f20c460" }
+alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "282b6ed7d3f665f67b5229a87b5fe6096f20c460" }
+alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/alloy", rev = "282b6ed7d3f665f67b5229a87b5fe6096f20c460" }
+alloy-serde = { git = "https://github.com/alloy-rs/alloy", rev = "282b6ed7d3f665f67b5229a87b5fe6096f20c460" }
+alloy-tx-macros = { git = "https://github.com/alloy-rs/alloy", rev = "282b6ed7d3f665f67b5229a87b5fe6096f20c460" }
+
 # reth-core
 reth-codecs = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
 reth-codecs-derive = { git = "https://github.com/paradigmxyz/reth-core", rev = "15c627dace6027a01c3bc5effe5f1a777f162a9d" }
