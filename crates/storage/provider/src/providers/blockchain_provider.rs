@@ -902,6 +902,14 @@ where
         self.consistent_provider()?.block_by_id(id)
     }
 
+    fn block_with_senders_by_id(
+        &self,
+        id: BlockId,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        self.consistent_provider()?.block_with_senders_by_id(id, transaction_kind)
+    }
+
     fn header_by_number_or_tag(
         &self,
         id: BlockNumberOrTag,
@@ -2059,18 +2067,25 @@ mod tests {
         );
 
         assert_eq!(provider.block_by_id(BlockId::pending())?, None);
+        assert_eq!(
+            provider.block_with_senders_by_id(BlockId::pending(), TransactionVariant::WithHash)?,
+            None
+        );
         let pending_block = random_block(
             &mut rng,
             block_number + 1,
             BlockParams { parent: Some(block_hash), ..Default::default() },
         );
+        let pending_recovered_block =
+            RecoveredBlock::new_sealed(pending_block.clone(), pending_block.senders().unwrap());
         canonical_in_memory_state_writer.set_pending_block(ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(
-                pending_block.clone(),
-                pending_block.senders().unwrap(),
-            )),
+            recovered_block: Arc::new(pending_recovered_block.clone()),
             ..Default::default()
         });
+        assert_eq!(
+            provider.block_with_senders_by_id(BlockId::pending(), TransactionVariant::WithHash)?,
+            Some(pending_recovered_block)
+        );
         assert_eq!(
             provider.block_by_id(BlockId::pending())?,
             Some(pending_block.clone().into_block())
