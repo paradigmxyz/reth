@@ -946,7 +946,7 @@ mod tests {
         let mut client_stream = EthStream::<_, EthNetworkPrimitives>::new(EthVersion::Eth67, sink);
 
         client_stream.start_send_raw(test_msg).unwrap();
-        client_stream.inner_mut().flush().await.unwrap();
+        SinkExt::<Bytes>::flush(client_stream.inner_mut()).await.unwrap();
 
         handle.await.unwrap();
     }
