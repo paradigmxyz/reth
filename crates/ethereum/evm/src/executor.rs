@@ -13,23 +13,27 @@ use alloc::{borrow::Cow, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionEnvelope;
 use alloy_eip7928::{BlockAccessIndex, BlockAccessList};
 use alloy_eips::{eip2718::Typed2718, eip7685::Requests};
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
+use core::{error::Error, fmt};
 use evm2::{
     block::{
         ethereum::{self as evm2_eth, EthBlockRules, EthPostExecutionOutput},
         BlockExecutor as _,
     },
     ethereum::TxEnvelope,
-    evm::Bal,
+    evm::{
+        AccountInfo, Bal, BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS,
+        CONSOLIDATION_REQUEST_ADDRESS, WITHDRAWAL_REQUEST_ADDRESS,
+    },
     interpreter::Host,
-    BaseEvmTypes, Evm, EvmTypes,
+    BaseEvmTypes, Evm, EvmTypes, SpecId,
 };
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_forks::EthereumHardforks;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
-    BlockExecutionError, BlockExecutionOutput, BlockExecutor, ExecutorTx, GasOutput,
-    ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
+    execute::map_database_error, BlockExecutionError, BlockExecutionOutput, BlockExecutor,
+    BlockValidationError, ExecutorTx, GasOutput, ReceiptBuilder, ReceiptBuilderCtx, RecoveredTx,
 };
 
 pub use evm2::block::ethereum::EthTransactionResultWithState;
@@ -60,6 +64,8 @@ where
     /// evm2 executor that runs the block.
     pub inner: evm2_eth::EthBlockExecutor<'a, T, ReceiptBuilderAdapter<R>>,
     ctx: EthBlockExecutionCtx<'a>,
+    /// When `false`, a request contract without code does not invalidate the block.
+    enforce_request_contract_code: bool,
 }
 
 /// Converts reth's execution context into evm2's.
@@ -88,7 +94,9 @@ where
     where
         C: EthChainSpec + EthereumHardforks + ?Sized,
     {
-        let block_number = evm.block_env().number.to::<u64>();
+        let block_env = evm.block_env();
+        let block_number = block_env.number.to::<u64>();
+        let timestamp = block_env.timestamp.to::<u64>();
         let rules = EthBlockRules::new(
             chain_spec,
             block_number,
@@ -100,7 +108,8 @@ where
             rules,
             ReceiptBuilderAdapter(receipt_builder),
         );
-        Self { inner, ctx }
+        let enforce_request_contract_code = chain_spec.rejects_empty_request_contracts(timestamp);
+        Self { inner, ctx, enforce_request_contract_code }
     }
 
     /// Returns the block execution context.
@@ -121,6 +130,39 @@ where
     /// Sets the Ethereum fork used for block system calls and deposit request processing.
     pub const fn set_spec_id(&mut self, spec_id: evm2::SpecId) {
         self.inner.set_spec_id(spec_id);
+    }
+
+    /// Rejects the block when a request contract has no code.
+    ///
+    /// From Prague, EIP-7002 and EIP-7251 require code at their contracts. From Amsterdam,
+    /// EIP-8282 does too. A call to an address without code succeeds and adds no requests, which
+    /// those EIPs make invalid. The read includes code deployed earlier in the block.
+    fn ensure_request_contracts_have_code(&mut self) -> Result<(), BlockExecutionError> {
+        let spec_id = self.inner.evm.spec_id();
+        if !self.enforce_request_contract_code || !spec_id.enables(SpecId::PRAGUE) {
+            return Ok(())
+        }
+
+        for address in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+            self.ensure_request_contract_has_code(address)?;
+        }
+        if spec_id.enables(SpecId::AMSTERDAM) {
+            for address in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+                self.ensure_request_contract_has_code(address)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn ensure_request_contract_has_code(
+        &mut self,
+        address: Address,
+    ) -> Result<(), BlockExecutionError> {
+        let info = self.inner.evm.read_account_info(&address).map_err(map_database_error)?;
+        if info.as_ref().is_none_or(AccountInfo::is_empty_code_hash) {
+            return Err(BlockValidationError::other(SystemContractEmpty { address }).into())
+        }
+        Ok(())
     }
 }
 
@@ -222,8 +264,9 @@ where
     }
 
     fn finish_with_prepared_block_access_list(
-        self,
+        mut self,
     ) -> Result<(BlockExecutionOutput<Self::Receipt>, Option<Bal>), BlockExecutionError> {
+        self.ensure_request_contracts_have_code()?;
         let (output, bal) = self.inner.finish_with_block_access_list()?;
         Ok((output.into(), bal))
     }
@@ -375,7 +418,7 @@ where
 
 impl<'a, C, F> EthBigBlockExecutor<'a, C, F>
 where
-    C: EthereumHardforks,
+    C: EthChainSpec + EthereumHardforks,
     F: EvmFactory,
     F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
@@ -418,8 +461,11 @@ where
             block_number,
             self.inner.inner.rules().deposit_contract_address,
         );
+        let timestamp = env.block.timestamp.to::<u64>();
         self.inner.ctx = segment.ctx.clone();
         self.inner.inner.start_block(evm2_ctx(&segment.ctx), rules, segment_idx as u64 * 2);
+        self.inner.enforce_request_contract_code =
+            self.chain_spec.rejects_empty_request_contracts(timestamp);
     }
 
     fn reseed_block_hashes(&mut self, block_number: u64) {
@@ -460,6 +506,7 @@ where
     }
 
     fn finish_segment(&mut self) -> Result<FinishedBigBlockSegment, BlockExecutionError> {
+        self.inner.ensure_request_contracts_have_code()?;
         let EthPostExecutionOutput { requests, gas_used, blob_gas_used } =
             self.inner.inner.apply_post_execution_changes(self.segment_receipt_start)?;
         Ok(FinishedBigBlockSegment { requests, gas_used, blob_gas_used })
@@ -503,7 +550,7 @@ where
 
 impl<'a, C, F> BlockExecutor for EthBigBlockExecutor<'a, C, F>
 where
-    C: EthereumHardforks,
+    C: EthChainSpec + EthereumHardforks,
     F: EvmFactory,
     F::Types: EvmTypes<Tx = TxEnvelope>,
     <F::Types as evm2::EvmTypesHost>::Tx: Typed2718,
@@ -658,6 +705,21 @@ where
         ))
     }
 }
+
+/// A Prague (or later) request contract has no code, so the block cannot produce its requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemContractEmpty {
+    /// Address of the request contract.
+    pub address: Address,
+}
+
+impl fmt::Display for SystemContractEmpty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "system contract {} has no code", self.address)
+    }
+}
+
+impl Error for SystemContractEmpty {}
 
 #[cfg(test)]
 mod tests {
@@ -1177,5 +1239,79 @@ mod tests {
         executor.execute_transaction(blob_tx(0)).expect("seven blobs fit the first segment cap");
         let err = executor.execute_transaction(blob_tx(1)).unwrap_err();
         assert!(err.to_string().contains("too many blobs: have 7, max 6"), "{err}");
+    }
+
+    #[test]
+    fn request_contract_deployed_in_block_is_visible() {
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().prague_activated().build(),
+        ));
+        let mut env = EthEvmEnv::new(
+            SpecId::PRAGUE,
+            BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(30_000_000), ..Default::default() },
+            1,
+        );
+        env.block.number = U256::from(1);
+        let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+        let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+        let code = Bytecode::new_legacy(Bytes::from_static(&[0x00]));
+        for address in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+            executor
+                .evm_mut()
+                .overlay_db_mut()
+                .insert_account_info(&address, AccountInfo::default().with_code(code.clone()));
+        }
+        executor.finish_with_block_access_list().expect("overlay code satisfies the check");
+    }
+
+    #[test]
+    fn chain_can_allow_empty_request_contracts() {
+        let factory = super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+            ChainSpecBuilder::mainnet().prague_activated().build(),
+        ));
+        let env = EthEvmEnv::new(
+            SpecId::PRAGUE,
+            BlockEnv::<BaseEvmTypes> { gas_limit: U256::from(30_000_000), ..Default::default() },
+            1,
+        );
+        let evm = factory.evm_with_env(Db::new(TestDatabase::default()), env);
+        let mut executor = factory.create_executor(evm, segment(0, 1, B256::ZERO).ctx);
+        executor.enforce_request_contract_code = false;
+        executor.finish_with_block_access_list().expect("chain opted out of the code check");
+    }
+
+    #[test]
+    fn big_block_prague_segment_rejects_empty_request_contract() {
+        let mut segment = segment(0, 1, B256::ZERO);
+        segment.evm_env = EthEvmEnv::new(
+            SpecId::PRAGUE,
+            BlockEnv::<BaseEvmTypes> {
+                number: U256::from(1),
+                gas_limit: U256::from(30_000_000),
+                ..Default::default()
+            },
+            1,
+        );
+        let plan = EthBigBlockPlan::new(vec![segment], Vec::new(), 0);
+        let factory = super::super::factory::EthBigBlockExecutorFactory::new(
+            super::super::factory::EthBlockExecutorFactory::new(Arc::new(
+                ChainSpecBuilder::mainnet().prague_activated().build(),
+            )),
+        );
+        let evm = factory
+            .evm_with_env(Db::new(TestDatabase::default()), plan.segments[0].evm_env.clone());
+        let executor = factory.create_executor(evm, plan);
+        let error = executor.finish_with_block_access_list().expect_err("empty request contract");
+        assert_eq!(
+            error.to_string(),
+            format!("system contract {WITHDRAWAL_REQUEST_ADDRESS} has no code")
+        );
+        let BlockExecutionError::Validation(BlockValidationError::Other(inner)) = &error else {
+            panic!("expected validation error, got {error}");
+        };
+        assert_eq!(
+            inner.downcast_ref::<SystemContractEmpty>().expect("system contract empty").address,
+            WITHDRAWAL_REQUEST_ADDRESS
+        );
     }
 }

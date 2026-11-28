@@ -67,6 +67,16 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn next_block_base_fee(&self, parent: &Self::Header, target_timestamp: u64) -> Option<u64> {
         parent.next_block_base_fee(self.base_fee_params_at_timestamp(target_timestamp))
     }
+
+    /// Whether a block at `timestamp` is invalid when an EIP-7002, EIP-7251, or EIP-8282 request
+    /// contract has no code.
+    ///
+    /// The executor applies this only once the fork that introduces the contract is active.
+    /// Ethereum requires the contracts, so this returns `true`. A chain that ran the fork before
+    /// those contracts were deployed can return `false` for those blocks.
+    fn rejects_empty_request_contracts(&self, _timestamp: u64) -> bool {
+        true
+    }
 }
 
 impl<H: BlockHeader> EthChainSpec for ChainSpec<H> {

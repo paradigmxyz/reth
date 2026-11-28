@@ -518,6 +518,129 @@ mod tests {
         }
     }
 
+    #[reth_concurrency::test]
+    fn rejects_prague_request_contract_without_code() {
+        // Absent and empty-code accounts are both invalid. The other contract has code, so the
+        // reported address is the empty one.
+        for empty in [WITHDRAWAL_REQUEST_ADDRESS, CONSOLIDATION_REQUEST_ADDRESS] {
+            for insert_empty in [false, true] {
+                let other = if empty == WITHDRAWAL_REQUEST_ADDRESS {
+                    CONSOLIDATION_REQUEST_ADDRESS
+                } else {
+                    WITHDRAWAL_REQUEST_ADDRESS
+                };
+                let mut database = InMemoryDB::default();
+                if insert_empty {
+                    database.insert_account_info(&empty, AccountInfo::default());
+                }
+                database.insert_account_info(
+                    &other,
+                    AccountInfo::default().with_code(return_byte_code(0xaa)),
+                );
+                let error = execute_block(
+                    SpecId::PRAGUE,
+                    BlockEnv::default(),
+                    database,
+                    core::iter::empty::<Recovered<TransactionSigned>>(),
+                    None,
+                )
+                .expect_err("request contract without code");
+                assert_system_contract_empty(&error, empty);
+            }
+        }
+    }
+
+    #[reth_concurrency::test]
+    fn accepts_request_contract_created_in_the_same_block() {
+        // Nonce-0 CREATE from the EIP-7002 and EIP-7251 deployment senders lands on the
+        // request contracts. Both accounts are empty beforehand, so the block is valid only
+        // when the empty-code check runs after these transactions.
+        let deployments = [
+            (
+                address!("8646861a7cf453ddd086874d622b0696de5b9674"),
+                WITHDRAWAL_REQUEST_ADDRESS,
+                0xaa,
+            ),
+            (
+                address!("13d1913d623e6a9d8811736359e50fd31fe54fca"),
+                CONSOLIDATION_REQUEST_ADDRESS,
+                0xbb,
+            ),
+        ];
+        let mut database = InMemoryDB::default();
+        let mut transactions = Vec::with_capacity(deployments.len());
+        for (deployer, contract, value) in deployments {
+            assert_eq!(deployer.create(0), contract);
+            database.insert_account_info(
+                &deployer,
+                AccountInfo::default().with_balance(U256::from(ETH_TO_WEI)),
+            );
+            transactions.push(create_contract_tx(deployer, value));
+        }
+
+        let output = execute_block(
+            SpecId::PRAGUE,
+            BlockEnv {
+                gas_limit: U256::from(30_000_000),
+                basefee: U256::from(1),
+                ..Default::default()
+            },
+            database,
+            transactions,
+            None,
+        )
+        .expect("request contracts created in the block");
+
+        assert_eq!(output.result.receipts.len(), 2);
+        assert!(output.result.receipts.iter().all(|receipt| receipt.success));
+        assert_eq!(
+            output.result.requests.iter().cloned().collect::<Vec<_>>(),
+            vec![
+                Bytes::from_static(&[WITHDRAWAL_REQUEST_TYPE, 0xaa]),
+                Bytes::from_static(&[CONSOLIDATION_REQUEST_TYPE, 0xbb]),
+            ]
+        );
+    }
+
+    #[reth_concurrency::test]
+    fn rejects_amsterdam_builder_request_contract_without_code() {
+        for empty in [BUILDER_DEPOSIT_REQUEST_ADDRESS, BUILDER_EXIT_REQUEST_ADDRESS] {
+            let mut database = InMemoryDB::default();
+            for address in [
+                WITHDRAWAL_REQUEST_ADDRESS,
+                CONSOLIDATION_REQUEST_ADDRESS,
+                BUILDER_DEPOSIT_REQUEST_ADDRESS,
+                BUILDER_EXIT_REQUEST_ADDRESS,
+            ] {
+                if address != empty {
+                    database.insert_account_info(
+                        &address,
+                        AccountInfo::default().with_code(return_byte_code(0xaa)),
+                    );
+                }
+            }
+            let error = execute_block(
+                SpecId::AMSTERDAM,
+                BlockEnv::default(),
+                database,
+                core::iter::empty::<Recovered<TransactionSigned>>(),
+                None,
+            )
+            .expect_err("builder request contract without code");
+            assert_system_contract_empty(&error, empty);
+        }
+    }
+
+    fn assert_system_contract_empty(error: &BlockExecutionError, address: Address) {
+        assert_eq!(error.to_string(), format!("system contract {address} has no code"));
+        let BlockExecutionError::Validation(BlockValidationError::Other(inner)) = error else {
+            panic!("expected validation error, got {error}");
+        };
+        let empty =
+            inner.downcast_ref::<crate::SystemContractEmpty>().expect("system contract empty");
+        assert_eq!(empty.address, address);
+    }
+
     #[test]
     fn collects_deposit_requests_from_transaction_logs() {
         let deposit = DepositEvent {
@@ -566,5 +689,40 @@ mod tests {
             0,
             op::RETURN,
         ]))
+    }
+
+    fn create_contract_tx(deployer: Address, value: u8) -> Recovered<TransactionSigned> {
+        let runtime = return_byte_code(value).original_bytes();
+        let len = u8::try_from(runtime.len()).expect("runtime fits one PUSH1");
+        // The CODECOPY prefix is 12 bytes, so the offset immediate has to be 12.
+        let mut init = vec![
+            op::PUSH1,
+            len,
+            op::PUSH1,
+            12,
+            op::PUSH1,
+            0,
+            op::CODECOPY,
+            op::PUSH1,
+            len,
+            op::PUSH1,
+            0,
+            op::RETURN,
+        ];
+        assert_eq!(init.len(), 12);
+        init.extend_from_slice(&runtime);
+        Recovered::new_unchecked(
+            TransactionSigned::Legacy(
+                TxLegacy {
+                    gas_price: 1_000_000_000,
+                    gas_limit: 200_000,
+                    to: TxKind::Create,
+                    input: Bytes::from(init),
+                    ..Default::default()
+                }
+                .into_signed(Signature::test_signature()),
+            ),
+            deployer,
+        )
     }
 }
