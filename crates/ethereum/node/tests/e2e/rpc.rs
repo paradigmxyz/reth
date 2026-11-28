@@ -1222,6 +1222,89 @@ async fn eth_call_without_gas_with_max_rpc_gas_cap() -> eyre::Result<()> {
     Ok(())
 }
 
+/// `--rpc.evm-memory-limit` applies to `eth_call`, `eth_estimateGas` and `eth_simulateV1` alike.
+#[tokio::test]
+async fn rpc_evm_memory_limit_applies_to_all_call_methods() -> eyre::Result<()> {
+    const LIMIT: u64 = 1 << 20;
+
+    let (node, _) = EthereumNode::test_setup_for(EthereumHardfork::Osaka)
+        .with_rpc_modifier(|mut rpc| {
+            rpc.rpc_evm_memory_limit = LIMIT;
+            rpc
+        })
+        .build_single()
+        .await?;
+    let provider = node.rpc_provider();
+
+    // Writes one byte at offset `CALLDATALOAD(0)`: `PUSH0 CALLDATALOAD PUSH0 SWAP1 MSTORE8 STOP`.
+    let writer = Address::with_last_byte(0x42);
+    // Writes one byte past the limit: `PUSH1 0 PUSH3 0x100000 MSTORE8 STOP`.
+    let past_limit = Address::with_last_byte(0x43);
+    // Call `past_limit` with all gas, or with 100k gas, ignore the result and stop:
+    // `PUSH0 PUSH0 PUSH0 PUSH0 PUSH0 PUSH1 0x43 GAS CALL POP STOP`.
+    let parent = Address::with_last_byte(0x44);
+    let parent_100k = Address::with_last_byte(0x45);
+    // Stops if more than 3M gas is left, else writes one byte past the limit:
+    // `GAS PUSH3 3000000 LT PUSH1 0x13 JUMPI PUSH1 0 PUSH3 0x100000 MSTORE8 PUSH0 PUSH0 REVERT
+    // JUMPDEST STOP`.
+    let gas_dependent = Address::with_last_byte(0x46);
+    let overrides = StateOverride::from_iter([
+        (writer, AccountOverride::default().with_code(bytes!("5f355f905300"))),
+        (past_limit, AccountOverride::default().with_code(bytes!("6000621000005300"))),
+        (parent, AccountOverride::default().with_code(bytes!("5f5f5f5f5f60435af15000"))),
+        (parent_100k, AccountOverride::default().with_code(bytes!("5f5f5f5f5f6043620186a0f15000"))),
+        (
+            gas_dependent,
+            AccountOverride::default()
+                .with_code(bytes!("5a622dc6c010601357600062100000535f5ffd5b00")),
+        ),
+    ]);
+    let write_at = |offset: u64| {
+        TransactionRequest::default()
+            .to(writer)
+            .input(Bytes::from(U256::from(offset).to_be_bytes::<32>()).into())
+    };
+
+    // The last byte that fits in the limit, then the first one past it.
+    for (offset, fits) in [(LIMIT - 1, true), (LIMIT, false)] {
+        let tx = write_at(offset);
+
+        let call: Result<Bytes, _> =
+            provider.raw_request("eth_call".into(), (&tx, "latest", &overrides)).await;
+        assert_eq!(call.is_ok(), fits, "eth_call at {offset}: {call:?}");
+
+        let estimate: Result<U256, _> =
+            provider.raw_request("eth_estimateGas".into(), (&tx, "latest", &overrides)).await;
+        assert_eq!(estimate.is_ok(), fits, "eth_estimateGas at {offset}: {estimate:?}");
+
+        let payload = serde_json::json!({
+            "blockStateCalls": [{ "stateOverrides": &overrides, "calls": [&tx] }],
+        });
+        let blocks: serde_json::Value =
+            provider.raw_request("eth_simulateV1".into(), (&payload, "latest")).await?;
+        let status = &blocks[0]["calls"][0]["status"];
+        assert_eq!(
+            status,
+            if fits { "0x1" } else { "0x0" },
+            "eth_simulateV1 at {offset}: {blocks}"
+        );
+    }
+
+    // With all the gas, `past_limit` could grow its memory past the limit in a mined transaction,
+    // so the estimate must not follow the path where the call fails. Growing past 1 MiB costs about
+    // 2.2M gas, so with 100k gas the call runs out of gas at the same point either way.
+    // `gas_dependent` succeeds with the highest gas limit, and the search then probes lower limits
+    // that the memory limit decides, which must count as failures instead of ending the estimate.
+    for (to, fits) in [(parent, false), (parent_100k, true), (gas_dependent, true)] {
+        let tx = TransactionRequest::default().to(to);
+        let estimate: Result<U256, _> =
+            provider.raw_request("eth_estimateGas".into(), (&tx, "latest", &overrides)).await;
+        assert_eq!(estimate.is_ok(), fits, "eth_estimateGas to {to}: {estimate:?}");
+    }
+
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_test_account_tx_builder() -> eyre::Result<()> {
     reth_tracing::init_test_tracing();

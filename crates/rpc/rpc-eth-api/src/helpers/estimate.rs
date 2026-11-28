@@ -7,8 +7,8 @@ use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::EvmOverrides, BlockId};
 use evm2::{
     evm::{CacheDB, Db, DynDatabase},
-    interpreter::InstrStop,
-    EvmFeatures, TxResult,
+    interpreter::{InstrStop, Interpreter, Message, MessageResult},
+    EvmFeatures, EvmTypesHost, Inspector, InspectorConfig, TxResult,
 };
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
@@ -25,6 +25,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
 use reth_storage_api::{EvmStateProvider, StateProvider};
 use reth_tasks::cancel::is_cancelled;
+use std::{cell::Cell, rc::Rc};
 use tracing::trace;
 
 /// Gas execution estimates
@@ -65,6 +66,10 @@ pub trait EstimateCall: Call {
         evm_env.version_mut().features.remove(
             EvmFeatures::FEE_CHARGE | EvmFeatures::BALANCE_CHECK | EvmFeatures::BALANCE_TOP_UP,
         );
+
+        // Keep a stricter limit that the EVM configuration sets for block execution.
+        let block_memory_limit = evm_env.version().memory_limit;
+        evm_env.version_mut().memory_limit = block_memory_limit.min(self.evm_memory_limit());
 
         // set nonce to None so that the correct nonce is chosen by the EVM
         request.as_mut().take_nonce();
@@ -131,10 +136,22 @@ pub trait EstimateCall: Call {
 
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = highest_gas_limit, is_basic_transfer, "Starting gas estimation");
 
+        let memory_limit_hit = Rc::new(Cell::new(false));
+        // Only a limit below the one block execution uses can make the estimate diverge from it.
+        let memory_limit_inspector = (evm_env.version().memory_limit < block_memory_limit)
+            .then(|| MemoryLimitInspector::new(evm_env.version(), memory_limit_hit.clone()));
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
+        if let Some(inspector) = memory_limit_inspector {
+            evm.set_inspector(inspector);
+        }
         let mut execute = move |gas_limit| {
             tx_env.inner_mut().set_gas_limit(gas_limit);
-            evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)
+            memory_limit_hit.set(false);
+            let res = evm.transact_result(&tx_env).map_err(Self::Error::from_evm_err)?;
+            if memory_limit_hit.get() {
+                return Err(Self::Error::from_evm_halt(InstrStop::MemoryLimitOOG, gas_limit))
+            }
+            Ok(res)
         };
 
         // For basic transfers, try using minimum gas before running full binary search
@@ -209,17 +226,24 @@ pub trait EstimateCall: Call {
         if optimistic_gas_limit < highest_gas_limit {
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
-            res = execute(optimistic_gas_limit)?;
-
-            // Update the gas used based on the new result.
-            gas_used = res.tx_gas_used();
-            // Update the gas limit estimates (highest and lowest) based on the execution result.
-            update_estimated_gas_range::<EvmTypesFor<Self::Evm>>(
-                res,
-                optimistic_gas_limit,
-                &mut highest_gas_limit,
-                &mut lowest_gas_limit,
-            )?;
+            match execute(optimistic_gas_limit) {
+                // A higher gas limit already succeeded, so a lower one that the memory limit
+                // decided counts as a failure, like a halt, instead of ending the estimate.
+                Err(err) if is_memory_limit_err(&err) => lowest_gas_limit = optimistic_gas_limit,
+                ethres => {
+                    res = ethres?;
+                    // Update the gas used based on the new result.
+                    gas_used = res.tx_gas_used();
+                    // Update the gas limit estimates (highest and lowest) based on the execution
+                    // result.
+                    update_estimated_gas_range::<EvmTypesFor<Self::Evm>>(
+                        res,
+                        optimistic_gas_limit,
+                        &mut highest_gas_limit,
+                        &mut lowest_gas_limit,
+                    )?;
+                }
+            }
         };
 
         // Pick a point that's close to the estimated gas
@@ -254,6 +278,8 @@ pub trait EstimateCall: Call {
                     // Increase the lowest gas limit if gas is too low
                     lowest_gas_limit = mid_gas_limit;
                 }
+                // A probe that the memory limit decided counts as a failure, see above.
+                Err(err) if is_memory_limit_err(&err) => lowest_gas_limit = mid_gas_limit,
                 // Handle other cases, including successful transactions.
                 ethres => {
                     // Update the estimated gas range based on the execution result.
@@ -348,4 +374,61 @@ pub fn update_estimated_gas_range<EvmTypes: evm2::EvmTypes>(
     }
 
     Ok(())
+}
+
+/// Returns whether `err` is the error a probe returns when the memory limit decided it.
+fn is_memory_limit_err(err: &impl AsEthApiError) -> bool {
+    matches!(
+        err.as_err(),
+        Some(EthApiError::InvalidTransaction(RpcInvalidTransactionError::MemoryLimitOutOfGas))
+    )
+}
+
+/// Flags a frame that hit the memory limit while it had the gas to grow its memory past it.
+///
+/// Block execution has no limit that low, so such a frame would keep running in the mined
+/// transaction and the estimate would follow a different path. A frame with less gas runs out of
+/// gas at the same point in the mined transaction, so its halt does not change the estimate.
+#[derive(Debug)]
+struct MemoryLimitInspector {
+    /// Gas that growing an empty memory past the limit costs.
+    min_gas: u64,
+    hit: Rc<Cell<bool>>,
+}
+
+impl MemoryLimitInspector {
+    fn new(version: &evm2::Version, hit: Rc<Cell<bool>>) -> Self {
+        let words = usize::try_from(version.memory_limit / 32 + 1).unwrap_or(usize::MAX);
+        Self { min_gas: version.gas_params.memory_cost(words), hit }
+    }
+
+    fn frame_end(&self, gas_limit: u64, stop: InstrStop) {
+        if stop == InstrStop::MemoryLimitOOG && gas_limit >= self.min_gas {
+            self.hit.set(true);
+        }
+    }
+}
+
+impl<T: EvmTypesHost> Inspector<T> for MemoryLimitInspector {
+    fn inspector_config(&self) -> InspectorConfig {
+        InspectorConfig::without_steps()
+    }
+
+    fn call_end(
+        &mut self,
+        _interp: &mut Interpreter<'_, '_, T>,
+        message: &Message<T>,
+        result: &mut MessageResult<T>,
+    ) {
+        self.frame_end(message.gas_limit, result.stop);
+    }
+
+    fn create_end(
+        &mut self,
+        _interp: &mut Interpreter<'_, '_, T>,
+        message: &Message<T>,
+        result: &mut MessageResult<T>,
+    ) {
+        self.frame_end(message.gas_limit, result.stop);
+    }
 }
