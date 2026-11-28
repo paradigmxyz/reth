@@ -560,7 +560,11 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
-            withdrawals: parent.withdrawals_root().map(|_| Default::default()),
+            // Execution and block building ignore withdrawals before Shanghai, so an override is
+            // passed even when the parent predates it.
+            withdrawals: block_overrides
+                .and_then(|overrides| overrides.withdrawals.clone())
+                .or_else(|| parent.withdrawals_root().map(|_| Default::default())),
             // The parent's extra data (e.g. a builder tag) doesn't belong to the next block.
             extra_data: Default::default(),
             slot_number: parent.slot_number().map(|slot| slot.saturating_add(1)),
