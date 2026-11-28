@@ -4,7 +4,13 @@ use crate::{
 };
 use alloy_primitives::{map::B256Map, Address, BlockHash, BlockNumber, B256, U256};
 use metrics::{Counter, Histogram};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx, DatabaseError};
+use reth_db_api::{
+    cursor::DbDupCursorRO,
+    table::DupSort,
+    tables,
+    transaction::{DbTx, DupCursorTy},
+    DatabaseError,
+};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_metrics::Metrics;
@@ -179,6 +185,14 @@ where
     /// first.
     multiproof_calculator:
         RefCell<Option<CachedMultiProofCalculator<<Provider::Target as DbTxProvider>::Tx>>>,
+    /// Storage cursors reused across [`StateProvider::storage`] reads, so slot-heavy callers
+    /// such as `eth_call` don't open and close a cursor per slot.
+    hashed_storage_cursor: RefCell<
+        Option<DupCursorTy<<Provider::Target as DbTxProvider>::Tx, tables::HashedStorages>>,
+    >,
+    plain_storage_cursor: RefCell<
+        Option<DupCursorTy<<Provider::Target as DbTxProvider>::Tx, tables::PlainStorageState>>,
+    >,
     /// The `!Unpin` pointee preserves cached transaction borrows when the owning box moves.
     provider: Pin<Box<(Provider, PhantomPinned)>>,
     overlay_builder: Option<OverlayBuilder<N>>,
@@ -300,6 +314,8 @@ where
     ) -> Self {
         Self {
             multiproof_calculator: RefCell::new(None),
+            hashed_storage_cursor: RefCell::new(None),
+            plain_storage_cursor: RefCell::new(None),
             provider: Box::pin((provider, PhantomPinned)),
             overlay_builder,
             state_trie_overlay_cache,
@@ -954,15 +970,16 @@ where
         if self.provider().cached_storage_settings().use_hashed_state() {
             let hashed_address = alloy_primitives::keccak256(address);
             let hashed_slot = alloy_primitives::keccak256(storage_key);
-            let mut cursor = self.provider().tx().cursor_dup_read::<tables::HashedStorages>()?;
-            let value = cursor
+            let mut cursor = self.hashed_storage_cursor.borrow_mut();
+            let value = cached_dup_cursor(&mut cursor, self.provider().tx())?
                 .seek_by_key_subkey(hashed_address, hashed_slot)?
                 .filter(|entry| entry.key == hashed_slot)
                 .map(|entry| entry.value);
             Ok(value.or_else(|| zero_if_missing.then_some(U256::ZERO)))
         } else {
-            let mut cursor = self.provider().tx().cursor_dup_read::<tables::PlainStorageState>()?;
-            if let Some(entry) = cursor.seek_by_key_subkey(address, storage_key)? &&
+            let mut cursor = self.plain_storage_cursor.borrow_mut();
+            if let Some(entry) = cached_dup_cursor(&mut cursor, self.provider().tx())?
+                .seek_by_key_subkey(address, storage_key)? &&
                 entry.key == storage_key
             {
                 return Ok(Some(entry.value))
@@ -1138,6 +1155,18 @@ fn into_database_error(error: ProviderError) -> DatabaseError {
     }
 }
 
+/// Returns the cursor cached in `slot`, opening one on `tx` the first time.
+fn cached_dup_cursor<'a, TX: DbTx, T: DupSort>(
+    slot: &'a mut Option<TX::DupCursor<T>>,
+    tx: &TX,
+) -> Result<&'a mut TX::DupCursor<T>, DatabaseError> {
+    let cursor = match slot.take() {
+        Some(cursor) => cursor,
+        None => tx.cursor_dup_read::<T>()?,
+    };
+    Ok(slot.insert(cursor))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1146,7 +1175,7 @@ mod tests {
         ExecutionOverlay, OverlayManager,
     };
     use alloy_eips::BlockNumHash;
-    use alloy_primitives::{Address, U256};
+    use alloy_primitives::{keccak256, Address, U256};
     use evm2::{bytecode::Bytecode, evm::AccountInfo};
     use reth_chain_state::{test_utils::TestBlockBuilder, ExecutedBlock, NewCanonicalChain};
     use reth_db_api::{
@@ -1615,5 +1644,71 @@ mod tests {
         assert_eq!(provider.basic_account(&address)?.map(|account| account.balance), Some(balance));
         assert_eq!(provider.storage(address, slot)?, Some(storage));
         Ok(())
+    }
+
+    #[test]
+    fn storage_reads_reuse_cursor_across_slots_and_addresses() {
+        for settings in [StorageSettings::v1(), StorageSettings::v2()] {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(settings);
+            let first = Address::with_last_byte(1);
+            let second = Address::with_last_byte(2);
+            let provider_rw = factory.provider_rw().unwrap();
+            for (address, key, value) in [
+                (first, B256::with_last_byte(1), U256::from(11)),
+                (first, B256::with_last_byte(3), U256::from(13)),
+                (second, B256::with_last_byte(2), U256::from(22)),
+            ] {
+                if settings.use_hashed_state() {
+                    provider_rw
+                        .tx_ref()
+                        .put::<tables::HashedStorages>(
+                            keccak256(address),
+                            StorageEntry::new(keccak256(key), value),
+                        )
+                        .unwrap();
+                } else {
+                    provider_rw
+                        .tx_ref()
+                        .put::<tables::PlainStorageState>(address, StorageEntry::new(key, value))
+                        .unwrap();
+                }
+            }
+            provider_rw.commit().unwrap();
+
+            let provider = OverlayStateProvider::<_, EthPrimitives>::new_with_execution(
+                factory.provider().unwrap(),
+                Arc::new(ExecutionOverlay::default()),
+                settings.is_v2(),
+            );
+
+            // Out-of-order reads across addresses and a missing slot between present ones all
+            // go through the one cached cursor, which must re-seek every time.
+            assert_eq!(
+                provider.storage(first, B256::with_last_byte(3)).unwrap(),
+                Some(U256::from(13))
+            );
+            assert_eq!(
+                provider.storage(second, B256::with_last_byte(2)).unwrap(),
+                Some(U256::from(22))
+            );
+            assert_eq!(provider.storage(first, B256::with_last_byte(2)).unwrap(), None);
+            assert_eq!(
+                provider.storage(first, B256::with_last_byte(1)).unwrap(),
+                Some(U256::from(11))
+            );
+            assert_eq!(
+                provider.storage(Address::with_last_byte(3), B256::with_last_byte(1)).unwrap(),
+                None
+            );
+            assert_eq!(
+                provider.hashed_storage_cursor.borrow().is_some(),
+                settings.use_hashed_state()
+            );
+            assert_eq!(
+                provider.plain_storage_cursor.borrow().is_some(),
+                !settings.use_hashed_state()
+            );
+        }
     }
 }
