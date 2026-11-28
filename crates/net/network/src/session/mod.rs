@@ -728,6 +728,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
+                    disconnect_deadline: None,
                 };
 
                 let supports_snap = session.conn.supports_snap();
